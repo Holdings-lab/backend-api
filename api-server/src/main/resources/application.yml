@@ -1,0 +1,18 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
+webhook:
+  # FastAPI에서 Webhook 요청 시 Header에 포함되어야 하는 안전용 비밀키
+  secret: ${WEBHOOK_SECRET}
+
+firebase:
+  # Firebase 서비스 계정 키 위치 (src/main/resources 아래에 배치)
+  config-path: ${FIREBASE_CONFIG_PATH}
+
+repository:
+  events-file: ${EVENTS_FILE}
+  users-file: ${USERS_FILE}
