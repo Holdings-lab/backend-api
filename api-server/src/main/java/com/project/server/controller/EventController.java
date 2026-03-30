@@ -1,15 +1,10 @@
 package com.project.server.controller;
 
-import com.project.server.dto.PolicyEventResponse;
-import com.project.server.service.EventService;
+import com.project.server.dto.EventDto;
+import com.project.server.service.event.EventService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
+import org.springframework.web.bind.annotation.*;
 
 @CrossOrigin(origins = "*")
 @RestController
@@ -20,7 +15,29 @@ public class EventController {
     private final EventService eventService;
 
     @GetMapping
-    public ResponseEntity<List<PolicyEventResponse>> getEvents() {
-        return ResponseEntity.ok(eventService.getAllEvents());
+    public ResponseEntity<EventDto.EventsResponse> getEvents(
+            @RequestParam(name = "user_id", defaultValue = "1") Long userId,
+            @RequestParam(name = "date_segment", defaultValue = "today") String dateSegment,
+            @RequestParam(name = "category", defaultValue = "all") String category
+    ) {
+        return ResponseEntity.ok(eventService.getEvents(userId, dateSegment, category));
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<EventDto.EventsResponse> refreshEvents(
+            @RequestParam(name = "user_id", defaultValue = "1") Long userId,
+            @RequestParam(name = "date_segment", defaultValue = "today") String dateSegment,
+            @RequestParam(name = "category", defaultValue = "all") String category
+    ) {
+        return ResponseEntity.ok(eventService.refreshEvents(userId, dateSegment, category));
+    }
+
+    @PostMapping("/{event_id}/alerts")
+    public ResponseEntity<EventDto.EventAlertResponse> updateEventAlert(
+            @RequestParam(name = "user_id", defaultValue = "1") Long userId,
+            @PathVariable("event_id") Long eventId,
+            @RequestBody EventDto.UpdateEventAlertRequest request
+    ) {
+        return ResponseEntity.ok(eventService.updateEventAlert(userId, eventId, request.isEnabled()));
     }
 }

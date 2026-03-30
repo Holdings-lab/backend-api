@@ -14,11 +14,9 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 async def send_webhook(event_id: int, keyword: str) -> dict:
-    # 2. 전송할 데이터 구조 
-    # FastAPI에서는 id와 keyword만 추출하여 전송합니다.
     payload = {
         "event_id": event_id,
-        "keyword": keyword
+        "keyword": keyword,
     }
     
     # Header 설정 (X-Webhook-Secret 필수로 포함)

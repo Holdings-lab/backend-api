@@ -1,7 +1,7 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.2.4'
-    id 'io.spring.dependency-management' version '1.1.4'
+    id 'org.springframework.boot' version '3.5.0'
+    id 'io.spring.dependency-management' version '1.1.6'
 }
 
 group = 'com.project'
@@ -23,6 +23,13 @@ repositories {
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'jakarta.validation:jakarta.validation-api:3.0.2'
+    implementation 'org.hibernate.validator:hibernate-validator:8.0.1.Final'
+    
+    // Database
+    runtimeOnly 'org.postgresql:postgresql:42.7.3'
     
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
@@ -36,4 +43,22 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+tasks.named('bootJar') {
+    archiveFileName = 'app.jar'
+    launchScript()
+}
+
+tasks.named('bootRun') {
+    jvmArgs = [
+        '-Dfile.encoding=UTF-8',
+        '-Dsun.jnu.encoding=UTF-8',
+        '-Dsun.stdout.encoding=UTF-8',
+        '-Dsun.stderr.encoding=UTF-8'
+    ]
 }

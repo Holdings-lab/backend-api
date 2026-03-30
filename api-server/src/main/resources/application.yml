@@ -2,8 +2,36 @@ server:
   port: ${SERVER_PORT:8080}
 
 spring:
-  jackson:
-    property-naming-strategy: SNAKE_CASE
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:pwa_db}
+    driver-class-name: org.postgresql.Driver
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:password}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+  sql:
+    init:
+      mode: never
+
+# Management endpoints for health checks
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
 
 webhook:
   # FastAPI에서 Webhook 요청 시 Header에 포함되어야 하는 안전용 비밀키
@@ -12,7 +40,3 @@ webhook:
 firebase:
   # Firebase 서비스 계정 키 위치 (src/main/resources 아래에 배치)
   config-path: ${FIREBASE_CONFIG_PATH}
-
-repository:
-  events-file: ${EVENTS_FILE}
-  users-file: ${USERS_FILE}

@@ -1,8 +1,6 @@
 from fastapi import FastAPI
-import random
 from datetime import datetime
 import logging
-import json
 import os
 import uvicorn
 from typing import Dict, Any
@@ -14,6 +12,7 @@ load_dotenv()
 
 from schemas import PolicyEvent
 from webhook_notifier import send_webhook
+from db_client import save_policy_event, fetch_policy_events
 
 # 새로 분리된 파이프라인 모듈 임포트
 from crawler import run_crawling_pipeline
@@ -34,13 +33,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-TEST_DATA_FILE = os.getenv("TEST_DATA_FILE")
-
-
 @app.get("/test-trigger")
 async def test_trigger_webhook() -> Dict[str, Any]:
     """
-    테스트용 엔드포인트: 가짜 데이터를 생성하여 JSON 파일에 저장하고 Spring Boot에 Webhook을 발송합니다.
+    테스트용 엔드포인트: 가짜 데이터를 생성하고 api-server에 전송하여 PostgreSQL에 저장합니다.
     후에 스케쥴링으로 전환하여 주기적으로 실행
     """
     logger.info("=========================================")
@@ -58,7 +54,6 @@ async def test_trigger_webhook() -> Dict[str, Any]:
     
     # 3. 예측 결과를 바탕으로 PolicyEvent 모델 생성
     dummy_data = {
-        "id": random.randint(1000, 9999), 
         "title": predicted_result["title"],
         "keyword": predicted_result["keyword"],
         "impact_score": predicted_result["impact_score"],
@@ -68,31 +63,19 @@ async def test_trigger_webhook() -> Dict[str, Any]:
 
     event_model = PolicyEvent(**dummy_data)
     
-    # JSON DB에 기록 ('test_data\events.json'에 덮어씌우기)
+    # PostgreSQL에 먼저 저장
     event_dict = event_model.model_dump()
     event_dict['created_at'] = event_dict['created_at'].isoformat()
-    events = [event_dict]  # 기존 데이터를 덮어씌움
-    
-    try:
-        os.makedirs(os.path.dirname(TEST_DATA_FILE), exist_ok=True)
-        with open(TEST_DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(events, f, ensure_ascii=False, indent=2)
-        logger.info(os.path.abspath(TEST_DATA_FILE))
-        logger.info(f"✨ JSON 데이터 저장 완료: {event_model.title} (ID: {event_model.id})")
-    except Exception as e:
-        logger.error(f"❌ JSON 데이터 저장 실패: {e}")
-        return {
-            "message": "Failed to save event data to JSON.",
-            "error": str(e)
-        }
+    saved_event = save_policy_event(event_dict)
+    logger.info(f"✨ DB 저장 완료: eventId={saved_event.get('id')}, title={event_model.title}")
 
     logger.info("🔗 [Pipeline Step 4] 대상 API-Server로 Webhook 발송 중...")
 
-    # 4. Webhook 발송
-    extracted_event_id = event_model.id
-    extracted_keyword = event_model.keyword
-    
-    webhook_result = await send_webhook(event_id=extracted_event_id, keyword=extracted_keyword)
+    # 4. Webhook은 신호(event_id)만 전달
+    webhook_result = await send_webhook(
+        event_id=saved_event.get("id"),
+        keyword=saved_event.get("keyword", event_model.keyword)
+    )
 
     logger.info("🔗 [Pipeline 단계 종료]")
     logger.info("=========================================")
@@ -101,7 +84,7 @@ async def test_trigger_webhook() -> Dict[str, Any]:
         "message": "Full AI Pipeline (Dummy) executed and Webhook triggered!",
         "crawling_result": crawled_data,
         "prediction_result": predicted_result,
-        "saved_event": event_dict,
+        "saved_event": saved_event,
         "webhook_result": webhook_result
     }
 
@@ -109,16 +92,13 @@ async def test_trigger_webhook() -> Dict[str, Any]:
 @app.get("/events")
 async def get_events() -> list:
     """
-    저장된 이벤트 목록을 반환합니다.
+    PostgreSQL에 저장된 이벤트 목록을 직접 조회해 반환합니다.
     """
-    if os.path.exists(TEST_DATA_FILE):
-        try:
-            with open(TEST_DATA_FILE, "r", encoding="utf-8") as f:
-                events = json.load(f)
-            return events
-        except json.JSONDecodeError:
-            return []
-    return []
+    try:
+        return fetch_policy_events(limit=100)
+    except Exception as e:
+        logger.error(f"❌ 이벤트 조회 실패: {e}")
+        return []
 
 if __name__ == "__main__":
     host = os.getenv("HOST")
