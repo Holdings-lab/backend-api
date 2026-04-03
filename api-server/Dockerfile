@@ -12,8 +12,8 @@ COPY gradlew gradlew.bat ./
 # Copy source code
 COPY src/ ./src/
 
-# Build application
-RUN chmod +x gradlew && ./gradlew build -x test --no-daemon
+# Build executable Spring Boot jar
+RUN chmod +x gradlew && ./gradlew bootJar -x test --no-daemon
 
 # Stage 2: Runtime
 FROM eclipse-temurin:17-jre-alpine
@@ -23,8 +23,8 @@ WORKDIR /app
 # Install curl for health checks
 RUN apk add --no-cache curl
 
-# Copy built jar from builder
-COPY --from=builder /build/build/libs/*.jar app.jar
+# Copy only the executable bootJar
+COPY --from=builder /build/build/libs/app.jar app.jar
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
