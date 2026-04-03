@@ -1,0 +1,17 @@
+# Gradle and Java build outputs
+.gradle/
+build/
+bin/
+out/
+*.class
+*.log
+
+# Keep wrapper JAR if present
+!gradle/wrapper/gradle-wrapper.jar
+
+# Environment files
+.env
+.env.*
+
+# Sensitive local keys
+src/main/resources/serviceAccountKey.json

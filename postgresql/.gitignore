@@ -1,0 +1,7 @@
+# Environment files
+.env
+.env.*
+
+# Local database volume folders (if mounted later)
+postgres-data/
+data/

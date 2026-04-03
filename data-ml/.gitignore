@@ -1,0 +1,22 @@
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Environment files
+.env
+.env.*
+
+# Test/tool cache
+.pytest_cache/
+
+# Generated training/runtime artifacts
+training/qqq_training_summary.json
+
+# Large local dataset snapshot
+merged_finbert.csv
