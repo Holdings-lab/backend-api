@@ -15,22 +15,18 @@ public class AuthDto {
     @Data
     @Builder
     public static class LoginRequest {
-        @NotBlank(message = "아이디는 필수입니다.")
-        @Size(min = 3, max = 50, message = "아이디는 3자 이상 50자 이하여야 합니다.")
-        private String username;
+        @NotBlank(message = "이메일은 필수입니다.")
+        private String email;
 
         @NotBlank(message = "비밀번호는 필수입니다.")
-        @Size(min = 4, max = 100, message = "비밀번호는 4자 이상 100자 이하여야 합니다.")
         private String password;
     }
 
     @Data
     @Builder
     public static class RegisterRequest {
-        @NotBlank(message = "아이디는 필수입니다.")
-        @Size(min = 3, max = 50, message = "아이디는 3자 이상 50자 이하여야 합니다.")
-        @Pattern(regexp = "^[a-zA-Z0-9._-]+$", message = "아이디는 영문, 숫자, . _ - 만 사용할 수 있습니다.")
-        private String username;
+        @NotBlank(message = "이메일은 필수입니다.")
+        private String email;
 
         @NotBlank(message = "닉네임은 필수입니다.")
         @Size(min = 2, max = 20, message = "닉네임은 2자 이상 20자 이하여야 합니다.")
@@ -38,8 +34,6 @@ public class AuthDto {
         private String nickname;
 
         @NotBlank(message = "비밀번호는 필수입니다.")
-        @Size(min = 4, max = 100, message = "비밀번호는 4자 이상 100자 이하여야 합니다.")
-        @Pattern(regexp = "^(?=.*[A-Za-z])(?=.*\\d).+$", message = "비밀번호는 영문과 숫자를 모두 포함해야 합니다.")
         private String password;
     }
 
@@ -47,7 +41,7 @@ public class AuthDto {
     @Builder
     public static class AuthResponse {
         private Long userId;
-        private String username;
+        private String email;
         private String nickname;
         private String message;
     }
@@ -56,7 +50,7 @@ public class AuthDto {
     @Builder
     public static class LoginResult {
         private Long userId;
-        private String username;
+        private String email;
         private String nickname;
         private String accessToken;
         private String refreshToken;
@@ -88,7 +82,7 @@ public class AuthDto {
     @Builder
     public static class AccountInfo {
         private Long userId;
-        private String username;
+        private String email;
         private String nickname;
     }
 

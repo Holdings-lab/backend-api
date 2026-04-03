@@ -40,3 +40,8 @@ webhook:
 firebase:
   # Firebase 서비스 계정 키 위치 (src/main/resources 아래에 배치)
   config-path: ${FIREBASE_CONFIG_PATH}
+
+integration:
+  ml:
+    # data-ml Flask API 베이스 URL
+    base-url: ${ML_API_BASE_URL:http://localhost:9000}

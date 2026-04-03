@@ -116,8 +116,8 @@ public class HomeService {
         if (user.getNickname() != null && !user.getNickname().isBlank()) {
             return user.getNickname();
         }
-        if (user.getUsername() != null && !user.getUsername().isBlank()) {
-            return user.getUsername();
+                if (user.getEmail() != null && !user.getEmail().isBlank()) {
+                        return user.getEmail();
         }
         return "지웅";
     }

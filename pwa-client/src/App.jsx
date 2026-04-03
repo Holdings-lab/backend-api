@@ -422,8 +422,8 @@ function MyTab({ data, onOpenNotification, onOpenAccount }) {
 function AuthPanel({
   mode,
   setMode,
-  username,
-  setUsername,
+  email,
+  setEmail,
   nickname,
   setNickname,
   password,
@@ -452,8 +452,8 @@ function AuthPanel({
           }}
         >
           <label>
-            아이디
-            <input value={username} onChange={(e) => setUsername(e.target.value)} maxLength={50} />
+            이메일
+            <input value={email} onChange={(e) => setEmail(e.target.value)} />
           </label>
           {mode === 'register' && (
             <label>
@@ -463,7 +463,7 @@ function AuthPanel({
           )}
           <label>
             비밀번호
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} maxLength={100} />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </label>
           {error && <p className="form-error">{error}</p>}
           <button className="primary-btn full" type="submit" disabled={loading}>
@@ -496,8 +496,8 @@ function AccountSheet({ open, currentUser, nickname, setNickname, onClose, onSav
         </div>
         <div className="sheet-list">
           <div className="toggle-row account-row">
-            <span>아이디</span>
-            <strong>{currentUser?.username || '-'}</strong>
+            <span>이메일</span>
+            <strong>{currentUser?.email || '-'}</strong>
           </div>
           <div className="account-editor">
             <label>
@@ -697,7 +697,7 @@ function mapMeApiToView(data) {
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authMode, setAuthMode] = useState('login');
-  const [authUsername, setAuthUsername] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
   const [authNickname, setAuthNickname] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
@@ -865,12 +865,12 @@ function App() {
     setAuthLoading(true);
     try {
       const data = authMode === 'login'
-        ? await login({ username: authUsername, password: authPassword })
-        : await register({ username: authUsername, nickname: authNickname, password: authPassword });
+        ? await login({ email: authEmail, password: authPassword })
+        : await register({ email: authEmail, nickname: authNickname, password: authPassword });
 
       const user = {
         userId: data.userId ?? data.user_id,
-        username: data.username,
+        email: data.email,
         nickname: data.nickname,
       };
       localStorage.setItem('policy_user', JSON.stringify(user));
@@ -895,7 +895,7 @@ function App() {
       const res = await updateNickname(currentUser.userId, profileNickname);
       const updatedUser = {
         userId: res.userId ?? res.user_id,
-        username: res.username,
+        email: res.email,
         nickname: res.nickname,
       };
       localStorage.setItem('policy_user', JSON.stringify(updatedUser));
@@ -1029,8 +1029,8 @@ function App() {
             <AuthPanel
               mode={authMode}
               setMode={setAuthMode}
-              username={authUsername}
-              setUsername={setAuthUsername}
+              email={authEmail}
+              setEmail={setAuthEmail}
               nickname={authNickname}
               setNickname={setAuthNickname}
               password={authPassword}

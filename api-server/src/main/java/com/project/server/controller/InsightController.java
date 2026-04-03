@@ -16,7 +16,7 @@ public class InsightController {
 
     @GetMapping("/heatmap")
     public ResponseEntity<InsightDto.HeatmapResponse> getHeatmap(
-            @RequestParam(name = "market_scope", defaultValue = "all") String marketScope,
+            @RequestParam(name = "marketScope", defaultValue = "all") String marketScope,
             @RequestParam(name = "country", defaultValue = "all") String country
     ) {
         return ResponseEntity.ok(insightService.getHeatmap(marketScope, country));

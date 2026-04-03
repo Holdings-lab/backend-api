@@ -17,7 +17,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ApiResponse<Object>> handleApiException(ApiException ex) {
         log.warn("API 예외 발생: code={}, message={}", ex.getErrorCode(), ex.getMessage());
-        return buildErrorResponse(ex.getStatus());
+    return buildErrorResponse(ex.getStatus());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -45,28 +45,14 @@ public class GlobalExceptionHandler {
     }
 
     private ResponseEntity<ApiResponse<Object>> buildErrorResponse(HttpStatus status) {
+        ErrorResponseCode errorCode = resolveErrorCode(status);
         return ResponseEntity.status(status).body(
-                ApiResponse.error(resolveCodeByStatus(status), resolveMessageByStatus(status))
+                ApiResponse.error(errorCode.getCode(), errorCode.getMessage())
         );
     }
 
-    private String resolveCodeByStatus(HttpStatus status) {
-        return switch (status) {
-            case BAD_REQUEST -> "COMMON-002";
-            case UNAUTHORIZED -> "COMMON-401";
-            case NOT_FOUND -> "COMMON-404";
-            case INTERNAL_SERVER_ERROR -> "COMMON-500";
-            default -> "ERROR-" + status.value();
-        };
-    }
-
-    private String resolveMessageByStatus(HttpStatus status) {
-        return switch (status) {
-            case BAD_REQUEST -> "요청 파라미터가 올바르지 않습니다.";
-            case UNAUTHORIZED -> "인증 정보가 유효하지 않습니다.";
-            case NOT_FOUND -> "존재하지 않는 리소스입니다.";
-            case INTERNAL_SERVER_ERROR -> "서버 오류가 발생했습니다.";
-            default -> "요청 처리 중 오류가 발생했습니다.";
-        };
+    private ErrorResponseCode resolveErrorCode(HttpStatus status) {
+        // 현재는 단일 실패 응답을 사용하고, 상태별 매핑은 이 메서드에서 확장한다.
+        return ErrorResponseCode.DEFAULT_FAILURE;
     }
 }

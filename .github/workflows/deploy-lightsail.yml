@@ -1,0 +1,36 @@
+name: Deploy Backend API to Lightsail
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "ai-engine/**"
+      - "api-server/**"
+      - "data-ml/**"
+      - "postgresql/**"
+      - "docker-compose.prod.yml"
+      - ".github/workflows/deploy-lightsail.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy on AWS Lightsail instance via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          port: ${{ secrets.LIGHTSAIL_SSH_PORT }}
+          script_stop: true
+          script: |
+            set -e
+            cd ${{ secrets.LIGHTSAIL_APP_PATH }}
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
+            docker compose -f docker-compose.prod.yml pull || true
+            docker compose -f docker-compose.prod.yml up -d --build postgres api-server data-ml ai-engine
+            docker image prune -f

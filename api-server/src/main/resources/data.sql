@@ -1,8 +1,8 @@
-MERGE INTO users (id, username, nickname, password, fcm_token)
+MERGE INTO users (id, email, nickname, password, fcm_token)
 KEY (id)
 VALUES
-(1, 'jiyoung', '지웅', 'password123', NULL),
-(2, 'demo_user', '데모', 'demo1234', NULL);
+(1, 'jiyoung@example.com', '지웅', 'password123', NULL),
+(2, 'demo_user@example.com', '데모', 'demo1234', NULL);
 
 MERGE INTO policy_events (id, title, keyword, impact_score, analysis_summary, created_at)
 KEY (id)

@@ -25,6 +25,7 @@ from optuna.samplers import TPESampler
 
 import random
 import os
+from pathlib import Path
 
 def seed_everything(seed=42):
     random.seed(seed)
@@ -563,6 +564,7 @@ plt.show()
 # 1. 테스트할 문턱(Threshold) 후보들 
 # (예: 0%, 1%, 2%, 3% 이상 상승 예측 시에만 매수)
 thresholds = [0, 0.002, 0.004, 0.006] 
+threshold_results = []
 
 plt.figure(figsize=(14, 8))
 
@@ -597,6 +599,46 @@ print(f"Market (Hold) : {cum_market.iloc[-1]:.2f}")
 for th in thresholds:
     final_ret = (1 + (result_df[f'Signal_{th}'].shift(1).fillna(0) * market_ret)).cumprod().iloc[-1]
     print(f"Threshold {th*100:.1f}% : {final_ret:.2f}")
+    threshold_results.append({
+        "threshold": float(th),
+        "finalReturn": float(final_ret),
+        "marketReturn": float(cum_market.iloc[-1]),
+        "excessReturn": float(final_ret - cum_market.iloc[-1]),
+        "tradeCount": int(result_df[f'Signal_{th}'].sum()),
+        "winRate": float((result_df[f'Signal_{th}'].shift(1).fillna(0) * market_ret > 0).mean()),
+    })
+
+best_threshold_result = max(threshold_results, key=lambda item: item["finalReturn"], default=None)
+
+feature_importances = pd.Series(best_model.feature_importances_, index=best_features).sort_values(ascending=False)
+top_feature_importance = [
+    {
+        "rank": idx + 1,
+        "feature": feature,
+        "importance": float(score),
+    }
+    for idx, (feature, score) in enumerate(feature_importances.head(10).items())
+]
+
+training_summary = {
+    "modelVersion": "qqq-xgb",
+    "targetTicker": target,
+    "bestHorizonDays": int(best_horizon),
+    "bestFeatures": best_features,
+    "metrics": {
+        "mae": float(mae),
+        "rmse": float(rmse),
+        "r2": float(r2),
+        "directionAccuracy": float(direction_acc),
+        "mape": float(mape),
+        "baselineMae": float(baseline_mae),
+        "baselineRmse": float(baseline_rmse),
+        "baselineMape": float(baseline_mape),
+    },
+    "thresholdPerformance": threshold_results,
+    "bestThreshold": float(best_threshold_result["threshold"]) if best_threshold_result else 0.004,
+    "topFeatureImportance": top_feature_importance,
+}
 
 # =========================================================
 # 12-1. 모델 및 메타데이터 저장
@@ -616,7 +658,11 @@ metadata = {
 with open("qqq_model_metadata.json", "w") as f:
     json.dump(metadata, f)
 
-print("\n✅ 모델과 메타데이터가 저장되었습니다. (qqq_xgboost_model.json, qqq_model_metadata.json)")
+summary_path = Path(__file__).resolve().with_name("qqq_training_summary.json")
+with open(summary_path, "w", encoding="utf-8") as f:
+    json.dump(training_summary, f, ensure_ascii=False, indent=2)
+
+print("\n✅ 모델, 메타데이터, 학습 요약이 저장되었습니다. (qqq_xgboost_model.json, qqq_model_metadata.json, qqq_training_summary.json)")
 
 """
 0번 그래프: 각각의 feature 기여도

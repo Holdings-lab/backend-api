@@ -27,35 +27,35 @@ public class AuthService {
     private final WatchAssetSelectionService watchAssetSelectionService;
 
     public AuthDto.AuthResponse register(AuthDto.RegisterRequest request) {
-        String normalizedUsername = request.getUsername().trim();
+        String normalizedEmail = request.getEmail().trim().toLowerCase();
         String normalizedNickname = request.getNickname().trim();
 
-        // 중복 사용자명 체크
-        if (userJpaRepository.findByUsername(normalizedUsername).isPresent()) {
-            throw ApiException.conflict("이미 존재하는 사용자명입니다.", "AUTH_USERNAME_DUPLICATED");
+        // 중복 이메일 체크
+        if (userJpaRepository.findByEmail(normalizedEmail).isPresent()) {
+            throw ApiException.conflict("이미 존재하는 이메일입니다.", "AUTH_EMAIL_DUPLICATED");
         }
 
         UserEntity newUser = UserEntity.builder()
-            .username(normalizedUsername)
+            .email(normalizedEmail)
             .nickname(normalizedNickname)
                 .password(request.getPassword()) // 실제로는 암호화해야 함
                 .build();
 
         UserEntity saved = userJpaRepository.save(newUser);
 
-        log.info("새 사용자 등록: {}", normalizedUsername);
+        log.info("새 사용자 등록: {}", normalizedEmail);
 
         return AuthDto.AuthResponse.builder()
                 .userId(saved.getId())
-                .username(saved.getUsername())
+                .email(saved.getEmail())
                 .nickname(saved.getNickname())
                 .message("회원가입이 완료되었습니다.")
                 .build();
     }
 
     public AuthDto.LoginResult login(AuthDto.LoginRequest request) {
-        String normalizedUsername = request.getUsername().trim();
-        UserEntity user = userJpaRepository.findByUsername(normalizedUsername).orElse(null);
+        String normalizedEmail = request.getEmail().trim().toLowerCase();
+        UserEntity user = userJpaRepository.findByEmail(normalizedEmail).orElse(null);
         if (user == null) {
             throw ApiException.notFound("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
         }
@@ -64,11 +64,11 @@ public class AuthService {
             throw ApiException.badRequest("비밀번호가 일치하지 않습니다.", "AUTH_INVALID_PASSWORD");
         }
 
-        log.info("사용자 로그인: {}", normalizedUsername);
+        log.info("사용자 로그인: {}", normalizedEmail);
 
         return AuthDto.LoginResult.builder()
                 .userId(user.getId())
-                .username(user.getUsername())
+            .email(user.getEmail())
                 .nickname(user.getNickname())
                 .accessToken(UUID.randomUUID().toString())
                 .refreshToken(UUID.randomUUID().toString())
@@ -89,11 +89,11 @@ public class AuthService {
 
         String token = request.getFcmToken();
         String tokenPreview = token.substring(0, Math.min(50, token.length()));
-        log.info("FCM 토큰 등록: 사용자={}, 토큰={}...", user.getUsername(), tokenPreview);
+        log.info("FCM 토큰 등록: 사용자={}, 토큰={}...", user.getEmail(), tokenPreview);
 
         return AuthDto.AuthResponse.builder()
                 .userId(user.getId())
-                .username(user.getUsername())
+            .email(user.getEmail())
                 .nickname(user.getNickname())
                 .message("FCM 토큰이 등록되었습니다.")
                 .build();
@@ -107,11 +107,11 @@ public class AuthService {
         }
 
         userJpaRepository.deleteById(userId);
-        log.info("사용자 탈퇴: {}", user.getUsername());
+    log.info("사용자 탈퇴: {}", user.getEmail());
 
         return AuthDto.AuthResponse.builder()
                 .userId(userId)
-                .username(user.getUsername())
+        .email(user.getEmail())
                 .nickname(user.getNickname())
                 .message("회원 탈퇴가 완료되었습니다.")
                 .build();
@@ -128,7 +128,7 @@ public class AuthService {
 
         return AuthDto.AuthResponse.builder()
                 .userId(user.getId())
-                .username(user.getUsername())
+            .email(user.getEmail())
                 .nickname(user.getNickname())
                 .message("닉네임이 변경되었습니다.")
                 .build();
@@ -139,7 +139,7 @@ public class AuthService {
         return users.stream()
                 .map(user -> AuthDto.AccountInfo.builder()
                         .userId(user.getId())
-                        .username(user.getUsername())
+                .email(user.getEmail())
                         .nickname(user.getNickname())
                         .build())
                 .collect(Collectors.toList());
@@ -152,7 +152,7 @@ public class AuthService {
 
         String displayName = (user != null && user.getNickname() != null && !user.getNickname().isBlank())
                 ? user.getNickname()
-                : (user != null ? user.getUsername() : "지웅");
+            : (user != null ? user.getEmail() : "지웅");
 
         String avatarText = profile == null ? "JY" : profile.getAvatarText();
         int weeklyLearningCount = profile == null ? 6 : profile.getWeeklyLearningCount();

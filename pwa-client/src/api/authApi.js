@@ -53,17 +53,17 @@ async function request(path, options = {}) {
   return data;
 }
 
-export function register({ username, nickname, password }) {
+export function register({ email, nickname, password }) {
   return request('/api/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ username, nickname, password }),
+    body: JSON.stringify({ email, nickname, password }),
   });
 }
 
-export function login({ username, password }) {
+export function login({ email, password }) {
   return request('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ email, password }),
   });
 }
 

@@ -16,8 +16,8 @@ public class EventController {
 
     @GetMapping
     public ResponseEntity<EventDto.EventsResponse> getEvents(
-            @RequestParam(name = "user_id", defaultValue = "1") Long userId,
-            @RequestParam(name = "date_segment", defaultValue = "today") String dateSegment,
+            @RequestParam(name = "userId", defaultValue = "1") Long userId,
+            @RequestParam(name = "dateSegment", defaultValue = "today") String dateSegment,
             @RequestParam(name = "category", defaultValue = "all") String category
     ) {
         return ResponseEntity.ok(eventService.getEvents(userId, dateSegment, category));
@@ -25,17 +25,17 @@ public class EventController {
 
     @PostMapping("/refresh")
     public ResponseEntity<EventDto.EventsResponse> refreshEvents(
-            @RequestParam(name = "user_id", defaultValue = "1") Long userId,
-            @RequestParam(name = "date_segment", defaultValue = "today") String dateSegment,
+            @RequestParam(name = "userId", defaultValue = "1") Long userId,
+            @RequestParam(name = "dateSegment", defaultValue = "today") String dateSegment,
             @RequestParam(name = "category", defaultValue = "all") String category
     ) {
         return ResponseEntity.ok(eventService.refreshEvents(userId, dateSegment, category));
     }
 
-    @PostMapping("/{event_id}/alerts")
+        @PostMapping("/{eventId}/alerts")
     public ResponseEntity<EventDto.EventAlertResponse> updateEventAlert(
-            @RequestParam(name = "user_id", defaultValue = "1") Long userId,
-            @PathVariable("event_id") Long eventId,
+            @RequestParam(name = "userId", defaultValue = "1") Long userId,
+            @PathVariable("eventId") Long eventId,
             @RequestBody EventDto.UpdateEventAlertRequest request
     ) {
         return ResponseEntity.ok(eventService.updateEventAlert(userId, eventId, request.isEnabled()));

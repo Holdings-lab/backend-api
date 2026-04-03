@@ -16,7 +16,7 @@ public class HomeController {
 
     @GetMapping("/home")
     public ResponseEntity<HomeDto.HomeResponse> getHome(
-            @RequestParam(name = "user_id", defaultValue = "1") Long userId
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
     ) {
         return ResponseEntity.ok(homeService.getHome(userId));
     }

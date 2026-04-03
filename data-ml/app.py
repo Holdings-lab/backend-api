@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
+from collections import Counter
 from datetime import datetime
-from threading import Lock
 from pathlib import Path
+from threading import Lock
 
-from flask import Flask, jsonify, request
+import pandas as pd
 from dotenv import load_dotenv
+from flask import Flask, jsonify, request
 
 from crawler.service import run_crawl_now
 from scheduler import build_scheduler
@@ -16,6 +19,320 @@ load_dotenv(Path(__file__).resolve().with_name(".env"))
 
 app = Flask(__name__)
 run_lock = Lock()
+BASE_DIR = Path(__file__).resolve().parent
+TRAINING_DIR = BASE_DIR / "training"
+MERGED_FINBERT_PATH = BASE_DIR / "merged_finbert.csv"
+MODEL_METADATA_PATH = TRAINING_DIR / "qqq_model_metadata.json"
+TRAINING_SUMMARY_PATH = TRAINING_DIR / "qqq_training_summary.json"
+
+
+def _safe_json_load(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _safe_float(value, default=None):
+    try:
+        if pd.isna(value):
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _safe_int(value, default=None):
+    try:
+        if pd.isna(value):
+            return default
+        return int(value)
+    except Exception:
+        return default
+
+
+def _safe_str(value, default=""):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return default
+    text = str(value).strip()
+    return text if text else default
+
+
+def _make_slug(text: str) -> str:
+    slug = _safe_str(text).lower()
+    slug = slug.replace("/", "-")
+    slug = "".join(ch if ch.isalnum() or ch == "-" else "-" for ch in slug)
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug.strip("-")
+
+
+def _classify_sentiment(score: float) -> str:
+    if score is None:
+        return "neutral"
+    if score > 0.15:
+        return "positive"
+    if score < -0.15:
+        return "negative"
+    return "neutral"
+
+
+def _build_target_assets(category: str) -> list[str]:
+    normalized = _safe_str(category).lower()
+    if normalized == "fomc":
+        return ["TLT", "QQQ", "SPY"]
+    if normalized == "white house":
+        return ["QQQ", "SOXX", "ICLN"]
+    return ["QQQ", "TLT", "UUP"]
+
+
+def _build_feature_drivers(best_features: list[str]) -> list[str]:
+    feature_map = {
+        "slope_60": "60일 추세가 중장기 방향성을 가장 강하게 보여줍니다.",
+        "slope_120": "120일 추세가 장기 추세 전환을 설명합니다.",
+        "bb_width": "볼린저 밴드 폭은 변동성 확장을 반영합니다.",
+        "vol_20": "20일 변동성은 위험 구간을 구분하는 데 유용합니다.",
+        "vol_ratio": "QQQ 변동성이 SPY 대비 얼마나 큰지 보여줍니다.",
+        "target_tlt_rel_ret": "QQQ와 장기채의 상대 강도는 리스크 온/오프 판단에 도움이 됩니다.",
+        "vix_level": "변동성 지수 수준은 위험회피 국면을 해석하는 핵심 신호입니다.",
+        "target_spy_ratio_20": "QQQ의 SPY 대비 상대 강도는 성장주 모멘텀을 나타냅니다.",
+    }
+    drivers = []
+    for feature in best_features[:3]:
+        driver = feature_map.get(feature)
+        if driver:
+            drivers.append(driver)
+    if not drivers:
+        drivers.append("선택된 핵심 피처를 기준으로 QQQ 방향성을 해석합니다.")
+    return drivers
+
+
+def _summarize_model_signal(sentiment_score: float, best_horizon: int, best_threshold: float, direction_accuracy: float) -> dict:
+    confidence = direction_accuracy if direction_accuracy is not None else 0.5
+    confidence = max(0.5, min(0.99, float(confidence)))
+    predicted_log_return = round((sentiment_score or 0.0) * 0.01 * confidence, 6)
+    predicted_return_pct = round(predicted_log_return * 100, 2)
+
+    if predicted_log_return > best_threshold:
+        signal = "buy"
+    elif predicted_log_return < -best_threshold:
+        signal = "sell"
+    else:
+        signal = "hold"
+
+    signal_strength = int(min(100, max(0, round(abs(predicted_return_pct) * 12 + confidence * 35))))
+
+    return {
+        "horizonDays": best_horizon,
+        "predictedLogReturn": predicted_log_return,
+        "predictedReturnPct": predicted_return_pct,
+        "predictedFuturePrice": None,
+        "signal": signal,
+        "signalStrength": signal_strength,
+        "thresholdUsed": best_threshold,
+        "confidence": round(confidence, 2),
+    }
+
+
+def _build_policy_feed(payload: dict) -> dict:
+    if not MERGED_FINBERT_PATH.exists():
+        return {
+            "feedType": "policy_news_with_model_signal",
+            "generatedAt": datetime.utcnow().isoformat() + "Z",
+            "source": {
+                "dataset": "merged_finbert",
+                "modelTarget": "QQQ",
+                "modelVersion": "unknown",
+            },
+            "summary": {
+                "totalCount": 0,
+                "positiveCount": 0,
+                "negativeCount": 0,
+                "neutralCount": 0,
+                "overallSentiment": "neutral",
+                "overallSentimentScore": 0.0,
+                "latestDate": None,
+                "topCategories": [],
+            },
+            "model": {
+                "targetTicker": "QQQ",
+                "bestHorizonDays": None,
+                "bestFeatures": [],
+                "metrics": {},
+                "thresholdPerformance": [],
+                "topFeatureImportance": [],
+            },
+            "filters": {
+                "categories": ["BIS", "FOMC", "White House"],
+                "docTypes": ["press_release", "statement", "minutes"],
+                "dateRange": {"from": None, "to": None},
+                "sentimentRange": {"min": -1, "max": 1},
+            },
+            "cards": [],
+        }
+
+    df = pd.read_csv(MERGED_FINBERT_PATH)
+    limit = int(payload.get("limit") or 20)
+    category = _safe_str(payload.get("category"), "all")
+    date_from = _safe_str(payload.get("dateFrom"), "")
+    date_to = _safe_str(payload.get("dateTo"), "")
+
+    if category and category.lower() != "all" and "category" in df.columns:
+        df = df[df["category"].astype(str).str.lower() == category.lower()]
+
+    if (date_from or date_to) and "date" in df.columns:
+        date_series = pd.to_datetime(df["date"], errors="coerce")
+        if date_from:
+            df = df[date_series >= pd.to_datetime(date_from, errors="coerce")]
+        if date_to:
+            df = df[date_series <= pd.to_datetime(date_to, errors="coerce")]
+
+    df = df.sort_values(by=["date", "title"], ascending=[False, True], na_position="last")
+
+    metadata = _safe_json_load(MODEL_METADATA_PATH)
+    training_summary = _safe_json_load(TRAINING_SUMMARY_PATH)
+
+    best_features = metadata.get("best_features") or training_summary.get("bestFeatures") or []
+    best_horizon = metadata.get("best_horizon") or training_summary.get("bestHorizonDays") or 15
+    best_threshold = training_summary.get("bestThreshold")
+    if best_threshold is None:
+        threshold_performance = training_summary.get("thresholdPerformance") or []
+        if threshold_performance:
+            best_threshold = threshold_performance[0].get("threshold", 0.004)
+        else:
+            best_threshold = 0.004
+
+    metrics = training_summary.get("metrics") or {}
+    direction_accuracy = metrics.get("directionAccuracy")
+
+    sentiment_score_column = "body_sentiment_score" if "body_sentiment_score" in df.columns else "title_sentiment_score"
+    score_series = df[sentiment_score_column] if sentiment_score_column in df.columns else pd.Series([0] * len(df), index=df.index)
+
+    total_count = int(len(df))
+    positive_count = int((score_series > 0.15).sum())
+    negative_count = int((score_series < -0.15).sum())
+    neutral_count = total_count - positive_count - negative_count
+    overall_sentiment_score = _safe_float(score_series.mean(), 0.0)
+
+    top_categories = []
+    if "category" in df.columns and total_count > 0:
+        category_counts = Counter(df["category"].astype(str))
+        top_categories = [
+            {"category": name, "count": int(count)}
+            for name, count in category_counts.most_common(5)
+        ]
+
+    latest_date = None
+    if "date" in df.columns and not df.empty:
+        latest_date = _safe_str(df["date"].dropna().astype(str).iloc[0], None)
+
+    cards = []
+    for _, row in df.head(limit).iterrows():
+        title_score = _safe_float(row.get("title_sentiment_score"), 0.0)
+        body_score = _safe_float(row.get("body_sentiment_score"), title_score)
+        combined_score = body_score if body_score is not None else title_score
+        impact_label = _classify_sentiment(combined_score)
+        model_signal = _summarize_model_signal(combined_score or 0.0, int(best_horizon), float(best_threshold), direction_accuracy or 0.5)
+        cards.append(
+            {
+                "id": f"{_safe_str(row.get('category'))}_{_safe_str(row.get('date'))}_{_make_slug(row.get('title'))}",
+                "date": _safe_str(row.get("date")),
+                "category": _safe_str(row.get("category")),
+                "docType": _safe_str(row.get("doc_type")),
+                "title": _safe_str(row.get("title")),
+                "bodySummary": _safe_str(row.get("body")),
+                "bodyExcerpt": _safe_str(row.get("body"))[:240],
+                "link": _safe_str(row.get("link")),
+                "bodyOriginalLength": _safe_int(row.get("body_original_length"), 0),
+                "bodyNChunks": _safe_int(row.get("body_n_chunks"), 0),
+                "tags": [
+                    _safe_str(row.get("category")),
+                    _classify_sentiment(combined_score),
+                ],
+                "temporal": {
+                    "dayOfWeek": _safe_str(row.get("day_of_week")),
+                    "month": _safe_int(row.get("month"), None),
+                    "isWeekend": bool(row.get("is_weekend")) if "is_weekend" in row else False,
+                },
+                "sentiment": {
+                    "titlePositiveProb": _safe_float(row.get("title_positive_prob"), 0.0),
+                    "titleNegativeProb": _safe_float(row.get("title_negative_prob"), 0.0),
+                    "titleNeutralProb": _safe_float(row.get("title_neutral_prob"), 0.0),
+                    "titleSentimentScore": title_score,
+                    "bodyPositiveProb": _safe_float(row.get("body_positive_prob"), 0.0),
+                    "bodyNegativeProb": _safe_float(row.get("body_negative_prob"), 0.0),
+                    "bodyNeutralProb": _safe_float(row.get("body_neutral_prob"), 0.0),
+                    "bodySentimentScore": body_score,
+                },
+                "modelSignal": {
+                    **model_signal,
+                    "predictedFuturePrice": None,
+                },
+                "impact": {
+                    "label": impact_label,
+                    "score": int(min(100, max(0, round(abs(combined_score or 0.0) * 100)))) ,
+                    "reason": f"{_safe_str(row.get('category'))} 문서의 감성과 모델 피드가 결합된 해석입니다.",
+                    "targetAssets": _build_target_assets(row.get("category")),
+                },
+                "features": {
+                    "matchedFeatures": list(best_features[:3]),
+                    "featureDrivers": _build_feature_drivers(best_features),
+                },
+            }
+        )
+
+    top_feature_importance = []
+    training_top_features = training_summary.get("topFeatureImportance") or []
+    if training_top_features:
+        top_feature_importance = training_top_features
+    elif best_features:
+        top_feature_importance = [
+            {"rank": idx + 1, "feature": feature, "importance": round(1.0 / (idx + 1), 3)}
+            for idx, feature in enumerate(best_features[:5])
+        ]
+
+    return {
+        "feedType": "policy_news_with_model_signal",
+        "generatedAt": datetime.utcnow().isoformat() + "Z",
+        "source": {
+            "dataset": "merged_finbert",
+            "modelTarget": metadata.get("target_ticker", "QQQ"),
+            "modelVersion": training_summary.get("modelVersion", "qqq-xgb"),
+        },
+        "summary": {
+            "totalCount": total_count,
+            "positiveCount": positive_count,
+            "negativeCount": negative_count,
+            "neutralCount": neutral_count,
+            "overallSentiment": _classify_sentiment(overall_sentiment_score),
+            "overallSentimentScore": round(overall_sentiment_score or 0.0, 4),
+            "latestDate": latest_date,
+            "topCategories": top_categories,
+        },
+        "model": {
+            "targetTicker": metadata.get("target_ticker", "QQQ"),
+            "bestHorizonDays": int(best_horizon) if best_horizon is not None else None,
+            "bestFeatures": best_features,
+            "metrics": metrics,
+            "thresholdPerformance": training_summary.get("thresholdPerformance") or [],
+            "topFeatureImportance": top_feature_importance,
+        },
+        "filters": {
+            "categories": ["BIS", "FOMC", "White House"],
+            "docTypes": ["press_release", "statement", "minutes"],
+            "dateRange": {
+                "from": _safe_str(payload.get("dateFrom"), None),
+                "to": _safe_str(payload.get("dateTo"), None),
+            },
+            "sentimentRange": {
+                "min": -1,
+                "max": 1,
+            },
+        },
+        "cards": cards,
+    }
 
 
 def run_pipeline() -> dict:
@@ -77,6 +394,13 @@ def run_predict_endpoint():
         return jsonify(result), code
     finally:
         run_lock.release()
+
+
+@app.post("/api/content/policy-feed")
+def policy_feed_endpoint():
+    payload = request.get_json(silent=True) or {}
+    result = _build_policy_feed(payload)
+    return jsonify(result), 200
 
 
 @app.post("/api/signal")

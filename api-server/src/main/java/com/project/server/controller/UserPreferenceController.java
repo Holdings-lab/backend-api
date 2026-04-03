@@ -23,21 +23,21 @@ public class UserPreferenceController {
 
     @GetMapping
     public ResponseEntity<AuthDto.MeResponse> getMe(
-            @RequestParam(name = "user_id", defaultValue = "1") Long userId
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
     ) {
         return ResponseEntity.ok(authService.getMe(userId));
     }
 
     @GetMapping("/settings/notifications")
     public ResponseEntity<UserPreferenceDto.NotificationSettingsResponse> getNotificationSettings(
-            @RequestParam(name = "user_id", defaultValue = "1") Long userId
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
     ) {
         return ResponseEntity.ok(userPreferenceService.getNotificationSettings(userId));
     }
 
     @PatchMapping("/settings/notifications")
     public ResponseEntity<UserPreferenceDto.NotificationSettingsResponse> updateNotificationSettings(
-            @RequestParam(name = "user_id", defaultValue = "1") Long userId,
+            @RequestParam(name = "userId", defaultValue = "1") Long userId,
             @RequestBody UserPreferenceDto.UpdateNotificationSettingsRequest request
     ) {
         return ResponseEntity.ok(userPreferenceService.updateNotificationSettings(userId, request));
@@ -54,7 +54,7 @@ public class UserPreferenceController {
 
     @PostMapping("/watch-assets")
     public ResponseEntity<ActionDto.ActionResponse> updateWatchAssets(
-            @RequestParam(name = "user_id", defaultValue = "1") Long userId,
+            @RequestParam(name = "userId", defaultValue = "1") Long userId,
             @RequestBody WatchAssetDto.UpdateWatchAssetsRequest request
     ) {
         watchAssetSelectionService.updateSelectedAssets(userId, request.getAssetNames());

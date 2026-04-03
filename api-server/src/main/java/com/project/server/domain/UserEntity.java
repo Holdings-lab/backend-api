@@ -9,7 +9,7 @@ import lombok.Setter;
 
 @Entity
 @Table(name = "users", uniqueConstraints = {
-        @UniqueConstraint(name = "uk_users_username", columnNames = "username")
+    @UniqueConstraint(name = "uk_users_email", columnNames = "email")
 })
 @Getter
 @Setter
@@ -22,8 +22,8 @@ public class UserEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "username", nullable = false, length = 100)
-    private String username;
+    @Column(name = "email", nullable = false, length = 100)
+    private String email;
 
     @Column(name = "nickname", nullable = false, length = 100)
     private String nickname;

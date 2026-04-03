@@ -47,7 +47,7 @@ services:
     volumes:
       - ./api-server/src/main/resources/serviceAccountKey.json:/app/config/serviceAccountKey.json:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -73,6 +73,33 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+    networks:
+      - app-network
+
+  # FastAPI AI Engine
+  ai-engine:
+    build:
+      context: ./ai-engine
+      dockerfile: Dockerfile
+    container_name: pwa-ai-engine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api-server:
+        condition: service_started
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-holdings}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      WEBHOOK_URL: http://api-server:8080/api/internal/webhook/event
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+    ports:
+      - "8000:8000"
     networks:
       - app-network
 
