@@ -1,1044 +1,541 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  getEvents,
-  getWatchAssetOptions,
-  getHeatmap,
-  getHome,
-  getMe,
-  refreshEvents,
-  getNotificationSettings,
-  updateEventAlert,
-  updateNotificationSettings,
-  triggerAIEngine,
-  updateWatchAssets,
-} from './api/pwaApi';
-import { login, register, updateNickname } from './api/authApi';
-import { pwaMockData } from './mocks/pwaMockData';
+import './App.css';
+import { login, register } from './api/authApi';
+import { getEvents, getHome, getMe, getPolicyFeed, trainRegression } from './api/pwaApi';
 
-const TABS = [
-  { key: 'home', label: '홈', icon: '⌂' },
-  { key: 'events', label: '이벤트', icon: '▦' },
-  { key: 'insight', label: '인사이트', icon: '▥' },
-  { key: 'my', label: 'MY', icon: '◉' },
+const NAV_TABS = [
+  { key: 'home', label: '홈', icon: '🏠' },
+  { key: 'signal', label: '시그널', icon: '📶' },
+  { key: 'asset', label: '내 자산', icon: '📋' },
+  { key: 'league', label: '리그', icon: '🏆' },
 ];
 
-const SEGMENT_LABEL_TO_API = {
-  오늘: 'today',
-  내일: 'tomorrow',
-  이번주: 'this_week',
-  지난발표: 'past',
+const POLICY_ICON_BY_CATEGORY = {
+  fomc: '🏛️',
+  'white house': '⚙️',
+  bis: '⚡',
 };
 
-const SEGMENT_API_TO_LABEL = {
-  today: '오늘',
-  tomorrow: '내일',
-  this_week: '이번주',
-  past: '지난발표',
-};
-
-const CATEGORY_LABEL_TO_API = {
-  전체: 'all',
-  금리: 'rate',
-  물가: 'inflation',
-  고용: 'employment',
-  환율: 'fx',
-  연설: 'speech',
-};
-
-const CATEGORY_API_TO_LABEL = {
-  all: '전체',
-  rate: '금리',
-  inflation: '물가',
-  employment: '고용',
-  fx: '환율',
-  speech: '연설',
-};
-
-const COUNTRY_LABEL_TO_API = {
-  전체: 'all',
-  미국: 'us',
-  한국: 'kr',
-};
-
-const COUNTRY_API_TO_LABEL = {
-  all: '전체',
-  us: '미국',
-  kr: '한국',
-};
-
-const PRESET_ASSET_OPTIONS = [
-  { assetName: '장기채 ETF', changePercent: -1.2 },
-  { assetName: '나스닥 성장주 ETF', changePercent: -0.8 },
-  { assetName: '달러 인덱스 ETF', changePercent: 0.6 },
-  { assetName: '금 ETF', changePercent: 1.5 },
-  { assetName: '비트코인 ETF', changePercent: 3.2 },
-  { assetName: '코스피 ETF', changePercent: -0.5 },
-  { assetName: '원유 ETF', changePercent: 1.1 },
-  { assetName: '미국 반도체 ETF', changePercent: 2.4 },
-  { assetName: '국내 배당 ETF', changePercent: 0.9 },
-];
-
-function normalizeAsset(rawAsset, index) {
-  const assetName = rawAsset?.assetName || rawAsset?.asset_name || `임시 자산 ${index + 1}`;
-  const parsedChange = Number(rawAsset?.changePercent ?? rawAsset?.change_percent);
-  const changePercent = Number.isFinite(parsedChange) ? parsedChange : 0;
-  return {
-    assetId: rawAsset?.assetId || rawAsset?.asset_id || `${assetName}-${index + 1}`,
-    assetName,
-    changePercent,
-  };
+function toTone(category) {
+  const value = (category || '').toLowerCase();
+  if (value.includes('fomc')) return 'blue';
+  if (value.includes('white')) return 'purple';
+  if (value.includes('bis')) return 'green';
+  return 'blue';
 }
 
-function normalizeAssetList(rawAssets, fallbackAssets = PRESET_ASSET_OPTIONS) {
-  const source = Array.isArray(rawAssets) && rawAssets.length > 0 ? rawAssets : fallbackAssets;
-  return source.map((asset, idx) => normalizeAsset(asset, idx));
+function formatDateText(date) {
+  if (!date) return '일정 미정';
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return `${parsed.getMonth() + 1}/${parsed.getDate()}`;
 }
 
-function Chip({ text, tone = 'default' }) {
-  return <span className={`chip chip-${tone}`}>{text}</span>;
+function moneyFormat(value) {
+  return new Intl.NumberFormat('ko-KR').format(Math.round(value));
 }
 
-function ProgressBar({ value }) {
+function buildPolicyCards(feedCards) {
+  return (feedCards || []).slice(0, 3).map((card, index) => {
+    const category = card.category || '정책';
+    const tone = toTone(category);
+    const id = card.id || `policy-${index + 1}`;
+    const title = card.title || '정책 업데이트';
+    const date = `일정 · ${formatDateText(card.date)}`;
+    const icon = POLICY_ICON_BY_CATEGORY[(category || '').toLowerCase()] || (index % 2 === 0 ? '🏛️' : '⚙️');
+    return { id, icon, date, title, tone, category, detail: card };
+  });
+}
+
+function buildNewsCards(feedCards) {
+  return (feedCards || []).slice(0, 3).map((card, index) => {
+    const tone = toTone(card.category);
+    const score = card.impact?.score ?? 0;
+    return {
+      id: card.id || `news-${index + 1}`,
+      tag: card.category || '정책',
+      ago: `${index + 2}시간 전`,
+      title: card.title || '정책 뉴스',
+      note: `↗ 영향 점수 ${score} · ${card.modelSignal?.signal || 'hold'} 시그널`,
+      tone,
+    };
+  });
+}
+
+function buildActionQueue(feedCards) {
+  return (feedCards || []).slice(0, 3).map((card, index) => {
+    const tone = toTone(card.category);
+    const driver = card.features?.featureDrivers?.[0] || '핵심 피처 기반으로 변동성 신호를 확인했습니다.';
+    const confidence = card.modelSignal?.confidence ?? 0;
+    return {
+      id: card.id || `action-${index + 1}`,
+      week: `${index + 3}월 ${index + 1}주차`,
+      linked: '보유자산 연관',
+      title: card.title || '정책 대응 점검',
+      description: card.bodyExcerpt || card.bodySummary || '정책 문서를 기반으로 자산 영향도를 해석합니다.',
+      action: `${driver} (신뢰도 ${Math.round(confidence * 100)}%)`,
+      tone,
+    };
+  });
+}
+
+function buildMatchingItems(feedCards) {
+  return (feedCards || []).slice(0, 3).map((card, index) => {
+    const tone = toTone(card.category);
+    const score = card.impact?.score || card.modelSignal?.signalStrength || 50;
+    const target = card.impact?.targetAssets?.[0] || 'QQQ';
+    const avg = card.modelSignal?.predictedReturnPct;
+    return {
+      id: card.id || `match-${index + 1}`,
+      icon: POLICY_ICON_BY_CATEGORY[(card.category || '').toLowerCase()] || '🏛️',
+      policy: card.title || '정책 이벤트',
+      etf: `${target} (연관 ETF)`,
+      score,
+      avg: `${avg === undefined || avg === null ? 0 : avg}%`,
+      tone,
+    };
+  });
+}
+
+function HomeTab({ homeData, policyCards, newsCards }) {
+  const [selectedPolicyId, setSelectedPolicyId] = useState(policyCards[0]?.id || '');
+
+  useEffect(() => {
+    if (!policyCards.some((card) => card.id === selectedPolicyId)) {
+      setSelectedPolicyId(policyCards[0]?.id || '');
+    }
+  }, [policyCards, selectedPolicyId]);
+
+  const selectedPolicy = policyCards.find((card) => card.id === selectedPolicyId) || policyCards[0];
+  const summary = selectedPolicy?.detail?.bodySummary || selectedPolicy?.detail?.bodyExcerpt || '정책 내용을 바탕으로 핵심 요약을 생성했습니다.';
+  const drivers = selectedPolicy?.detail?.features?.featureDrivers || [];
+
   return (
-    <div className="progress-wrap" role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100}>
-      <div className="progress-fill" style={{ width: `${value}%` }} />
+    <div className="screen-content">
+      <header className="top-head">
+        <div>
+          <p className="date-text">{new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</p>
+          <h1>{homeData?.userGreeting?.headline || '안녕하세요, 투자자님'}</h1>
+        </div>
+        <div className="avatar">{(homeData?.userGreeting?.headline || 'JK').slice(0, 2).toUpperCase()}</div>
+      </header>
+
+      <section className="section-title-row">
+        <h2>이번 주 정책 일정</h2>
+      </section>
+
+      <div className="policy-row">
+        {policyCards.map((card) => (
+          <button
+            key={card.id}
+            className={`policy-card ${selectedPolicyId === card.id ? 'selected' : ''}`}
+            onClick={() => setSelectedPolicyId(card.id)}
+          >
+            <span className={`policy-icon ${card.tone}`}>{card.icon}</span>
+            <p className="policy-date">{card.date}</p>
+            <p className="policy-title">{card.title}</p>
+          </button>
+        ))}
+      </div>
+
+      {selectedPolicy && (
+        <section className="glass-card detail-card">
+          <h3>내 보유 자산 기준 브리핑</h3>
+          <p className="sub-copy">{summary}</p>
+          <h3>정책 핵심 포인트</h3>
+          <ol className="number-list">
+            {drivers.length > 0
+              ? drivers.slice(0, 3).map((driver, index) => <li key={`${selectedPolicy.id}-${index + 1}`}>{driver}</li>)
+              : <li>모델 피처 기반 요약을 준비 중입니다.</li>}
+          </ol>
+          <div className="tip-box">
+            <strong>발표 때 이것만 확인하세요</strong>
+            <p>카테고리: {selectedPolicy.category || '정책'}</p>
+            <p>예상 시그널: {(selectedPolicy.detail?.modelSignal?.signal || 'hold').toUpperCase()}</p>
+          </div>
+        </section>
+      )}
+
+      <section className="glass-card portfolio-card">
+        <div className="row-between">
+          <h3>My Portfolio</h3>
+          <span className="gain-pill">↗ {(homeData?.featuredEvent?.tags || []).includes('금리') ? '+1.2%' : '+0.8%'}</span>
+        </div>
+        <p className="money">₩{moneyFormat(13550000)}</p>
+        <div className="reason-box">
+          <strong>이유 있는 변동</strong>
+          <p>{homeData?.featuredEvent?.summary || '정책 이벤트와 모델 시그널을 결합해 변동 이유를 제공합니다.'}</p>
+          <small>➜ 데이터 출처: merged_finbert.csv / train_regression.py 결과 반영</small>
+        </div>
+      </section>
+
+      <section className="section-title-row mt-8">
+        <h2>맞춤형 정책 뉴스</h2>
+      </section>
+
+      <div className="news-stack">
+        {newsCards.map((item) => (
+          <article className="glass-card news-card" key={item.id}>
+            <div className="row-between">
+              <span className={`tag ${item.tone}`}>{item.tag}</span>
+              <span className="ago">{item.ago}</span>
+            </div>
+            <p className="news-title">{item.title}</p>
+            <p className="news-note">{item.note}</p>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }
 
-function SectionCard({ children, className = '' }) {
-  return <section className={`section-card ${className}`}>{children}</section>;
-}
-
-function HomeTab({ data }) {
+function SignalTab({ actionQueue, matchingItems, trainingResult }) {
   return (
-    <div className="tab-page fade-in">
-      <section className="hero-panel">
-        <div className="hero-top">
-          <strong>PolicyLink</strong>
-          <div className="hero-icons">
-            <button className="icon-btn" aria-label="search">⌕</button>
-            <button className="icon-btn" aria-label="alarm">◌</button>
-          </div>
-        </div>
-        <h1>{data.greeting.headline}</h1>
-        <p>{data.greeting.subtext}</p>
-        <button className="pill-btn">◔ 4일 연속</button>
-      </section>
+    <div className="screen-content">
+      <header className="signal-header">
+        <h1>시그널 센터</h1>
+        <p>정책이 만드는 투자 기회를 포착하세요</p>
+        <p>학습 실행 상태: {trainingResult?.exitCode === 0 ? '정상' : '확인 필요'}</p>
+      </header>
 
-      <SectionCard>
-        <div className="row-between tiny-label">
-          <span>{data.featuredEvent.label}</span>
-          <span>{data.featuredEvent.dday}</span>
-        </div>
-        <h2 className="event-title">{data.featuredEvent.title}</h2>
-        <div className="row-wrap">
-          {(data.featuredEvent.tags || []).map((tag) => (
-            <Chip key={tag} text={tag} tone={tag === '매우높음' ? 'red' : tag === '금리' ? 'blue' : 'default'} />
-          ))}
-        </div>
-        <p className="muted">{data.featuredEvent.summary}</p>
-        <div className="row-wrap mt-12">
-          <button className="primary-btn">왜 중요한가</button>
-          <button className="ghost-btn">◌ 알림</button>
-        </div>
-        <p className="tiny-note">{data.featuredEvent.meta}</p>
-      </SectionCard>
-
-      <SectionCard>
-        <p className="tiny-label">오늘의 3분 학습</p>
-        <h3>{data.learning.title}</h3>
-        <p className="muted-sm">{data.learning.progress}%</p>
-        <ProgressBar value={data.learning.progress} />
-        <button className="primary-btn full">이어서 학습하기</button>
-      </SectionCard>
-
-      <SectionCard>
-        <h3>내 관심자산 영향</h3>
-        {data.watchImpacts.map((item) => (
-          <div className="asset-row" key={item.assetName}>
-            <div>
-              <p className="asset-name">{item.assetName}</p>
-              <p className="muted-sm">민감도 높음</p>
-            </div>
-            <span className={`signal-badge ${item.tone}`}>{item.signalText}</span>
-          </div>
-        ))}
-      </SectionCard>
-
-      <SectionCard>
-        <h3>세 가지 인사이트</h3>
-        <div className="insight-grid">
-          {data.threeInsights.map((card) => (
-            <article className={`insight-mini ${card.tone}`} key={card.title}>
-              <p className="insight-title">{card.title}</p>
-              <p className="insight-sub">{card.subtitle}</p>
-              <p className="insight-detail">{card.detail}</p>
+      <section className="glass-card">
+        <h3>이번 달 액션 큐</h3>
+        <p className="sub-copy">보유 ETF 기준으로 지금 확인할 정책 대응 순서예요</p>
+        <div className="queue-stack">
+          {actionQueue.map((item) => (
+            <article className="queue-item" key={item.id}>
+              <div className="row-wrap">
+                <span className="tag purple">{item.week}</span>
+                <span className="tag green">{item.linked}</span>
+              </div>
+              <h4>{item.title}</h4>
+              <p>{item.description}</p>
+              <div className={`recommend ${item.tone}`}>➜ {item.action}</div>
             </article>
           ))}
         </div>
-      </SectionCard>
+      </section>
 
-      <SectionCard>
-        <div className="row-between">
-          <h3>왜 이렇게 봤나</h3>
-          <p className="muted-sm">{data.reasons.source}</p>
-        </div>
-        {data.reasons.items.map((reason) => (
-          <div className="reason-row" key={reason.rank}>
-            <div className="reason-head">
-              <span className="reason-rank">{reason.rank}</span>
-              <span>{reason.label}</span>
+      <section className="section-title-row mt-12">
+        <h2>정책-ETF 매칭</h2>
+      </section>
+
+      <div className="match-stack">
+        {matchingItems.map((item) => (
+          <article className="glass-card match-card" key={item.id}>
+            <div className="match-main">
+              <div className="match-left">
+                <span className={`policy-icon ${item.tone}`}>{item.icon}</span>
+                <div>
+                  <p className="policy-date">{item.policy}</p>
+                  <p className="match-etf">{item.etf}</p>
+                  <p className="news-note">📈 예상 반응 {item.avg}</p>
+                </div>
+              </div>
+              <div className={`score-ring ${item.tone}`} style={{ '--score': `${item.score}` }}>
+                <span>{item.score}</span>
+              </div>
             </div>
-            <span className="reason-score">+{reason.score}</span>
-            <ProgressBar value={reason.score * 2} />
-          </div>
+            <button className="apply-btn">이번 달 포트폴리오에 반영하기</button>
+          </article>
         ))}
-        <button className="link-btn">쉬운 설명 보기 →</button>
-      </SectionCard>
-
-      <SectionCard>
-        <p className="tiny-label">어제 예측 vs 실제</p>
-        <div className="review-card">
-          <strong>미국 CPI</strong>
-          <p className="muted">핵심 물가 둔화로 장기채 반등 가능성</p>
-          <p className="result-ok">● 실제 발표 후 장기채 +1.1%, 예측 적중</p>
-        </div>
-        <button className="link-btn">복기하기</button>
-      </SectionCard>
-
-      <p className="disclaimer">본 앱은 정책 이벤트 학습용 시뮬레이터입니다. 실제 투자 판단을 사용하지 않습니다.</p>
+      </div>
     </div>
   );
 }
 
-function EventsTab({ data, segment, setSegment, category, setCategory, onToggleAlert }) {
-  const firstItem = data.items[0];
+function AssetTab({ meData, matchingItems }) {
+  const [segment, setSegment] = useState('detail');
+  const watchAssets = meData?.watchAssets || [];
+  const [weights, setWeights] = useState(() => {
+    const base = {};
+    watchAssets.slice(0, 3).forEach((asset, index) => {
+      base[index] = Math.min(45, Math.max(5, Math.round(Math.abs(asset.changePercent || 0) * 7) + 15));
+    });
+    return base;
+  });
+
+  useEffect(() => {
+    const next = {};
+    watchAssets.slice(0, 3).forEach((asset, index) => {
+      next[index] = Math.min(45, Math.max(5, Math.round(Math.abs(asset.changePercent || 0) * 7) + 15));
+    });
+    setWeights(next);
+  }, [watchAssets]);
 
   return (
-    <div className="tab-page fade-in">
-      <header className="plain-header">
-        <h1>이벤트</h1>
-      </header>
+    <div className="screen-content">
+      <div className="segment-wrap">
+        <button className={segment === 'detail' ? 'active' : ''} onClick={() => setSegment('detail')}>내 자산 상세</button>
+        <button className={segment === 'rebalance' ? 'active' : ''} onClick={() => setSegment('rebalance')}>리밸런싱</button>
+      </div>
 
-      <SectionCard>
-        <p className="muted-sm">날짜 세그먼트</p>
-        <div className="row-wrap">
-          {data.segments.map((item) => (
-            <button
-              key={item}
-              className={`segment-btn ${segment === item ? 'active' : ''}`}
-              onClick={() => setSegment(item)}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
+      {segment === 'detail' ? (
+        <>
+          <section className="glass-card">
+            <h3>내 자산 요약</h3>
+            <div className="summary-grid">
+              <div><small>연결 자산</small><strong>{watchAssets.length}개</strong></div>
+              <div><small>ETF 비중</small><strong>{Math.min(90, watchAssets.length * 12 + 20)}%</strong></div>
+              <div><small>안전자산</small><strong>{Math.max(10, 100 - (watchAssets.length * 12 + 20))}%</strong></div>
+            </div>
+            <p className="sub-copy">연결된 자산 현황을 한 번에 확인하고 리밸런싱으로 이동하세요.</p>
+          </section>
 
-        <p className="muted-sm mt-12">카테고리</p>
-        <div className="row-wrap">
-          {data.categories.map((item) => (
-            <button
-              key={item}
-              className={`segment-btn compact ${category === item ? 'active dark' : ''}`}
-              onClick={() => setCategory(item)}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-      </SectionCard>
+          <section className="glass-card">
+            <h3>보유 자산 상세</h3>
+            <div className="asset-list">
+              {watchAssets.map((item, index) => (
+                <div className="asset-line" key={`${item.assetName}-${index + 1}`}>
+                  <div className="asset-left">
+                    <span className="asset-icon">📊</span>
+                    <div>
+                      <p>{item.assetName}</p>
+                      <small>ETF</small>
+                    </div>
+                  </div>
+                  <strong>{Math.max(3, Math.round(Math.abs(item.changePercent || 0) * 8) + 10)}%</strong>
+                </div>
+              ))}
+            </div>
+          </section>
 
-      {firstItem && (
-        <SectionCard>
-          <div className="row-between">
-            <strong>{firstItem.timeText}</strong>
-            <span className="status-pill">● {firstItem.statusText || '예정'}</span>
-          </div>
-          <h2 className="event-title">{firstItem.title}</h2>
-          <div className="row-wrap">
-            {(firstItem.tags || []).map((tag) => (
-              <Chip key={tag} text={tag} tone={tag === '고용' ? 'blue' : 'default'} />
-            ))}
-            <span className="stars">{'★'.repeat(firstItem.importanceStars || 0)}{'☆'.repeat(5 - (firstItem.importanceStars || 0))}</span>
-          </div>
-          <p className="muted">○ {firstItem.countdownText}</p>
-          <div className="row-wrap">
-            {(firstItem.relatedAssets || []).map((asset) => (
-              <Chip key={asset} text={asset} tone="blue-soft" />
-            ))}
-          </div>
-          <button className="primary-btn full" onClick={() => onToggleAlert(firstItem)}>
-            {firstItem.alertEnabled ? '알림 해제' : '알림 설정'}
-          </button>
-        </SectionCard>
+          <section className="glass-card">
+            <h3>증권사앱 연결</h3>
+            <p className="sub-copy">실계좌 연결로 보유종목과 잔고를 자동 동기화할 수 있어요</p>
+            <button className="link-manage">증권사앱 연결 관리 ›</button>
+          </section>
+        </>
+      ) : (
+        <>
+          <header className="signal-header compact">
+            <h1>리밸런싱</h1>
+            <p>보유 ETF 전체 비중을 조절하고 추천 비중과 수수료 영향을 함께 확인하세요</p>
+          </header>
+
+          <section className="glass-card">
+            <h3>투자 시뮬레이터</h3>
+            <p className="sub-copy">데이터-ML 모델 신호를 반영해 리밸런싱 비중을 계산합니다.</p>
+            <div className="rebalance-stack">
+              {watchAssets.slice(0, 3).map((asset, index) => {
+                const match = matchingItems[index];
+                return (
+                  <article className="rebalance-item" key={`${asset.assetName}-${index + 1}`}>
+                    <div className="row-between">
+                      <div>
+                        <h4>{asset.assetName}</h4>
+                        <p className="sub-copy">연결 ETF</p>
+                      </div>
+                      <div className="row-wrap">
+                        <span className={`tag ${match?.tone || 'blue'}`}>추천 {Math.max(10, (weights[index] || 20) - 2)}%</span>
+                        <strong className="ratio">{weights[index] || 20}%</strong>
+                      </div>
+                    </div>
+                    <input
+                      className={`weight-slider ${match?.tone || 'blue'}`}
+                      type="range"
+                      min="0"
+                      max="45"
+                      value={weights[index] || 20}
+                      onChange={(event) => setWeights((prev) => ({ ...prev, [index]: Number(event.target.value) }))}
+                    />
+                    <div className="row-between muted-line">
+                      <span>현재 {weights[index] || 20}%</span>
+                      <span>최대 45%</span>
+                      <span className="up">예상 {(asset.changePercent || 0).toFixed(1)}%/월</span>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        </>
       )}
     </div>
   );
 }
 
-function heatmapTone(text) {
-  if (text === '매우높음') return 'tone-hot';
-  if (text === '높음') return 'tone-warm';
-  if (text === '보통') return 'tone-mid';
-  return 'tone-low';
-}
-
-function InsightTab({ data, country, setCountry }) {
-  const [view, setView] = useState('히트맵');
-
+function LeagueTab() {
   return (
-    <div className="tab-page fade-in">
-      <header className="plain-header">
-        <h1>인사이트</h1>
+    <div className="screen-content">
+      <header className="signal-header compact">
+        <h1>리그</h1>
+        <p>참여/투표/랭킹 기반 동기부여</p>
       </header>
-
-      <SectionCard>
-        <div className="row-wrap">
-          {data.views.map((item) => (
-            <button
-              key={item}
-              className={`segment-btn compact ${view === item ? 'active' : ''}`}
-              onClick={() => setView(item)}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-
-        <div className="row-wrap mt-12">
-          {data.countries.map((item) => (
-            <button
-              key={item}
-              className={`segment-btn compact ${country === item ? 'active' : ''}`}
-              onClick={() => setCountry(item)}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-      </SectionCard>
-
-      <SectionCard>
-        <h3>이벤트 유형별 자산 민감도</h3>
-        <div className="heatmap-wrap">
-          <div className="heatmap-grid header">
-            <span />
-            {data.columns.map((col) => (
-              <span key={col} className="grid-label">{col}</span>
-            ))}
-          </div>
-          {data.rows.map((row) => (
-            <div className="heatmap-grid" key={row.eventType}>
-              <span className="grid-label left">{row.eventType}</span>
-              {row.cells.map((cell, idx) => (
-                <span key={`${row.eventType}-${idx}`} className={`heat-cell ${heatmapTone(cell)}`}>
-                  {cell}
-                </span>
-              ))}
-            </div>
-          ))}
-        </div>
-
-        <div className="legend-row">
-          {['매우높음', '높음', '보통', '낮음'].map((item) => (
-            <span key={item} className="legend-item">
-              <i className={`legend-dot ${heatmapTone(item)}`} />
-              {item}
-            </span>
-          ))}
-        </div>
-      </SectionCard>
     </div>
   );
 }
 
-function MyTab({ data, onOpenNotification, onOpenAccount }) {
+function AuthGate({ mode, setMode, onSubmit, loading, error }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [nickname, setNickname] = useState('');
+
   return (
-    <div className="tab-page fade-in">
-      <SectionCard>
-        <div className="profile-row">
-          <div className="avatar">{data.profile.avatarText || 'JY'}</div>
-          <div>
-            <h3>{data.profile.name}</h3>
-            <p className="muted-sm">{data.profile.summary}</p>
+    <div className="app-bg">
+      <main className="phone-shell auth-shell">
+        <div className="dynamic-island" />
+        <div className="auth-wrap">
+          <p className="auth-kicker">PolicyLink</p>
+          <h1>환영합니다</h1>
+          <p className="auth-sub">정책 뉴스가 내 자산에 미치는 영향을 쉽게 확인해보세요.</p>
+
+          <div className="auth-segment">
+            <button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>로그인</button>
+            <button className={mode === 'signup' ? 'active' : ''} onClick={() => setMode('signup')}>회원가입</button>
           </div>
-        </div>
-      </SectionCard>
 
-      <SectionCard>
-        <h3>★ 내 관심자산</h3>
-        {data.watchAssets.map((asset) => (
-          <div className="asset-row" key={asset.assetName}>
-            <p className="asset-name">{asset.assetName}</p>
-            <strong className={asset.changePercent > 0 ? 'up' : 'down'}>
-              {asset.changePercent > 0 ? '+' : ''}{asset.changePercent}%
-            </strong>
-          </div>
-        ))}
-        <button className="link-btn">추적 중 3개 자산</button>
-      </SectionCard>
-
-      <SectionCard>
-        <h3>학습 기록</h3>
-        <div className="stats-grid">
-          {data.studyStats.map((s) => (
-            <article key={s.label}>
-              <strong>{s.value}</strong>
-              <p className="muted-sm">{s.label}</p>
-            </article>
-          ))}
-        </div>
-      </SectionCard>
-
-      <SectionCard>
-        <h3>설정</h3>
-        {data.settings.map((item, index) => (
-          <button
-            key={item.title}
-            className="setting-row"
-            onClick={() => {
-              if (item.key === 'notification' || index === 0) onOpenNotification();
-              if (item.key === 'account' || index === data.settings.length - 1) onOpenAccount();
+          <form
+            className="auth-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSubmit({ email, password, nickname });
             }}
           >
-            <span className="setting-left">
-              <span className="setting-icon">◌</span>
-              <span>
-                <strong>{item.title}</strong>
-                <p className="muted-sm">{item.description}</p>
-              </span>
-            </span>
-            <span className="chevron">›</span>
-          </button>
-        ))}
-      </SectionCard>
-
-      <p className="disclaimer">본 앱은 정책 이벤트 학습용 시뮬레이터입니다. 실제 투자 판단을 사용하지 않습니다.</p>
-    </div>
-  );
-}
-
-function AuthPanel({
-  mode,
-  setMode,
-  email,
-  setEmail,
-  nickname,
-  setNickname,
-  password,
-  setPassword,
-  loading,
-  error,
-  onSubmit,
-}) {
-  return (
-    <div className="tab-page fade-in auth-page">
-      <section className="hero-panel">
-        <div className="hero-top">
-          <strong>PolicyLink</strong>
-        </div>
-        <h1>정책 이벤트 학습</h1>
-        <p>로그인 후 개인화된 인사이트를 확인하세요.</p>
-      </section>
-
-      <SectionCard className="auth-card">
-        <h2>{mode === 'login' ? '로그인' : '회원가입'}</h2>
-        <form
-          className="auth-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit();
-          }}
-        >
-          <label>
-            이메일
-            <input value={email} onChange={(e) => setEmail(e.target.value)} />
-          </label>
-          {mode === 'register' && (
             <label>
-              닉네임
-              <input value={nickname} onChange={(e) => setNickname(e.target.value)} maxLength={20} />
+              이메일
+              <input type="text" value={email} onChange={(event) => setEmail(event.target.value)} required />
             </label>
-          )}
-          <label>
-            비밀번호
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          </label>
-          {error && <p className="form-error">{error}</p>}
-          <button className="primary-btn full" type="submit" disabled={loading}>
-            {loading ? '처리 중...' : mode === 'login' ? '로그인' : '회원가입'}
-          </button>
-        </form>
-        <button className="link-btn auth-switch" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
-          {mode === 'login' ? '계정이 없나요? 회원가입' : '이미 계정이 있나요? 로그인'}
-        </button>
-      </SectionCard>
-    </div>
-  );
-}
 
-function AccountSheet({ open, currentUser, nickname, setNickname, onClose, onSave, onLogout, loading, error }) {
-  return (
-    <>
-      <button
-        className={`sheet-overlay ${open ? 'show' : ''}`}
-        onClick={onClose}
-        aria-hidden={!open}
-        inert={open ? undefined : ''}
-        tabIndex={open ? 0 : -1}
-      />
-      <section className={`sheet ${open ? 'show' : ''}`} aria-hidden={!open} inert={open ? undefined : ''}>
-        <div className="sheet-grabber" />
-        <div className="row-between">
-          <h2>계정 설정</h2>
-          <button className="link-btn" onClick={onClose}>닫기</button>
-        </div>
-        <div className="sheet-list">
-          <div className="toggle-row account-row">
-            <span>이메일</span>
-            <strong>{currentUser?.email || '-'}</strong>
-          </div>
-          <div className="account-editor">
+            {mode === 'signup' && (
+              <label>
+                닉네임
+                <input value={nickname} onChange={(event) => setNickname(event.target.value)} required />
+              </label>
+            )}
+
             <label>
-              닉네임
-              <input value={nickname} onChange={(e) => setNickname(e.target.value)} maxLength={20} />
+              비밀번호
+              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
             </label>
-            {error && <p className="form-error">{error}</p>}
-            <button className="primary-btn full" onClick={onSave} disabled={loading}>
-              {loading ? '저장 중...' : '닉네임 저장'}
+
+            {error ? <p className="sub-copy">{error}</p> : null}
+
+            <button type="submit" className="auth-submit" disabled={loading}>
+              {loading ? '처리 중...' : mode === 'login' ? '로그인하고 시작하기' : '회원가입 후 시작하기'}
             </button>
-            <button className="ghost-btn full" onClick={onLogout}>로그아웃</button>
-          </div>
+          </form>
         </div>
-      </section>
-    </>
+      </main>
+    </div>
   );
-}
-
-function NotificationSheet({ open, settings, setSettings, onClose, onSave }) {
-  return (
-    <>
-      <button
-        className={`sheet-overlay ${open ? 'show' : ''}`}
-        onClick={onClose}
-        aria-hidden={!open}
-        inert={open ? undefined : ''}
-        tabIndex={open ? 0 : -1}
-      />
-      <section className={`sheet ${open ? 'show' : ''}`} aria-hidden={!open} inert={open ? undefined : ''}>
-        <div className="sheet-grabber" />
-        <div className="row-between">
-          <h2>알림 설정</h2>
-          <button className="link-btn" onClick={onSave}>완료</button>
-        </div>
-        <div className="sheet-list">
-          {[
-            { key: 'before30m', label: '발표 30분 전' },
-            { key: 'importantEventBriefing', label: '중요 이벤트 브리핑' },
-            { key: 'learningReminder', label: '학습 리마인드' },
-          ].map((item) => (
-            <div className="toggle-row" key={item.key}>
-              <span>{item.label}</span>
-              <button
-                className={`toggle ${settings[item.key] ? 'on' : ''}`}
-                onClick={() => setSettings((prev) => ({ ...prev, [item.key]: !prev[item.key] }))}
-              >
-                <span />
-              </button>
-            </div>
-          ))}
-        </div>
-      </section>
-    </>
-  );
-}
-
-function AssetSelectionSheet({ open, availableAssets, selectedAssets, onClose, onSelect, onConfirm }) {
-  return (
-    <>
-      <button
-        className={`sheet-overlay ${open ? 'show' : ''}`}
-        onClick={onClose}
-        aria-hidden={!open}
-        inert={open ? undefined : ''}
-        tabIndex={open ? 0 : -1}
-      />
-      <section className={`sheet ${open ? 'show' : ''}`} aria-hidden={!open} inert={open ? undefined : ''}>
-        <div className="sheet-grabber" />
-        <div className="row-between">
-          <h2>관심자산 선택</h2>
-          <button className="link-btn" onClick={onClose}>닫기</button>
-        </div>
-        <div className="sheet-list">
-          {availableAssets.map((asset) => {
-            const assetKey = asset.assetId || asset.assetName;
-            const isSelected = selectedAssets.some((s) => (s.assetId || s.assetName) === assetKey);
-            return (
-              <button
-                key={assetKey}
-                className={`asset-select-row ${isSelected ? 'selected' : ''}`}
-                onClick={() => onSelect(asset)}
-              >
-                <input type="checkbox" checked={isSelected} readOnly />
-                <div>
-                  <p className="asset-name">{asset.assetName}</p>
-                  <p className="muted-sm">{asset.changePercent > 0 ? '+' : ''}{asset.changePercent}%</p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-        <button className="primary-btn full" onClick={onConfirm} style={{ marginTop: '16px' }}>
-          선택 완료
-        </button>
-      </section>
-    </>
-  );
-}
-
-function mapHomeApiToView(data) {
-  return {
-    greeting: {
-      headline: data.userGreeting?.headline ?? data.user_greeting?.headline ?? pwaMockData.home.greeting.headline,
-      subtext: data.userGreeting?.subtext ?? data.user_greeting?.subtext ?? pwaMockData.home.greeting.subtext,
-    },
-    featuredEvent: {
-      label: data.featuredEvent?.label ?? data.featured_event?.label ?? pwaMockData.home.featuredEvent.label,
-      dday: data.featuredEvent?.dDayText ?? data.featured_event?.d_day_text ?? pwaMockData.home.featuredEvent.dday,
-      title: data.featuredEvent?.title ?? data.featured_event?.title ?? pwaMockData.home.featuredEvent.title,
-      tags: data.featuredEvent?.tags ?? data.featured_event?.tags ?? ['미국', '금리', '매우높음'],
-      summary: data.featuredEvent?.summary ?? data.featured_event?.summary ?? pwaMockData.home.featuredEvent.summary,
-      meta: data.featuredEvent?.metaText ?? data.featured_event?.meta_text ?? pwaMockData.home.featuredEvent.meta,
-    },
-    learning: {
-      title: data.learningCard?.title ?? data.learning_card?.title ?? pwaMockData.home.learning.title,
-      progress: data.learningCard?.progressPercent ?? data.learning_card?.progress_percent ?? pwaMockData.home.learning.progress,
-    },
-    watchImpacts: (data.watchAssetImpacts || data.watch_asset_impacts || pwaMockData.home.watchImpacts).map((item, idx) => {
-      const tones = ['tone-orange', 'tone-red', 'tone-green'];
-      return {
-        assetName: item.asset_name || item.assetName,
-        signalText: item.signal_text || item.signalText,
-        tone: tones[idx] || 'tone-orange',
-      };
-    }),
-    threeInsights: (data.threeInsights || data.three_insights || []).map((item, idx) => {
-      const tones = ['pink', 'orange', 'gray'];
-      return {
-        title: item.title,
-        subtitle: item.subtitle,
-        detail: item.detail,
-        tone: tones[idx] || 'gray',
-      };
-    }),
-    reasons: {
-      source: data.reasonPanel?.sourceText ?? data.reason_panel?.source_text ?? pwaMockData.home.reasons.source,
-      items: data.reasonPanel?.items ?? data.reason_panel?.items ?? pwaMockData.home.reasons.items,
-    },
-  };
-}
-
-function mapEventsApiToView(data) {
-  return {
-    segments: (data.dateSegments || data.date_segments || []).map((s) => SEGMENT_API_TO_LABEL[s] || '오늘'),
-    categories: (data.categories || []).map((c) => CATEGORY_API_TO_LABEL[c] || '전체'),
-    items: (data.items || []).map((item) => ({
-      eventId: item.eventId ?? item.event_id,
-      timeText: item.timeText ?? item.time_text,
-      title: item.title,
-      statusText: item.statusText ?? item.status_text,
-      tags: item.tags || [],
-      importanceStars: item.importanceStars ?? item.importance_stars,
-      countdownText: item.countdownText ?? item.countdown_text,
-      relatedAssets: item.relatedAssets ?? item.related_assets ?? [],
-      alertEnabled: item.alertEnabled ?? item.alert_enabled,
-    })),
-  };
-}
-
-function mapHeatmapApiToView(data) {
-  return {
-    views: (data.view_tabs || []).map((v) => {
-      if (v === 'heatmap') return '히트맵';
-      if (v === 'ranking') return '랭킹';
-      if (v === 'network') return '연결맵';
-      return v;
-    }),
-    countries: (data.country_filters || []).map((c) => COUNTRY_API_TO_LABEL[c] || '전체'),
-    columns: data.columns || pwaMockData.insight.columns,
-    rows: (data.rows || pwaMockData.insight.rows).map((row) => ({
-      eventType: row.event_type || row.eventType,
-      cells: row.cells,
-    })),
-  };
-}
-
-function mapMeApiToView(data) {
-  return {
-    profile: {
-      avatarText: data.profile?.avatarText ?? data.profile?.avatar_text ?? 'JY',
-      name: data.profile?.name ?? pwaMockData.my.profile.name,
-      summary: data.profile?.summaryText ?? data.profile?.summary_text ?? pwaMockData.my.profile.summary,
-    },
-    watchAssets: normalizeAssetList(data.watchAssets || data.watch_assets || pwaMockData.my.watchAssets),
-    studyStats: (data.studyStats || data.study_stats || pwaMockData.my.studyStats).map((stat) => ({
-      label: stat.label,
-      value: stat.valueText || stat.value_text || stat.value,
-    })),
-    settings: (data.settingsMenu || data.settings_menu || pwaMockData.my.settings).map((setting) => ({
-      key: setting.key,
-      title: setting.title,
-      description: setting.description,
-    })),
-  };
 }
 
 function App() {
-  const [currentUser, setCurrentUser] = useState(null);
+  const [activeTab, setActiveTab] = useState('home');
   const [authMode, setAuthMode] = useState('login');
-  const [authEmail, setAuthEmail] = useState('');
-  const [authNickname, setAuthNickname] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');
 
-  const [activeTab, setActiveTab] = useState('home');
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [accountSheetOpen, setAccountSheetOpen] = useState(false);
-  const [assetSheetOpen, setAssetSheetOpen] = useState(false);
-  const [profileNickname, setProfileNickname] = useState('');
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [profileError, setProfileError] = useState('');
-  const [homeData, setHomeData] = useState(pwaMockData.home);
-  const [eventsData, setEventsData] = useState({ ...pwaMockData.events, items: [{ ...pwaMockData.events.item, eventId: 101, tags: ['미국', '고용'], importanceStars: 4, alertEnabled: false, statusText: '예정' }] });
-  const [insightData, setInsightData] = useState(pwaMockData.insight);
-  const [myData, setMyData] = useState(pwaMockData.my);
-  const [segment, setSegment] = useState('내일');
-  const [category, setCategory] = useState('전체');
-  const [country, setCountry] = useState('전체');
-  const [notificationSettings, setNotificationSettings] = useState({
-    before30m: true,
-    importantEventBriefing: false,
-    learningReminder: true,
-  });
-  const [selectedAssets, setSelectedAssets] = useState(normalizeAssetList(pwaMockData.my.watchAssets));
-  const [availableAssets, setAvailableAssets] = useState(normalizeAssetList(PRESET_ASSET_OPTIONS));
-  const [aiLoading, setAiLoading] = useState(false);
+  const [homeData, setHomeData] = useState(null);
+  const [eventsData, setEventsData] = useState(null);
+  const [meData, setMeData] = useState(null);
+  const [feedData, setFeedData] = useState(null);
+  const [trainData, setTrainData] = useState(null);
+  const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('policy_user');
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed?.userId) {
-        setCurrentUser(parsed);
-        if (parsed.nickname) {
-          setProfileNickname(parsed.nickname);
-        }
-      }
-    } catch (error) {
-      localStorage.removeItem('policy_user');
+    const saved = localStorage.getItem('policy_user');
+    if (saved) {
+      setIsAuthenticated(true);
     }
   }, []);
 
   useEffect(() => {
-    if (!currentUser?.userId) {
-      return;
-    }
+    if (!isAuthenticated) return;
 
     async function bootstrap() {
+      setLoadingData(true);
       try {
-        const [homeRes, meRes, settingsRes] = await Promise.all([
-          getHome(currentUser.userId),
-          getMe(currentUser.userId),
-          getNotificationSettings(currentUser.userId),
+        const raw = localStorage.getItem('policy_user');
+        const user = raw ? JSON.parse(raw) : null;
+        const userId = user?.userId || 1;
+
+        const [homeRes, eventsRes, meRes, feedRes, trainRes] = await Promise.all([
+          getHome(userId),
+          getEvents('this_week', 'all', userId),
+          getMe(userId),
+          getPolicyFeed({ limit: 20, category: 'all', userId }),
+          trainRegression(),
         ]);
 
-        setHomeData(mapHomeApiToView(homeRes));
-        const mappedMe = mapMeApiToView(meRes);
-        setMyData(mappedMe);
-        setSelectedAssets(normalizeAssetList(mappedMe.watchAssets || []));
-        setProfileNickname(mappedMe.profile.name || currentUser.nickname || '');
-        setNotificationSettings({
-          before30m: settingsRes.before30m ?? settingsRes.before_30m,
-          importantEventBriefing: settingsRes.importantEventBriefing ?? settingsRes.important_event_briefing,
-          learningReminder: settingsRes.learningReminder ?? settingsRes.learning_reminder,
-        });
-
-        const assetsRes = await getWatchAssetOptions();
-        if (assetsRes?.assets?.length) {
-          setAvailableAssets(normalizeAssetList(assetsRes.assets));
-        } else {
-          setAvailableAssets(normalizeAssetList(PRESET_ASSET_OPTIONS));
-        }
+        setHomeData(homeRes);
+        setEventsData(eventsRes);
+        setMeData(meRes);
+        setFeedData(feedRes);
+        setTrainData(trainRes);
       } catch (error) {
-        setAvailableAssets(normalizeAssetList(PRESET_ASSET_OPTIONS));
-        console.warn('bootstrap fallback to mock data:', error);
+        console.warn(error);
+      } finally {
+        setLoadingData(false);
       }
     }
 
     bootstrap();
-  }, [currentUser]);
+  }, [isAuthenticated]);
 
-  useEffect(() => {
-    if (!currentUser?.userId) {
+  async function handleAuthSubmit({ email, password, nickname }) {
+    if (!email || !password || (authMode === 'signup' && !nickname)) {
       return;
     }
 
-    async function loadEvents() {
-      try {
-        const res = await getEvents(
-          SEGMENT_LABEL_TO_API[segment] || 'today',
-          CATEGORY_LABEL_TO_API[category] || 'all',
-          currentUser.userId,
-        );
-        const mapped = mapEventsApiToView(res);
-        if (mapped.segments.length === 0 || mapped.categories.length === 0 || mapped.items.length === 0) {
-          return;
-        }
-        setEventsData(mapped);
-      } catch (error) {
-        console.warn('events fallback to mock data:', error);
-      }
-    }
-
-    loadEvents();
-  }, [segment, category, currentUser]);
-
-  useEffect(() => {
-    async function loadHeatmap() {
-      try {
-        const res = await getHeatmap(COUNTRY_LABEL_TO_API[country] || 'all');
-        setInsightData(mapHeatmapApiToView(res));
-      } catch (error) {
-        console.warn('insight fallback to mock data:', error);
-      }
-    }
-
-    loadHeatmap();
-  }, [country]);
-
-  useEffect(() => {
-    if (sheetOpen || accountSheetOpen || assetSheetOpen) {
-      return;
-    }
-
-    const active = document.activeElement;
-    if (active instanceof HTMLElement && active.closest('.sheet')) {
-      active.blur();
-    }
-  }, [sheetOpen, accountSheetOpen, assetSheetOpen]);
-
-  const tabContent = useMemo(() => {
-    if (activeTab === 'home') return <HomeTab data={homeData} />;
-    if (activeTab === 'events') {
-      return (
-        <EventsTab
-          data={eventsData}
-          segment={segment}
-          setSegment={setSegment}
-          category={category}
-          setCategory={setCategory}
-          onToggleAlert={async (item) => {
-            try {
-              await updateEventAlert(item.eventId, !item.alertEnabled, currentUser?.userId);
-              setEventsData((prev) => ({
-                ...prev,
-                items: prev.items.map((it) => (it.eventId === item.eventId ? { ...it, alertEnabled: !it.alertEnabled } : it)),
-              }));
-            } catch (error) {
-              console.warn('failed to update event alert:', error);
-            }
-          }}
-        />
-      );
-    }
-    if (activeTab === 'insight') {
-      return <InsightTab data={insightData} country={country} setCountry={setCountry} />;
-    }
-    return <MyTab data={myData} onOpenNotification={() => setSheetOpen(true)} onOpenAccount={() => setAccountSheetOpen(true)} />;
-  }, [activeTab, homeData, eventsData, segment, category, insightData, country, myData, currentUser]);
-
-  async function handleAuthSubmit() {
     setAuthError('');
     setAuthLoading(true);
     try {
-      const data = authMode === 'login'
-        ? await login({ email: authEmail, password: authPassword })
-        : await register({ email: authEmail, nickname: authNickname, password: authPassword });
+      const response = authMode === 'login'
+        ? await login({ email, password })
+        : await register({ email, nickname, password });
 
-      const user = {
-        userId: data.userId ?? data.user_id,
-        email: data.email,
-        nickname: data.nickname,
-      };
-      localStorage.setItem('policy_user', JSON.stringify(user));
-      setCurrentUser(user);
-      setProfileNickname(data.nickname || '');
-      setAuthPassword('');
-      setAuthError('');
+      localStorage.setItem('policy_user', JSON.stringify({
+        userId: response.userId,
+        email: response.email,
+        nickname: response.nickname,
+      }));
+
+      setIsAuthenticated(true);
     } catch (error) {
-      setAuthError(error.message || '인증에 실패했습니다.');
+      setAuthError(error.message || '인증 처리에 실패했습니다.');
     } finally {
       setAuthLoading(false);
     }
   }
 
-  async function handleNicknameSave() {
-    if (!currentUser?.userId) {
-      return;
-    }
-    setProfileError('');
-    setProfileSaving(true);
-    try {
-      const res = await updateNickname(currentUser.userId, profileNickname);
-      const updatedUser = {
-        userId: res.userId ?? res.user_id,
-        email: res.email,
-        nickname: res.nickname,
-      };
-      localStorage.setItem('policy_user', JSON.stringify(updatedUser));
-      setCurrentUser(updatedUser);
-      setMyData((prev) => ({
-        ...prev,
-        profile: {
-          ...prev.profile,
-          name: res.nickname,
-        },
-      }));
-      setAccountSheetOpen(false);
-    } catch (error) {
-      setProfileError(error.message || '닉네임 저장에 실패했습니다.');
-    } finally {
-      setProfileSaving(false);
-    }
-  }
-
-  function handleLogout() {
-    localStorage.removeItem('policy_user');
-    setCurrentUser(null);
-    setActiveTab('home');
-    setAccountSheetOpen(false);
-    setAuthPassword('');
-    setAuthError('');
-  }
-
-  async function handleTriggerAI() {
-    setAiLoading(true);
-    try {
-      const result = await triggerAIEngine(currentUser?.userId);
-      const [homeRes, meRes, eventsRes] = await Promise.all([
-        getHome(currentUser?.userId),
-        getMe(currentUser?.userId),
-        getEvents(SEGMENT_LABEL_TO_API[segment] || 'today', CATEGORY_LABEL_TO_API[category] || 'all', currentUser?.userId),
-      ]);
-
-      setHomeData(mapHomeApiToView(homeRes));
-      const mappedMe = mapMeApiToView(meRes);
-      setMyData(mappedMe);
-      setSelectedAssets(normalizeAssetList(mappedMe.watchAssets || []));
-      setEventsData(mapEventsApiToView(eventsRes));
-      alert(result?.message || 'AI 엔진 트리거 완료! 알림을 전송했습니다.');
-    } catch (error) {
-      console.warn('AI trigger failed:', error);
-      alert('AI 엔진 트리거 실패. 콘솔을 확인해주세요.');
-    } finally {
-      setAiLoading(false);
-    }
-  }
-
-  function handleSelectAssets(asset) {
-    setSelectedAssets((prev) => {
-      const targetKey = asset.assetId || asset.assetName;
-      const isSelected = prev.some((a) => (a.assetId || a.assetName) === targetKey);
-      if (isSelected) {
-        return prev.filter((a) => (a.assetId || a.assetName) !== targetKey);
-      } else {
-        return [...prev, asset];
-      }
-    });
-  }
-
-  function toWatchImpacts(assets) {
-    return assets.map((asset) => ({
-      assetName: asset.assetName,
-      signalText: asset.changePercent >= 0 ? '상승확률 68%' : '하락확률 62%',
-      tone: asset.changePercent >= 0 ? 'tone-green' : 'tone-red',
+  const policyCards = useMemo(() => {
+    const cards = buildPolicyCards(feedData?.cards);
+    if (cards.length > 0) return cards;
+    const events = eventsData?.items || [];
+    return events.slice(0, 3).map((event, index) => ({
+      id: `event-${index + 1}`,
+      icon: '🏛️',
+      date: event.timeText || '일정 · 미정',
+      title: event.title || '정책 일정',
+      tone: 'blue',
+      category: '정책',
+      detail: {},
     }));
+  }, [feedData, eventsData]);
+
+  const newsCards = useMemo(() => buildNewsCards(feedData?.cards), [feedData]);
+  const actionQueue = useMemo(() => buildActionQueue(feedData?.cards), [feedData]);
+  const matchingItems = useMemo(() => buildMatchingItems(feedData?.cards), [feedData]);
+
+  if (!isAuthenticated) {
+    return <AuthGate mode={authMode} setMode={setAuthMode} onSubmit={handleAuthSubmit} loading={authLoading} error={authError} />;
   }
 
-  async function handleUpdateAssets() {
-    if (!selectedAssets.length) {
-      alert('최소 1개 자산을 선택해주세요.');
-      return;
-    }
-
-    // API 응답 실패와 무관하게 화면은 즉시 반영한다.
-    setMyData((prev) => ({
-      ...prev,
-      watchAssets: selectedAssets,
-    }));
-    setHomeData((prev) => ({
-      ...prev,
-      watchImpacts: toWatchImpacts(selectedAssets),
-      featuredEvent: {
-        ...prev.featuredEvent,
-        meta: `약 45초 · 4번의 탭 · 내 자산 ${selectedAssets.length}개 연결`,
-      },
-    }));
-    setAssetSheetOpen(false);
-
-    try {
-      await updateWatchAssets(selectedAssets.map((asset) => asset.assetName), currentUser?.userId);
-      const [homeRes, meRes] = await Promise.all([
-        getHome(currentUser?.userId),
-        getMe(currentUser?.userId),
-      ]);
-      setHomeData(mapHomeApiToView(homeRes));
-      const mappedMe = mapMeApiToView(meRes);
-      setMyData(mappedMe);
-      setSelectedAssets(normalizeAssetList(mappedMe.watchAssets || []));
-      alert('관심자산이 업데이트되었습니다.');
-    } catch (error) {
-      console.warn('watch assets update failed:', error);
-      alert('관심자산이 로컬로 반영되었습니다. 서버 저장은 실패했습니다.');
-    }
-  }
-
-  async function handleUpdateEvents() {
-    try {
-      const res = await refreshEvents(
-        SEGMENT_LABEL_TO_API[segment] || 'today',
-        CATEGORY_LABEL_TO_API[category] || 'all',
-        currentUser?.userId,
-      );
-      setEventsData(mapEventsApiToView(res));
-      alert('이벤트가 업데이트되었습니다.');
-    } catch (error) {
-      console.warn('event refresh failed:', error);
-      alert('이벤트 업데이트 실패');
-    }
-  }
-
-  if (!currentUser?.userId) {
+  if (loadingData) {
     return (
       <div className="app-bg">
-        <main className="app-shell">
-          <div className="scroll-area">
-            <AuthPanel
-              mode={authMode}
-              setMode={setAuthMode}
-              email={authEmail}
-              setEmail={setAuthEmail}
-              nickname={authNickname}
-              setNickname={setAuthNickname}
-              password={authPassword}
-              setPassword={setAuthPassword}
-              loading={authLoading}
-              error={authError}
-              onSubmit={handleAuthSubmit}
-            />
+        <main className="phone-shell">
+          <div className="dynamic-island" />
+          <div className="scroll-frame">
+            <div className="screen-content">
+              <section className="glass-card">
+                <h3>데이터 불러오는 중</h3>
+                <p className="sub-copy">merged_finbert.csv 및 학습 결과를 동기화하고 있습니다.</p>
+              </section>
+            </div>
           </div>
         </main>
       </div>
@@ -1047,86 +544,28 @@ function App() {
 
   return (
     <div className="app-bg">
-      <main className="app-shell">
-        <div className="scroll-area">{tabContent}</div>
+      <main className="phone-shell">
+        <div className="dynamic-island" />
+        <div className="scroll-frame">
+          {activeTab === 'home' && <HomeTab homeData={homeData} policyCards={policyCards} newsCards={newsCards} />}
+          {activeTab === 'signal' && <SignalTab actionQueue={actionQueue} matchingItems={matchingItems} trainingResult={trainData} />}
+          {activeTab === 'asset' && <AssetTab meData={meData} matchingItems={matchingItems} />}
+          {activeTab === 'league' && <LeagueTab />}
+        </div>
+
         <nav className="bottom-nav">
-          {TABS.map((tab) => (
+          {NAV_TABS.map((tab) => (
             <button
               key={tab.key}
-              className={`nav-item ${activeTab === tab.key ? 'active' : ''}`}
+              className={`nav-button ${activeTab === tab.key ? 'active' : ''}`}
               onClick={() => setActiveTab(tab.key)}
             >
               <span className="nav-icon">{tab.icon}</span>
-              <span>{tab.label}</span>
+              <span className="nav-label">{tab.label}</span>
             </button>
           ))}
         </nav>
       </main>
-      <div className="side-btns">
-        <button
-          className="side-btn"
-          onClick={handleTriggerAI}
-          disabled={aiLoading}
-          title="AI 엔진 트리거"
-        >
-          ⚡
-        </button>
-        <button
-          className="side-btn"
-          onClick={() => setAssetSheetOpen(true)}
-          title="관심자산 선택"
-        >
-          ★
-        </button>
-        <button
-          className="side-btn"
-          onClick={handleUpdateEvents}
-          title="이벤트 업데이트"
-        >
-          📅
-        </button>
-      </div>
-
-      <NotificationSheet
-        open={sheetOpen}
-        settings={notificationSettings}
-        setSettings={setNotificationSettings}
-        onClose={() => setSheetOpen(false)}
-        onSave={async () => {
-          try {
-            await updateNotificationSettings({
-              before30m: notificationSettings.before30m,
-              importantEventBriefing: notificationSettings.importantEventBriefing,
-              learningReminder: notificationSettings.learningReminder,
-            }, currentUser?.userId);
-          } catch (error) {
-            console.warn('failed to save notification settings:', error);
-          } finally {
-            setSheetOpen(false);
-          }
-        }}
-      />
-
-      <AccountSheet
-        open={accountSheetOpen}
-        currentUser={currentUser}
-        nickname={profileNickname}
-        setNickname={setProfileNickname}
-        onClose={() => setAccountSheetOpen(false)}
-        onSave={handleNicknameSave}
-        onLogout={handleLogout}
-        loading={profileSaving}
-        error={profileError}
-      />
-
-      <AssetSelectionSheet
-        open={assetSheetOpen}
-        availableAssets={availableAssets}
-        selectedAssets={selectedAssets}
-        onClose={() => setAssetSheetOpen(false)}
-        onSelect={handleSelectAssets}
-        onConfirm={handleUpdateAssets}
-      />
     </div>
   );
 }

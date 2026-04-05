@@ -60,20 +60,20 @@ async function request(path, options = {}) {
 }
 
 export function getHome(userId) {
-  return request(`/api/home?user_id=${resolveUserId(userId)}`);
+  return request(`/api/home?userId=${resolveUserId(userId)}`);
 }
 
 export function getEvents(dateSegment, category, userId) {
   const query = new URLSearchParams({
-    user_id: String(resolveUserId(userId)),
-    date_segment: dateSegment,
+    userId: String(resolveUserId(userId)),
+    dateSegment: dateSegment,
     category,
   });
   return request(`/api/events?${query.toString()}`);
 }
 
 export function updateEventAlert(eventId, enabled, userId) {
-  return request(`/api/events/${eventId}/alerts?user_id=${resolveUserId(userId)}`, {
+  return request(`/api/events/${eventId}/alerts?userId=${resolveUserId(userId)}`, {
     method: 'POST',
     body: JSON.stringify({ enabled }),
   });
@@ -81,29 +81,29 @@ export function updateEventAlert(eventId, enabled, userId) {
 
 export function getHeatmap(country = 'all') {
   const query = new URLSearchParams({
-    market_scope: 'all',
+    marketScope: 'all',
     country,
   });
   return request(`/api/insights/heatmap?${query.toString()}`);
 }
 
 export function getMe(userId) {
-  return request(`/api/me?user_id=${resolveUserId(userId)}`);
+  return request(`/api/me?userId=${resolveUserId(userId)}`);
 }
 
 export function getNotificationSettings(userId) {
-  return request(`/api/me/settings/notifications?user_id=${resolveUserId(userId)}`);
+  return request(`/api/me/settings/notifications?userId=${resolveUserId(userId)}`);
 }
 
 export function updateNotificationSettings(payload, userId) {
-  return request(`/api/me/settings/notifications?user_id=${resolveUserId(userId)}`, {
+  return request(`/api/me/settings/notifications?userId=${resolveUserId(userId)}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
 }
 
 export function triggerAIEngine(userId) {
-  return request(`/api/ai/trigger?user_id=${resolveUserId(userId)}`, {
+  return request(`/api/ai/trigger?userId=${resolveUserId(userId)}`, {
     method: 'POST',
   });
 }
@@ -113,20 +113,33 @@ export function getWatchAssetOptions() {
 }
 
 export function updateWatchAssets(assetNames, userId) {
-  return request(`/api/me/watch-assets?user_id=${resolveUserId(userId)}`, {
+  return request(`/api/me/watch-assets?userId=${resolveUserId(userId)}`, {
     method: 'POST',
-    body: JSON.stringify({ asset_names: assetNames }),
+    body: JSON.stringify({ assetNames }),
   });
 }
 
 export function refreshEvents(dateSegment, category, userId) {
   const query = new URLSearchParams({
-    user_id: String(resolveUserId(userId)),
-    date_segment: dateSegment,
+    userId: String(resolveUserId(userId)),
+    dateSegment: dateSegment,
     category,
   });
 
   return request(`/api/events/refresh?${query.toString()}`, {
+    method: 'POST',
+  });
+}
+
+export function getPolicyFeed(payload = {}) {
+  return request('/api/content/policy-feed', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function trainRegression() {
+  return request('/api/ai/train-regression', {
     method: 'POST',
   });
 }
