@@ -1,5 +1,6 @@
 package com.project.server.service.integration;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.server.dto.PolicyFeedDto;
 import com.project.server.exception.ApiException;
@@ -34,7 +35,7 @@ public class PolicyFeedProxyService {
     }
 
     public PolicyFeedDto.PolicyFeedResponse getPolicyFeed(PolicyFeedDto.PolicyFeedRequest requestBody) {
-        String targetUrl = normalizeBaseUrl(mlBaseUrl) + "/api/content/policy-feed";
+        String targetUrl = normalizeBaseUrl(mlBaseUrl) + "/ml/content/policy-feed";
 
         PolicyFeedDto.PolicyFeedRequest safeRequest = requestBody == null
                 ? PolicyFeedDto.PolicyFeedRequest.builder().build()
@@ -63,7 +64,9 @@ public class PolicyFeedProxyService {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "FEED-UPSTREAM-400", "ML 서비스 요청이 거부되었습니다.");
             }
 
-            return objectMapper.readValue(response.body(), PolicyFeedDto.PolicyFeedResponse.class);
+            JsonNode envelope = objectMapper.readTree(response.body());
+            JsonNode resultNode = envelope.path("result");
+            return objectMapper.treeToValue(resultNode, PolicyFeedDto.PolicyFeedResponse.class);
         } catch (CompletionException completionException) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "FEED-UPSTREAM-CONNECT", "ML 서비스에 연결할 수 없습니다.");
         } catch (ApiException apiException) {

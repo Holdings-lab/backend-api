@@ -39,7 +39,7 @@ public class AiPipelineTriggerService {
                 .build();
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:8000/test-trigger"))
+                .uri(URI.create("http://localhost:8000/ai/test-trigger"))
                 .timeout(Duration.ofSeconds(10))
                 .GET()
                 .build();

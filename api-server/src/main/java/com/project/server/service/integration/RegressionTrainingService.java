@@ -39,7 +39,7 @@ public class RegressionTrainingService {
     }
 
     public ActionDto.TrainRegressionResponse runTrainRegression() {
-        String targetUrl = normalizeBaseUrl(mlBaseUrl) + "/api/predict/run";
+        String targetUrl = normalizeBaseUrl(mlBaseUrl) + "/ml/predict/run";
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(targetUrl))
                 .timeout(REQUEST_TIMEOUT)
@@ -70,9 +70,10 @@ public class RegressionTrainingService {
             }
 
             JsonNode body = objectMapper.readTree(response.body());
-            int exitCode = body.path("return_code").asInt(-1);
-            String stdoutTail = body.path("stdout_tail").asText("");
-            String stderrTail = body.path("stderr_tail").asText("");
+            JsonNode result = body.path("result");
+            int exitCode = result.path("return_code").asInt(-1);
+            String stdoutTail = result.path("stdout_tail").asText("");
+            String stderrTail = result.path("stderr_tail").asText("");
 
             return ActionDto.TrainRegressionResponse.builder()
                     .scriptPath("data-ml/training/train_regression.py")
