@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import { login, register } from './api/authApi';
-import { getEvents, getHome, getMe, getPolicyFeed } from './api/pwaApi';
+import { getEvents, getHome, getMe, getPolicyFeed, trainRegression, triggerAIEngine } from './api/pwaApi';
 
 const NAV_TABS = [
   { key: 'home', label: '홈', icon: '🏠' },
@@ -433,6 +433,11 @@ function App() {
   const [meData, setMeData] = useState(null);
   const [feedData, setFeedData] = useState(null);
   const [trainData, setTrainData] = useState(null);
+  const [manualRunLoading, setManualRunLoading] = useState(false);
+  const [manualRunState, setManualRunState] = useState({
+    level: 'idle',
+    message: '필요할 때 CSV + 학습 + 예측 연산을 수동으로 실행할 수 있습니다.',
+  });
   const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
@@ -519,6 +524,50 @@ function App() {
     }
   }
 
+  async function handleManualPipelineRun() {
+    if (manualRunLoading) return;
+
+    setManualRunLoading(true);
+    setManualRunState({ level: 'running', message: 'CSV 수집 및 예측 파이프라인을 실행 중입니다...' });
+
+    try {
+      const startedAt = Date.now();
+      const raw = localStorage.getItem('policy_user');
+      const user = raw ? JSON.parse(raw) : null;
+      const userId = user?.userId || 1;
+
+      await triggerAIEngine(userId);
+
+      setManualRunState({ level: 'running', message: '회귀 모델 학습을 실행 중입니다...' });
+      const trainResult = await trainRegression();
+      setTrainData(trainResult);
+
+      const refreshedFeed = await getPolicyFeed({ limit: 20, category: 'all', userId });
+      setFeedData(refreshedFeed);
+
+      const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      if (trainResult?.exitCode === 0) {
+        setManualRunState({
+          level: 'success',
+          message: `수동 연산 완료 (${elapsedSeconds}초). 최신 피드를 반영했습니다.`,
+        });
+      } else {
+        setManualRunState({
+          level: 'warning',
+          message: `학습 종료코드 ${trainResult?.exitCode ?? 'unknown'} (${elapsedSeconds}초). 로그를 확인하세요.`,
+        });
+      }
+    } catch (error) {
+      console.warn(error);
+      setManualRunState({
+        level: 'error',
+        message: error?.message || '수동 연산 실행에 실패했습니다.',
+      });
+    } finally {
+      setManualRunLoading(false);
+    }
+  }
+
   const policyCards = useMemo(() => {
     const cards = buildPolicyCards(feedData?.cards);
     if (cards.length > 0) return cards;
@@ -562,29 +611,44 @@ function App() {
 
   return (
     <div className="app-bg">
-      <main className="phone-shell">
-        <div className="dynamic-island" />
-        <button type="button" className="logout-button" onClick={handleLogout}>로그아웃</button>
-        <div className="scroll-frame">
-          {activeTab === 'home' && <HomeTab homeData={homeData} policyCards={policyCards} newsCards={newsCards} />}
-          {activeTab === 'signal' && <SignalTab actionQueue={actionQueue} matchingItems={matchingItems} trainingResult={trainData} />}
-          {activeTab === 'asset' && <AssetTab meData={meData} matchingItems={matchingItems} />}
-          {activeTab === 'league' && <LeagueTab />}
-        </div>
+      <div className="phone-shell-wrap">
+        <aside className="manual-run-panel">
+          <p className="manual-run-title">수동 연산</p>
+          <button
+            type="button"
+            className="manual-run-button"
+            onClick={handleManualPipelineRun}
+            disabled={manualRunLoading}
+          >
+            {manualRunLoading ? '실행 중...' : 'CSV + 학습 + 예측'}
+          </button>
+          <p className={`manual-run-message ${manualRunState.level}`}>{manualRunState.message}</p>
+        </aside>
 
-        <nav className="bottom-nav">
-          {NAV_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              className={`nav-button ${activeTab === tab.key ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              <span className="nav-icon">{tab.icon}</span>
-              <span className="nav-label">{tab.label}</span>
-            </button>
-          ))}
-        </nav>
-      </main>
+        <main className="phone-shell">
+          <div className="dynamic-island" />
+          <button type="button" className="logout-button" onClick={handleLogout}>로그아웃</button>
+          <div className="scroll-frame">
+            {activeTab === 'home' && <HomeTab homeData={homeData} policyCards={policyCards} newsCards={newsCards} />}
+            {activeTab === 'signal' && <SignalTab actionQueue={actionQueue} matchingItems={matchingItems} trainingResult={trainData} />}
+            {activeTab === 'asset' && <AssetTab meData={meData} matchingItems={matchingItems} />}
+            {activeTab === 'league' && <LeagueTab />}
+          </div>
+
+          <nav className="bottom-nav">
+            {NAV_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                className={`nav-button ${activeTab === tab.key ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                <span className="nav-icon">{tab.icon}</span>
+                <span className="nav-label">{tab.label}</span>
+              </button>
+            ))}
+          </nav>
+        </main>
+      </div>
     </div>
   );
 }
