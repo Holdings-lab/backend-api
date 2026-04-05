@@ -1,0 +1,342 @@
+{
+  "info": {
+    "name": "Holdings-lab Backend APIs",
+    "_postman_id": "7c3f2b7c-f56f-4e99-b8f1-3f8e9e2ea223",
+    "description": "api-server (/api), ai-engine (/ai), data-ml (/ml) endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "apiBaseUrl", "value": "http://localhost:8080" },
+    { "key": "aiBaseUrl", "value": "http://localhost:8000" },
+    { "key": "mlBaseUrl", "value": "http://localhost:9000" },
+    { "key": "userId", "value": "1" },
+    { "key": "eventId", "value": "101" },
+    { "key": "webhookSecret", "value": "CHANGE_ME" }
+  ],
+  "item": [
+    {
+      "name": "API Server - Health/Home/Events/Insights/Me",
+      "item": [
+        {
+          "name": "GET /api/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/health"
+          }
+        },
+        {
+          "name": "GET /api/home",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/home?userId={{userId}}"
+          }
+        },
+        {
+          "name": "GET /api/events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/events?userId={{userId}}&dateSegment=today&category=all"
+          }
+        },
+        {
+          "name": "POST /api/events/refresh",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/events/refresh?userId={{userId}}&dateSegment=today&category=all"
+          }
+        },
+        {
+          "name": "POST /api/events/{eventId}/alerts",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true\n}"
+            },
+            "url": "{{apiBaseUrl}}/api/events/{{eventId}}/alerts?userId={{userId}}"
+          }
+        },
+        {
+          "name": "GET /api/insights/heatmap",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/insights/heatmap?marketScope=all&country=all"
+          }
+        },
+        {
+          "name": "GET /api/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/me?userId={{userId}}"
+          }
+        },
+        {
+          "name": "GET /api/me/settings/notifications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/me/settings/notifications?userId={{userId}}"
+          }
+        },
+        {
+          "name": "PATCH /api/me/settings/notifications",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"before30m\": true,\n  \"importantEventBriefing\": true,\n  \"learningReminder\": false\n}"
+            },
+            "url": "{{apiBaseUrl}}/api/me/settings/notifications?userId={{userId}}"
+          }
+        },
+        {
+          "name": "GET /api/me/watch-assets/options",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/me/watch-assets/options"
+          }
+        },
+        {
+          "name": "POST /api/me/watch-assets",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assetNames\": [\"QQQ\", \"TLT\", \"SPY\"]\n}"
+            },
+            "url": "{{apiBaseUrl}}/api/me/watch-assets?userId={{userId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "API Server - Auth",
+      "item": [
+        {
+          "name": "POST /api/auth/register",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"nickname\": \"tester\",\n  \"password\": \"test1234\"\n}"
+            },
+            "url": "{{apiBaseUrl}}/api/auth/register"
+          }
+        },
+        {
+          "name": "POST /api/auth/login",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"test1234\"\n}"
+            },
+            "url": "{{apiBaseUrl}}/api/auth/login"
+          }
+        },
+        {
+          "name": "POST /api/auth/register-fcm-token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": {{userId}},\n  \"fcmToken\": \"sample_fcm_token_1234567890\"\n}"
+            },
+            "url": "{{apiBaseUrl}}/api/auth/register-fcm-token"
+          }
+        },
+        {
+          "name": "PATCH /api/auth/users/{userId}/nickname",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nickname\": \"new-nickname\"\n}"
+            },
+            "url": "{{apiBaseUrl}}/api/auth/users/{{userId}}/nickname"
+          }
+        },
+        {
+          "name": "DELETE /api/auth/delete/{userId}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/auth/delete/{{userId}}"
+          }
+        },
+        {
+          "name": "GET /api/auth/accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/auth/accounts"
+          }
+        }
+      ]
+    },
+    {
+      "name": "API Server - Integration/Content/Webhook",
+      "item": [
+        {
+          "name": "POST /api/ai/trigger",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/ai/trigger?userId={{userId}}"
+          }
+        },
+        {
+          "name": "POST /api/ai/train-regression",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/ai/train-regression"
+          }
+        },
+        {
+          "name": "POST /api/content/policy-feed",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"limit\": 10,\n  \"category\": \"all\",\n  \"userId\": {{userId}},\n  \"dateFrom\": \"\",\n  \"dateTo\": \"\"\n}"
+            },
+            "url": "{{apiBaseUrl}}/api/content/policy-feed"
+          }
+        },
+        {
+          "name": "POST /api/internal/webhook/event",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Webhook-Secret", "value": "{{webhookSecret}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": {{eventId}},\n  \"keyword\": \"fomc\"\n}"
+            },
+            "url": "{{apiBaseUrl}}/api/internal/webhook/event"
+          }
+        }
+      ]
+    },
+    {
+      "name": "AI Engine (direct)",
+      "item": [
+        {
+          "name": "GET /ai/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{aiBaseUrl}}/ai/health"
+          }
+        },
+        {
+          "name": "GET /ai/test-trigger",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{aiBaseUrl}}/ai/test-trigger"
+          }
+        },
+        {
+          "name": "GET /ai/events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{aiBaseUrl}}/ai/events"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Data-ML (direct)",
+      "item": [
+        {
+          "name": "GET /ml/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mlBaseUrl}}/ml/health"
+          }
+        },
+        {
+          "name": "POST /ml/crawl/run",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{mlBaseUrl}}/ml/crawl/run"
+          }
+        },
+        {
+          "name": "POST /ml/predict/run",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{mlBaseUrl}}/ml/predict/run"
+          }
+        },
+        {
+          "name": "POST /ml/content/policy-feed",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"limit\": 10,\n  \"category\": \"all\",\n  \"userId\": {{userId}},\n  \"dateFrom\": \"\",\n  \"dateTo\": \"\"\n}"
+            },
+            "url": "{{mlBaseUrl}}/ml/content/policy-feed"
+          }
+        },
+        {
+          "name": "POST /ml/signal",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"now\",\n  \"source\": \"postman\"\n}"
+            },
+            "url": "{{mlBaseUrl}}/ml/signal"
+          }
+        }
+      ]
+    }
+  ]
+}
