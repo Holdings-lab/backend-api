@@ -19,6 +19,7 @@ load_dotenv(Path(__file__).resolve().with_name(".env"))
 
 app = Flask(__name__)
 run_lock = Lock()
+ML_PREFIX = "/ml"
 BASE_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
 MERGED_FINBERT_PATH = BASE_DIR / "merged_finbert.csv"
@@ -33,6 +34,38 @@ def _safe_json_load(path: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def _success_response(result=None, message="요청에 성공했습니다.", code="SUCCESS-200"):
+    return jsonify(
+        {
+            "isSuccess": True,
+            "code": code,
+            "message": message,
+            "result": {} if result is None else result,
+        }
+    )
+
+
+def _error_response(message="요청에 실패했습니다.", code="FAIL-001", status_code=500):
+    return (
+        jsonify(
+            {
+                "isSuccess": False,
+                "code": code,
+                "message": message,
+            }
+        ),
+        status_code,
+    )
+
+
+def _remove_message_fields(value):
+    if isinstance(value, dict):
+        return {k: _remove_message_fields(v) for k, v in value.items() if k != "message"}
+    if isinstance(value, list):
+        return [_remove_message_fields(item) for item in value]
+    return value
 
 
 def _safe_float(value, default=None):
@@ -361,49 +394,52 @@ def run_pipeline() -> dict:
 scheduler = build_scheduler(run_pipeline)
 
 
-@app.get("/health")
+@app.get(f"{ML_PREFIX}/health")
 def health():
-    return jsonify(
+    return _success_response(
         {
             "status": "healthy",
             "scheduler_running": scheduler.running,
             "timestamp": datetime.utcnow().isoformat() + "Z",
-        }
+        },
+        message="데이터-ML 헬스체크에 성공했습니다.",
     )
 
 
-@app.post("/api/crawl/run")
+@app.post(f"{ML_PREFIX}/crawl/run")
 def run_crawl_endpoint():
     if not run_lock.acquire(blocking=False):
-        return jsonify({"status": "busy", "message": "이미 다른 작업이 실행 중입니다."}), 409
+        return _error_response("이미 다른 작업이 실행 중입니다.", status_code=409)
     try:
         result = run_crawl_now()
-        code = 200 if result.get("status") in {"success", "skipped"} else 500
-        return jsonify(result), code
+        if result.get("status") in {"success", "skipped"}:
+            return _success_response(_remove_message_fields(result), message="크롤링 실행에 성공했습니다.")
+        return _error_response(status_code=500)
     finally:
         run_lock.release()
 
 
-@app.post("/api/predict/run")
+@app.post(f"{ML_PREFIX}/predict/run")
 def run_predict_endpoint():
     if not run_lock.acquire(blocking=False):
-        return jsonify({"status": "busy", "message": "이미 다른 작업이 실행 중입니다."}), 409
+        return _error_response("이미 다른 작업이 실행 중입니다.", status_code=409)
     try:
         result = run_prediction_now()
-        code = 200 if result.get("status") == "success" else 500
-        return jsonify(result), code
+        if result.get("status") == "success":
+            return _success_response(_remove_message_fields(result), message="예측 실행에 성공했습니다.")
+        return _error_response(status_code=500)
     finally:
         run_lock.release()
 
 
-@app.post("/api/content/policy-feed")
+@app.post(f"{ML_PREFIX}/content/policy-feed")
 def policy_feed_endpoint():
     payload = request.get_json(silent=True) or {}
     result = _build_policy_feed(payload)
-    return jsonify(result), 200
+    return _success_response(_remove_message_fields(result), message="정책 피드 생성에 성공했습니다.")
 
 
-@app.post("/api/signal")
+@app.post(f"{ML_PREFIX}/signal")
 def signal_endpoint():
     """외부 신호 수신 즉시 파이프라인 실행.
 
@@ -416,9 +452,12 @@ def signal_endpoint():
     payload = request.get_json(silent=True) or {}
     result = run_pipeline()
     result["signal"] = payload
-    code = 200 if result.get("status") == "success" else 409 if result.get("status") == "busy" else 500
-    return jsonify(result), code
+    if result.get("status") == "success":
+        return _success_response(_remove_message_fields(result), message="외부 신호 기반 파이프라인 실행에 성공했습니다.")
+    if result.get("status") == "busy":
+        return _error_response("이미 다른 작업이 실행 중입니다.", status_code=409)
+    return _error_response(status_code=500)
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("ML_API_PORT", "9000")), debug=False)
+    app.run(host="0.0.0.0", port=int(os.getenv("ML_API_PORT", "9000")), debug=False, use_reloader=False)
