@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import { login, register } from './api/authApi';
-import { getEvents, getHome, getMe, getPolicyFeed, trainRegression } from './api/pwaApi';
+import { getEvents, getHome, getMe, getPolicyFeed } from './api/pwaApi';
 
 const NAV_TABS = [
   { key: 'home', label: '홈', icon: '🏠' },
@@ -195,7 +195,7 @@ function SignalTab({ actionQueue, matchingItems, trainingResult }) {
       <header className="signal-header">
         <h1>시그널 센터</h1>
         <p>정책이 만드는 투자 기회를 포착하세요</p>
-        <p>학습 실행 상태: {trainingResult?.exitCode === 0 ? '정상' : '확인 필요'}</p>
+        {trainingResult ? <p>학습 실행 상태: {trainingResult?.exitCode === 0 ? '정상' : '확인 필요'}</p> : null}
       </header>
 
       <section className="glass-card">
@@ -452,19 +452,23 @@ function App() {
         const user = raw ? JSON.parse(raw) : null;
         const userId = user?.userId || 1;
 
-        const [homeRes, eventsRes, meRes, feedRes, trainRes] = await Promise.all([
+        const [homeRes, eventsRes, meRes, feedRes] = await Promise.allSettled([
           getHome(userId),
           getEvents('this_week', 'all', userId),
           getMe(userId),
           getPolicyFeed({ limit: 20, category: 'all', userId }),
-          trainRegression(),
         ]);
 
-        setHomeData(homeRes);
-        setEventsData(eventsRes);
-        setMeData(meRes);
-        setFeedData(feedRes);
-        setTrainData(trainRes);
+        if (homeRes.status === 'fulfilled') setHomeData(homeRes.value);
+        if (eventsRes.status === 'fulfilled') setEventsData(eventsRes.value);
+        if (meRes.status === 'fulfilled') setMeData(meRes.value);
+        if (feedRes.status === 'fulfilled') setFeedData(feedRes.value);
+
+        [homeRes, eventsRes, meRes, feedRes].forEach((result) => {
+          if (result.status === 'rejected') {
+            console.warn(result.reason);
+          }
+        });
       } catch (error) {
         console.warn(error);
       } finally {
@@ -474,6 +478,20 @@ function App() {
 
     bootstrap();
   }, [isAuthenticated]);
+
+  function handleLogout() {
+    localStorage.removeItem('policy_user');
+    setIsAuthenticated(false);
+    setAuthMode('login');
+    setAuthError('');
+    setActiveTab('home');
+    setHomeData(null);
+    setEventsData(null);
+    setMeData(null);
+    setFeedData(null);
+    setTrainData(null);
+    setLoadingData(true);
+  }
 
   async function handleAuthSubmit({ email, password, nickname }) {
     if (!email || !password || (authMode === 'signup' && !nickname)) {
@@ -546,6 +564,7 @@ function App() {
     <div className="app-bg">
       <main className="phone-shell">
         <div className="dynamic-island" />
+        <button type="button" className="logout-button" onClick={handleLogout}>로그아웃</button>
         <div className="scroll-frame">
           {activeTab === 'home' && <HomeTab homeData={homeData} policyCards={policyCards} newsCards={newsCards} />}
           {activeTab === 'signal' && <SignalTab actionQueue={actionQueue} matchingItems={matchingItems} trainingResult={trainData} />}

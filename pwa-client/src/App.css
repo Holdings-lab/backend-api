@@ -32,6 +32,25 @@
   z-index: 4;
 }
 
+.logout-button {
+  position: absolute;
+  top: 16px;
+  right: 14px;
+  z-index: 7;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid rgba(126, 145, 217, 0.38);
+  background: rgba(20, 31, 74, 0.82);
+  color: #dce7ff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 12px;
+}
+
+.logout-button:hover {
+  background: rgba(33, 48, 103, 0.9);
+}
+
 .scroll-frame {
   height: 100%;
   overflow: auto;
