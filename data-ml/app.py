@@ -44,6 +44,14 @@ DEFAULT_POLICY_FEED_PAYLOAD = {
     "userId": int(os.getenv("POLICY_FEED_PREWARM_USER_ID", "1")),
 }
 
+POSTGRES_CONFIG = {
+    "host": os.getenv("POSTGRES_HOST", "localhost"),
+    "port": int(os.getenv("POSTGRES_PORT", "5432")),
+    "dbname": os.getenv("POSTGRES_DB", "pwa_db"),
+    "user": os.getenv("POSTGRES_USER", "postgres"),
+    "password": os.getenv("POSTGRES_PASSWORD", "password"),
+}
+
 
 def _current_day_key() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d")
@@ -126,6 +134,54 @@ def _set_cached_policy_feed(payload: dict, result: dict):
             "result": deepcopy(result),
         }
     _save_policy_feed_snapshot(payload, result)
+    _upsert_policy_feed_snapshot_to_postgres(payload, result)
+
+
+def _upsert_policy_feed_snapshot_to_postgres(payload: dict, result: dict):
+    connection = None
+    cursor = None
+    try:
+        import importlib
+        psycopg2 = importlib.import_module("psycopg2")
+
+        connection = psycopg2.connect(**POSTGRES_CONFIG)
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO ml_policy_feed_snapshot (
+                feed_limit,
+                category,
+                date_from,
+                date_to,
+                user_id,
+                result_json,
+                generated_at,
+                updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s::jsonb, NOW(), NOW())
+            ON CONFLICT (feed_limit, category, date_from, date_to, user_id)
+            DO UPDATE SET
+                result_json = EXCLUDED.result_json,
+                generated_at = NOW(),
+                updated_at = NOW()
+            """,
+            (
+                int(payload.get("limit") or 20),
+                _safe_str(payload.get("category"), "all"),
+                _safe_str(payload.get("dateFrom"), ""),
+                _safe_str(payload.get("dateTo"), ""),
+                _safe_int(payload.get("userId"), 1),
+                json.dumps(result, ensure_ascii=False),
+            ),
+        )
+        connection.commit()
+    except Exception as error:
+        app.logger.warning("policy-feed postgres upsert failed: %s", error)
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None:
+            connection.close()
 
 
 def _build_and_cache_policy_feed(payload: dict) -> dict:
