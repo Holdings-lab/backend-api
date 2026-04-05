@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 import subprocess
+import sys
 
 
 def run_prediction_now() -> dict:
@@ -19,13 +20,17 @@ def run_prediction_now() -> dict:
 
     env = dict(**os.environ)
     env["MPLBACKEND"] = "Agg"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
 
     completed = subprocess.run(
-        ["python", str(script_path)],
+        [sys.executable, str(script_path)],
         cwd=str(base_dir),
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
     return {
