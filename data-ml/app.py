@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
+from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -19,12 +22,134 @@ load_dotenv(Path(__file__).resolve().with_name(".env"))
 
 app = Flask(__name__)
 run_lock = Lock()
+policy_feed_cache_lock = Lock()
 ML_PREFIX = "/ml"
 BASE_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
 MERGED_FINBERT_PATH = BASE_DIR / "merged_finbert.csv"
 MODEL_METADATA_PATH = TRAINING_DIR / "qqq_model_metadata.json"
 TRAINING_SUMMARY_PATH = TRAINING_DIR / "qqq_training_summary.json"
+POLICY_FEED_SNAPSHOT_DIR = BASE_DIR / "cache" / "policy_feed"
+policy_feed_cache = {
+    "day_key": datetime.utcnow().strftime("%Y-%m-%d"),
+    "signal_revision": 0,
+    "items": {},
+}
+policy_feed_warmup_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="policy-feed-warmup")
+DEFAULT_POLICY_FEED_PAYLOAD = {
+    "limit": int(os.getenv("POLICY_FEED_PREWARM_LIMIT", "20")),
+    "category": os.getenv("POLICY_FEED_PREWARM_CATEGORY", "all"),
+    "dateFrom": "",
+    "dateTo": "",
+    "userId": int(os.getenv("POLICY_FEED_PREWARM_USER_ID", "1")),
+}
+
+
+def _current_day_key() -> str:
+    return datetime.utcnow().strftime("%Y-%m-%d")
+
+
+def _normalize_policy_feed_payload(payload: dict) -> dict:
+    return {
+        "limit": int(payload.get("limit") or 20),
+        "category": _safe_str(payload.get("category"), "all"),
+        "dateFrom": _safe_str(payload.get("dateFrom"), ""),
+        "dateTo": _safe_str(payload.get("dateTo"), ""),
+        "userId": _safe_int(payload.get("userId"), 1),
+    }
+
+
+def _policy_feed_cache_key(payload: dict) -> str:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _policy_feed_snapshot_path(payload: dict) -> Path:
+    cache_key = _policy_feed_cache_key(payload)
+    digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()
+    return POLICY_FEED_SNAPSHOT_DIR / f"{digest}.json"
+
+
+def _save_policy_feed_snapshot(payload: dict, result: dict):
+    try:
+        POLICY_FEED_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        target_path = _policy_feed_snapshot_path(payload)
+        target_path.write_text(
+            json.dumps(result, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as error:
+        app.logger.warning("policy-feed snapshot save failed: %s", error)
+
+
+def _load_policy_feed_snapshot(payload: dict):
+    try:
+        target_path = _policy_feed_snapshot_path(payload)
+        if not target_path.exists():
+            return None
+        return json.loads(target_path.read_text(encoding="utf-8"))
+    except Exception as error:
+        app.logger.warning("policy-feed snapshot load failed: %s", error)
+        return None
+
+
+def _invalidate_policy_feed_cache(reason: str):
+    with policy_feed_cache_lock:
+        policy_feed_cache["signal_revision"] += 1
+        policy_feed_cache["items"].clear()
+    app.logger.info("policy-feed cache invalidated: %s", reason)
+
+
+def _get_cached_policy_feed(payload: dict):
+    day_key = _current_day_key()
+    cache_key = _policy_feed_cache_key(payload)
+
+    with policy_feed_cache_lock:
+        if policy_feed_cache["day_key"] != day_key:
+            policy_feed_cache["day_key"] = day_key
+            policy_feed_cache["items"].clear()
+
+        entry = policy_feed_cache["items"].get(cache_key)
+        if entry is None:
+            return None
+
+        if entry.get("signal_revision") != policy_feed_cache["signal_revision"]:
+            return None
+
+        return deepcopy(entry.get("result"))
+
+
+def _set_cached_policy_feed(payload: dict, result: dict):
+    cache_key = _policy_feed_cache_key(payload)
+    with policy_feed_cache_lock:
+        policy_feed_cache["items"][cache_key] = {
+            "signal_revision": policy_feed_cache["signal_revision"],
+            "result": deepcopy(result),
+        }
+    _save_policy_feed_snapshot(payload, result)
+
+
+def _build_and_cache_policy_feed(payload: dict) -> dict:
+    normalized_payload = _normalize_policy_feed_payload(payload)
+    cached = _get_cached_policy_feed(normalized_payload)
+    if cached is not None:
+        return cached
+
+    result = _build_policy_feed(normalized_payload)
+    _set_cached_policy_feed(normalized_payload, result)
+    return result
+
+
+def _prewarm_policy_feed_cache(reason: str, payload: dict | None = None):
+    target_payload = _normalize_policy_feed_payload(payload or DEFAULT_POLICY_FEED_PAYLOAD)
+    try:
+        _build_and_cache_policy_feed(target_payload)
+        app.logger.info("policy-feed cache prewarmed: %s", reason)
+    except Exception as error:
+        app.logger.warning("policy-feed prewarm failed (%s): %s", reason, error)
+
+
+def _schedule_policy_feed_warmup(reason: str, payload: dict | None = None):
+    policy_feed_warmup_executor.submit(_prewarm_policy_feed_cache, reason, payload)
 
 
 def _safe_json_load(path: Path) -> dict:
@@ -368,6 +493,50 @@ def _build_policy_feed(payload: dict) -> dict:
     }
 
 
+def _empty_policy_feed_response(payload: dict, status: str = "warming") -> dict:
+    return {
+        "feedType": "policy_news_with_model_signal",
+        "generatedAt": datetime.utcnow().isoformat() + "Z",
+        "status": status,
+        "source": {
+            "dataset": "merged_finbert",
+            "modelTarget": "QQQ",
+            "modelVersion": "qqq-xgb",
+        },
+        "summary": {
+            "totalCount": 0,
+            "positiveCount": 0,
+            "negativeCount": 0,
+            "neutralCount": 0,
+            "overallSentiment": "neutral",
+            "overallSentimentScore": 0.0,
+            "latestDate": None,
+            "topCategories": [],
+        },
+        "model": {
+            "targetTicker": "QQQ",
+            "bestHorizonDays": None,
+            "bestFeatures": [],
+            "metrics": {},
+            "thresholdPerformance": [],
+            "topFeatureImportance": [],
+        },
+        "filters": {
+            "categories": ["BIS", "FOMC", "White House"],
+            "docTypes": ["press_release", "statement", "minutes"],
+            "dateRange": {
+                "from": _safe_str(payload.get("dateFrom"), None),
+                "to": _safe_str(payload.get("dateTo"), None),
+            },
+            "sentimentRange": {
+                "min": -1,
+                "max": 1,
+            },
+        },
+        "cards": [],
+    }
+
+
 def run_pipeline() -> dict:
     if not run_lock.acquire(blocking=False):
         return {
@@ -392,6 +561,19 @@ def run_pipeline() -> dict:
 
 
 scheduler = build_scheduler(run_pipeline)
+
+# 하루 1회 캐시를 새로 계산해 첫 요청 지연을 줄인다.
+scheduler.add_job(
+    lambda: _schedule_policy_feed_warmup("daily-refresh"),
+    trigger="cron",
+    hour=int(os.getenv("POLICY_FEED_WARMUP_HOUR", "0")),
+    minute=int(os.getenv("POLICY_FEED_WARMUP_MINUTE", "5")),
+    id="policy_feed_daily_prewarm",
+    replace_existing=True,
+)
+
+# 서버 시작 후 즉시 기본 정책 피드를 백그라운드에서 준비한다.
+_schedule_policy_feed_warmup("startup")
 
 
 @app.get(f"{ML_PREFIX}/health")
@@ -426,6 +608,8 @@ def run_predict_endpoint():
     try:
         result = run_prediction_now()
         if result.get("status") == "success":
+            _invalidate_policy_feed_cache("predict-run-success")
+            _schedule_policy_feed_warmup("predict-run-success")
             return _success_response(_remove_message_fields(result), message="예측 실행에 성공했습니다.")
         return _error_response(status_code=500)
     finally:
@@ -434,9 +618,23 @@ def run_predict_endpoint():
 
 @app.post(f"{ML_PREFIX}/content/policy-feed")
 def policy_feed_endpoint():
-    payload = request.get_json(silent=True) or {}
-    result = _build_policy_feed(payload)
-    return _success_response(_remove_message_fields(result), message="정책 피드 생성에 성공했습니다.")
+    payload = _normalize_policy_feed_payload(request.get_json(silent=True) or {})
+    cached = _get_cached_policy_feed(payload)
+    if cached is not None:
+        return _success_response(_remove_message_fields(cached), message="정책 피드 조회에 성공했습니다.")
+
+    snapshot = _load_policy_feed_snapshot(payload)
+    if snapshot is not None:
+        _set_cached_policy_feed(payload, snapshot)
+        _schedule_policy_feed_warmup("snapshot-served", payload)
+        return _success_response(_remove_message_fields(snapshot), message="저장된 정책 피드 조회에 성공했습니다.")
+
+    _schedule_policy_feed_warmup("cache-miss-request", payload)
+    return _success_response(
+        _remove_message_fields(_empty_policy_feed_response(payload, status="warming")),
+        message="정책 피드를 준비 중입니다.",
+        code="SUCCESS-202",
+    )
 
 
 @app.post(f"{ML_PREFIX}/signal")
@@ -453,6 +651,8 @@ def signal_endpoint():
     result = run_pipeline()
     result["signal"] = payload
     if result.get("status") == "success":
+        _invalidate_policy_feed_cache("signal-received")
+        _schedule_policy_feed_warmup("signal-received")
         return _success_response(_remove_message_fields(result), message="외부 신호 기반 파이프라인 실행에 성공했습니다.")
     if result.get("status") == "busy":
         return _error_response("이미 다른 작업이 실행 중입니다.", status_code=409)
