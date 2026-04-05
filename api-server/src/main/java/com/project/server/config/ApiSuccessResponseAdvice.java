@@ -2,6 +2,7 @@ package com.project.server.config;
 
 import com.project.server.dto.ApiResponse;
 import org.springframework.core.MethodParameter;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.HttpMessageConverter;
@@ -17,8 +18,11 @@ import java.util.Map;
 @RestControllerAdvice(basePackages = "com.project.server.controller")
 public class ApiSuccessResponseAdvice implements ResponseBodyAdvice<Object> {
 
-    private static final String SUCCESS_CODE = "SUCCESS-200";
-    private static final String SUCCESS_MESSAGE = "요청에 성공했습니다.";
+    private final ApiSuccessMetaResolver successMetaResolver;
+
+    public ApiSuccessResponseAdvice(ApiSuccessMetaResolver successMetaResolver) {
+        this.successMetaResolver = successMetaResolver;
+    }
 
     @Override
     public boolean supports(MethodParameter returnType, Class<? extends HttpMessageConverter<?>> converterType) {
@@ -47,6 +51,9 @@ public class ApiSuccessResponseAdvice implements ResponseBodyAdvice<Object> {
         }
 
         Object result = body == null ? Map.of() : body;
-        return ApiResponse.success(SUCCESS_CODE, SUCCESS_MESSAGE, result);
+        HttpMethod method = request.getMethod();
+        String path = request.getURI().getPath();
+        ApiSuccessMetaResolver.ApiSuccessMeta meta = successMetaResolver.resolve(method, path);
+        return ApiResponse.success(meta.code(), meta.message(), result);
     }
 }

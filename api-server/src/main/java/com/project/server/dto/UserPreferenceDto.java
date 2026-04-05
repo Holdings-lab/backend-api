@@ -11,7 +11,6 @@ public class UserPreferenceDto {
         private boolean before30m;
         private boolean importantEventBriefing;
         private boolean learningReminder;
-        private String message;
     }
 
     @Data

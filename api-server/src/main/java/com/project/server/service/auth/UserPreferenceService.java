@@ -13,7 +13,7 @@ public class UserPreferenceService {
 
     public UserPreferenceDto.NotificationSettingsResponse getNotificationSettings(Long userId) {
         UserNotificationSettingEntity settings = notificationSettingsService.getNotificationSettings(userId);
-        return mapNotificationSettings(settings, "조회 성공");
+        return mapNotificationSettings(settings);
     }
 
     public UserPreferenceDto.NotificationSettingsResponse updateNotificationSettings(
@@ -26,18 +26,16 @@ public class UserPreferenceService {
                 request.getImportantEventBriefing(),
                 request.getLearningReminder()
         );
-        return mapNotificationSettings(saved, "알림 설정이 저장되었습니다.");
+        return mapNotificationSettings(saved);
     }
 
     private UserPreferenceDto.NotificationSettingsResponse mapNotificationSettings(
-            UserNotificationSettingEntity settings,
-            String message
+            UserNotificationSettingEntity settings
     ) {
         return UserPreferenceDto.NotificationSettingsResponse.builder()
                 .before30m(settings.isBefore30m())
                 .importantEventBriefing(settings.isImportantEventBriefing())
                 .learningReminder(settings.isLearningReminder())
-                .message(message)
                 .build();
     }
 }

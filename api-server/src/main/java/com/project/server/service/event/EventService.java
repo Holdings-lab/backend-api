@@ -44,7 +44,6 @@ public class EventService {
         return EventDto.EventAlertResponse.builder()
                 .eventId(eventId)
                 .enabled(storedEnabled)
-                .message("알림 설정이 저장되었습니다.")
                 .build();
     }
 }

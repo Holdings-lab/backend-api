@@ -43,7 +43,6 @@ public class AuthDto {
         private Long userId;
         private String email;
         private String nickname;
-        private String message;
     }
 
     @Data

@@ -20,6 +20,7 @@ public class ApiSuccessMetaResolver {
             new ApiSuccessMetaRule(HttpMethod.GET, "/api/auth/accounts", "AUTH-ACCOUNTS-200", "계정 목록 조회에 성공했습니다."),
 
             new ApiSuccessMetaRule(HttpMethod.GET, "/api/home", "HOME-GET-200", "홈 정보 조회에 성공했습니다."),
+                new ApiSuccessMetaRule(HttpMethod.GET, "/api/health", "HEALTH-GET-200", "헬스체크에 성공했습니다."),
 
             new ApiSuccessMetaRule(HttpMethod.GET, "/api/events", "EVENTS-GET-200", "이벤트 목록 조회에 성공했습니다."),
             new ApiSuccessMetaRule(HttpMethod.POST, "/api/events/refresh", "EVENTS-REFRESH-200", "이벤트 새로고침에 성공했습니다."),
@@ -34,6 +35,8 @@ public class ApiSuccessMetaResolver {
             new ApiSuccessMetaRule(HttpMethod.POST, "/api/me/watch-assets", "ME-ASSET-UPDATE-200", "관심자산이 업데이트되었습니다."),
 
             new ApiSuccessMetaRule(HttpMethod.POST, "/api/ai/trigger", "AI-TRIGGER-200", "AI 파이프라인 실행에 성공했습니다."),
+                new ApiSuccessMetaRule(HttpMethod.POST, "/api/ai/train-regression", "AI-TRAIN-200", "회귀 학습 실행 요청에 성공했습니다."),
+                new ApiSuccessMetaRule(HttpMethod.POST, "/api/content/policy-feed", "CONTENT-FEED-200", "정책 피드 조회에 성공했습니다."),
             new ApiSuccessMetaRule(HttpMethod.POST, "/api/internal/webhook/event", "WEBHOOK-EVENT-200", "Webhook 처리가 완료되었습니다.")
     );
 
@@ -43,7 +46,7 @@ public class ApiSuccessMetaResolver {
                 return new ApiSuccessMeta(rule.code(), rule.message());
             }
         }
-        return new ApiSuccessMeta("SUCCESS-200", "요청이 성공했습니다.");
+        return new ApiSuccessMeta("SUCCESS-200", "요청에 성공했습니다.");
     }
 
     public record ApiSuccessMeta(String code, String message) {}

@@ -10,7 +10,8 @@ public class ActionDto {
     @Data
     @Builder
     public static class ActionResponse {
-        private String message;
+        private String action;
+        private String status;
     }
 
     @Data

@@ -34,7 +34,6 @@ public class EventDto {
     public static class EventAlertResponse {
         private Long eventId;
         private boolean enabled;
-        private String message;
     }
 
     @Data

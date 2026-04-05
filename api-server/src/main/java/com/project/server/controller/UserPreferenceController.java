@@ -58,6 +58,6 @@ public class UserPreferenceController {
             @RequestBody WatchAssetDto.UpdateWatchAssetsRequest request
     ) {
         watchAssetSelectionService.updateSelectedAssets(userId, request.getAssetNames());
-        return ResponseEntity.ok(ActionDto.ActionResponse.builder().message("관심자산이 업데이트되었습니다.").build());
+        return ResponseEntity.ok(ActionDto.ActionResponse.builder().action("watch-assets-update").status("completed").build());
     }
 }

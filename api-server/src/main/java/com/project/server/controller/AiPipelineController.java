@@ -22,7 +22,8 @@ public class AiPipelineController {
     ) {
         aiPipelineTriggerService.triggerAndUpdateFeatured(userId);
         return ResponseEntity.ok(ActionDto.ActionResponse.builder()
-                .message("AI 파이프라인 시뮬레이션 완료. 알림을 전송했습니다.")
+            .action("ai-trigger")
+            .status("completed")
                 .build());
     }
 

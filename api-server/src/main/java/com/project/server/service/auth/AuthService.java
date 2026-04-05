@@ -49,7 +49,6 @@ public class AuthService {
                 .userId(saved.getId())
                 .email(saved.getEmail())
                 .nickname(saved.getNickname())
-                .message("회원가입이 완료되었습니다.")
                 .build();
     }
 
@@ -95,7 +94,6 @@ public class AuthService {
                 .userId(user.getId())
             .email(user.getEmail())
                 .nickname(user.getNickname())
-                .message("FCM 토큰이 등록되었습니다.")
                 .build();
     }
 
@@ -113,7 +111,6 @@ public class AuthService {
                 .userId(userId)
         .email(user.getEmail())
                 .nickname(user.getNickname())
-                .message("회원 탈퇴가 완료되었습니다.")
                 .build();
     }
 
@@ -130,7 +127,6 @@ public class AuthService {
                 .userId(user.getId())
             .email(user.getEmail())
                 .nickname(user.getNickname())
-                .message("닉네임이 변경되었습니다.")
                 .build();
     }
 

@@ -46,7 +46,8 @@ public class WebhookController {
         notificationService.processPushNotification(eventId, keyword);
 
         return ResponseEntity.ok(ActionDto.ActionResponse.builder()
-            .message("Webhook 수신 후 비동기 푸시 처리가 시작되었습니다.")
+            .action("webhook-event")
+            .status("accepted")
             .build());
     }
 }
