@@ -28,7 +28,7 @@ COPY --from=builder /build/build/libs/app.jar app.jar
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:${SERVER_PORT:-8080}/health || exit 1
+  CMD curl -f http://localhost:${SERVER_PORT:-8080}/api/health || exit 1
 
 # Environment variables (can be overridden)
 ENV SERVER_PORT=8080
