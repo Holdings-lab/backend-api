@@ -54,7 +54,7 @@ services:
     networks:
       - app-network
 
-  # Python Data-ML Service (scheduler + immediate APIs)
+  # Python Data-ML Service (on-demand policy feed + batch APIs)
   data-ml:
     build:
       context: ./data-ml
@@ -69,6 +69,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       SCHEDULE_MODE: ${SCHEDULE_MODE:-hourly}
+      WEBHOOK_URL: http://api-server:8080/api/internal/webhook/event
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
     ports:
       - "9000:9000"
     healthcheck:
@@ -77,33 +79,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
-    networks:
-      - app-network
-
-  # FastAPI AI Engine
-  ai-engine:
-    build:
-      context: ./ai-engine
-      dockerfile: Dockerfile
-    container_name: pwa-ai-engine
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      api-server:
-        condition: service_started
-    environment:
-      HOST: 0.0.0.0
-      PORT: 8000
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-holdings}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      WEBHOOK_URL: http://api-server:8080/api/internal/webhook/event
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
-    ports:
-      - "8000:8000"
     networks:
       - app-network
 

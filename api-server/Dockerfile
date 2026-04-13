@@ -36,8 +36,6 @@ ENV POSTGRES_HOST=postgres
 ENV POSTGRES_PORT=5432
 ENV POSTGRES_DB=holdings
 ENV POSTGRES_USER=postgres
-ENV POSTGRES_PASSWORD=postgres
-ENV WEBHOOK_SECRET=ai-engine-secure-webhook-secret-key-2026
 
 # Expose port
 EXPOSE ${SERVER_PORT}

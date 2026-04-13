@@ -43,11 +43,24 @@ public class PolicyFeedProxyService {
         PolicyFeedDto.PolicyFeedRequest safeRequest = requestBody == null
                 ? PolicyFeedDto.PolicyFeedRequest.builder().build()
                 : requestBody;
-        int limit = safeRequest.getLimit() == null ? 20 : safeRequest.getLimit();
-        String category = isBlank(safeRequest.getCategory()) ? "all" : safeRequest.getCategory().trim();
-        String dateFrom = isBlank(safeRequest.getDateFrom()) ? "" : safeRequest.getDateFrom().trim();
-        String dateTo = isBlank(safeRequest.getDateTo()) ? "" : safeRequest.getDateTo().trim();
-        long userId = safeRequest.getUserId() == null ? 1L : safeRequest.getUserId();
+        try {
+            PolicyFeedDto.PolicyFeedResponse response = fetchPolicyFeedFromMl(safeRequest, "live-request");
+            if (response != null) {
+                return response;
+            }
+            return fallbackPolicyFeedFromDb(safeRequest, "ml-empty");
+        } catch (Exception exception) {
+            log.warn("policy-feed live fetch failed, trying DB fallback", exception);
+            return fallbackPolicyFeedFromDb(safeRequest, "ml-error");
+        }
+    }
+
+    private PolicyFeedDto.PolicyFeedResponse fallbackPolicyFeedFromDb(PolicyFeedDto.PolicyFeedRequest requestBody, String reason) {
+        int limit = requestBody.getLimit() == null ? 20 : requestBody.getLimit();
+        String category = isBlank(requestBody.getCategory()) ? "all" : requestBody.getCategory().trim();
+        String dateFrom = isBlank(requestBody.getDateFrom()) ? "" : requestBody.getDateFrom().trim();
+        String dateTo = isBlank(requestBody.getDateTo()) ? "" : requestBody.getDateTo().trim();
+        long userId = requestBody.getUserId() == null ? 1L : requestBody.getUserId();
 
         try {
             String json = jdbcTemplate.query(
@@ -75,10 +88,11 @@ public class PolicyFeedProxyService {
                 return objectMapper.treeToValue(resultNode, PolicyFeedDto.PolicyFeedResponse.class);
             }
 
-            return fetchPolicyFeedFromMl(safeRequest, "db-miss");
+            log.warn("policy-feed DB fallback empty: reason={}", reason);
+            return emptyResponse();
         } catch (Exception exception) {
-            log.warn("policy-feed DB read failed, trying ML fallback", exception);
-            return fetchPolicyFeedFromMl(safeRequest, "db-error");
+            log.warn("policy-feed DB fallback failed: reason={}", reason, exception);
+            return emptyResponse();
         }
     }
 
@@ -96,19 +110,19 @@ public class PolicyFeedProxyService {
 
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() >= 400) {
-                log.warn("policy-feed ML fallback failed: status={}, reason={}", response.statusCode(), reason);
-                return emptyResponse();
+                log.warn("policy-feed ML live request failed: status={}, reason={}", response.statusCode(), reason);
+                return null;
             }
 
             JsonNode root = objectMapper.readTree(response.body());
             JsonNode resultNode = root.has("result") ? root.get("result") : root;
             if (resultNode == null || resultNode.isNull()) {
-                return emptyResponse();
+                return null;
             }
             return objectMapper.treeToValue(resultNode, PolicyFeedDto.PolicyFeedResponse.class);
         } catch (Exception exception) {
             log.warn("policy-feed ML fallback error: reason={}", reason, exception);
-            return emptyResponse();
+            return null;
         }
     }
 

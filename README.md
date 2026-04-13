@@ -9,7 +9,7 @@ backend-api는 Holdings-lab의 백엔드 기능을 통합 관리.
 - 주요 서비스: api-server
 	- Spring Boot 기반 메인 API 서버
 	- 인증/사용자 선호, 이벤트/홈/인사이트 API, 외부 ML 연동(Webhook/Trigger), Firebase 알림 연동 담당
-- 데모/보조 구성: ai-engine, data-ml, pwa-client, postgresql, postman, scripts
+- 데모/보조 구성: data-ml, pwa-client, postgresql, postman, scripts
 	- 기능 검증, 테스트 데이터 준비, 로컬 실험/시연용 구성
 
 ## API Server
@@ -206,19 +206,15 @@ curl http://<server-address>:8080/health
 ## 🛠️ Development & Test Tools
 백엔드 기능 검증 및 학습을 위한 테스트 환경 구성 요소.
 
-### 1. ai-engine
-- 크롤링, 예측 로직, 웹훅 알림 흐름 테스트.
-- data-ml로 완전히 대체되면 제거 예정.
-
-### 2. data-ml
+### 1. data-ml
 - Holdings-lab의 data-ml 레포지토리.
 
-### 3. pwa-client
+### 2. pwa-client
 - API 연동 검증용 프론트엔드 테스트베드(Vite 기반 PWA).
 - 인증/조회/설정 API를 실제 화면 흐름에서 확인할 때 사용.
 
-### 4. postgresql
+### 3. postgresql
 - 로컬/테스트 DB 구성을 위한 PostgreSQL 설정 모음.
 
-### 5. postman
+### 4. postman
 - API 수동 테스트를 위한 Postman 컬렉션 보관.

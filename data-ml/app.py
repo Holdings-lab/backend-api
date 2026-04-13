@@ -3,24 +3,37 @@ from __future__ import annotations
 import json
 import os
 import hashlib
+import logging
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
 from copy import deepcopy
-from concurrent.futures import ThreadPoolExecutor
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 import pandas as pd
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from crawler.service import run_crawl_now
-from scheduler import build_scheduler
 from training.service import run_prediction_now
 
 load_dotenv(Path(__file__).resolve().with_name(".env"))
 
-app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Data-ML Service")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 run_lock = Lock()
 policy_feed_cache_lock = Lock()
 ML_PREFIX = "/ml"
@@ -35,14 +48,6 @@ policy_feed_cache = {
     "signal_revision": 0,
     "items": {},
 }
-policy_feed_warmup_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="policy-feed-warmup")
-DEFAULT_POLICY_FEED_PAYLOAD = {
-    "limit": int(os.getenv("POLICY_FEED_PREWARM_LIMIT", "20")),
-    "category": os.getenv("POLICY_FEED_PREWARM_CATEGORY", "all"),
-    "dateFrom": "",
-    "dateTo": "",
-    "userId": int(os.getenv("POLICY_FEED_PREWARM_USER_ID", "1")),
-}
 
 POSTGRES_CONFIG = {
     "host": os.getenv("POSTGRES_HOST", "localhost"),
@@ -51,6 +56,9 @@ POSTGRES_CONFIG = {
     "user": os.getenv("POSTGRES_USER", "postgres"),
     "password": os.getenv("POSTGRES_PASSWORD", "password"),
 }
+
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://localhost:8080/api/internal/webhook/event")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
 
 def _current_day_key() -> str:
@@ -86,7 +94,7 @@ def _save_policy_feed_snapshot(payload: dict, result: dict):
             encoding="utf-8",
         )
     except Exception as error:
-        app.logger.warning("policy-feed snapshot save failed: %s", error)
+        logger.warning("policy-feed snapshot save failed: %s", error)
 
 
 def _load_policy_feed_snapshot(payload: dict):
@@ -96,7 +104,7 @@ def _load_policy_feed_snapshot(payload: dict):
             return None
         return json.loads(target_path.read_text(encoding="utf-8"))
     except Exception as error:
-        app.logger.warning("policy-feed snapshot load failed: %s", error)
+        logger.warning("policy-feed snapshot load failed: %s", error)
         return None
 
 
@@ -104,7 +112,7 @@ def _invalidate_policy_feed_cache(reason: str):
     with policy_feed_cache_lock:
         policy_feed_cache["signal_revision"] += 1
         policy_feed_cache["items"].clear()
-    app.logger.info("policy-feed cache invalidated: %s", reason)
+    logger.info("policy-feed cache invalidated: %s", reason)
 
 
 def _get_cached_policy_feed(payload: dict):
@@ -176,12 +184,154 @@ def _upsert_policy_feed_snapshot_to_postgres(payload: dict, result: dict):
         )
         connection.commit()
     except Exception as error:
-        app.logger.warning("policy-feed postgres upsert failed: %s", error)
+        logger.warning("policy-feed postgres upsert failed: %s", error)
     finally:
         if cursor is not None:
             cursor.close()
         if connection is not None:
             connection.close()
+
+
+def _save_policy_event_to_postgres(event: dict) -> dict:
+    connection = None
+    cursor = None
+    try:
+        import importlib
+
+        psycopg2 = importlib.import_module("psycopg2")
+
+        connection = psycopg2.connect(**POSTGRES_CONFIG)
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO policy_events (
+                title,
+                keyword,
+                impact_score,
+                analysis_summary,
+                created_at
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, title, keyword, impact_score, analysis_summary, created_at
+            """,
+            (
+                _safe_str(event.get("title"), "정책 피드 분석 결과"),
+                _safe_str(event.get("keyword"), "policy-feed"),
+                float(event.get("impact_score") or 0.0),
+                _safe_str(event.get("analysis_summary"), "정책 피드 분석 결과가 저장되었습니다."),
+                event.get("created_at") or datetime.utcnow(),
+            ),
+        )
+        row = cursor.fetchone()
+        connection.commit()
+        if row is None:
+            return {}
+        columns = [column[0] for column in cursor.description or []]
+        return dict(zip(columns, row))
+    except Exception as error:
+        logger.warning("policy-event postgres insert failed: %s", error)
+        return {}
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None:
+            connection.close()
+
+
+def _send_webhook_to_api_server(event_id: int, keyword: str) -> dict:
+    if not WEBHOOK_URL:
+        return {
+            "success": False,
+            "error_type": "MissingWebhookUrl",
+            "details": "WEBHOOK_URL is not configured",
+        }
+
+    payload = json.dumps({
+        "eventId": int(event_id),
+        "keyword": _safe_str(keyword, "unknown"),
+    }).encode("utf-8")
+
+    request_obj = urllib_request.Request(
+        WEBHOOK_URL,
+        data=payload,
+        headers={
+            "X-Webhook-Secret": WEBHOOK_SECRET,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib_request.urlopen(request_obj, timeout=10) as response:
+            response_text = response.read().decode("utf-8", errors="replace")
+            logger.info("policy-feed webhook sent: event_id=%s status=%s", event_id, response.status)
+            return {
+                "success": True,
+                "status_code": response.status,
+                "response_text": response_text,
+            }
+    except urllib_error.HTTPError as error:
+        error_text = error.read().decode("utf-8", errors="replace") if error.fp else ""
+        logger.warning("policy-feed webhook HTTP error: %s", error)
+        return {
+            "success": False,
+            "error_type": type(error).__name__,
+            "status_code": error.code,
+            "details": error_text or str(error),
+        }
+    except Exception as error:
+        logger.warning("policy-feed webhook send failed: %s", error)
+        return {
+            "success": False,
+            "error_type": type(error).__name__,
+            "details": str(error),
+        }
+
+
+def _build_policy_event_from_feed(payload: dict, feed_result: dict, prediction_result: dict) -> dict:
+    cards = feed_result.get("cards") or []
+    first_card = cards[0] if cards else {}
+    summary = feed_result.get("summary") or {}
+    source = feed_result.get("source") or {}
+    model = feed_result.get("model") or {}
+    impact = (first_card.get("impact") or {}) if isinstance(first_card, dict) else {}
+
+    category = _safe_str(payload.get("category"), "all")
+    title = _safe_str(first_card.get("title"), f"{category} 정책 피드 분석 결과")
+    keyword = category if category.lower() != "all" else _safe_str(source.get("modelTarget"), "policy-feed")
+    overall_sentiment = _safe_str(summary.get("overallSentiment"), "neutral")
+    total_count = _safe_int(summary.get("totalCount"), 0)
+    best_horizon = _safe_int(model.get("bestHorizonDays"), 0)
+    predicted_strength = _safe_int((first_card.get("modelSignal") or {}).get("signalStrength"), 0)
+    impact_score = min(
+        100,
+        max(
+            0,
+            int(
+                round(
+                    abs(_safe_float(summary.get("overallSentimentScore"), 0.0) * 80)
+                    + predicted_strength * 0.2
+                    + _safe_float(impact.get("score"), 0.0) * 0.2
+                )
+            ),
+        ),
+    )
+
+    prediction_status = _safe_str(prediction_result.get("status"), "unknown")
+    analysis_summary = _safe_str(
+        impact.get("reason"),
+        f"{total_count}건의 정책 문서를 분석해 {overall_sentiment} 흐름으로 판단했습니다. "
+        f"예측 스크립트 상태는 {prediction_status}이며, 기준 horizon은 {best_horizon}일입니다."
+    )
+
+    return {
+        "title": title,
+        "keyword": keyword,
+        "impact_score": impact_score,
+        "analysis_summary": analysis_summary,
+        "created_at": datetime.utcnow(),
+    }
 
 
 def _build_and_cache_policy_feed(payload: dict) -> dict:
@@ -195,19 +345,6 @@ def _build_and_cache_policy_feed(payload: dict) -> dict:
     return result
 
 
-def _prewarm_policy_feed_cache(reason: str, payload: dict | None = None):
-    target_payload = _normalize_policy_feed_payload(payload or DEFAULT_POLICY_FEED_PAYLOAD)
-    try:
-        _build_and_cache_policy_feed(target_payload)
-        app.logger.info("policy-feed cache prewarmed: %s", reason)
-    except Exception as error:
-        app.logger.warning("policy-feed prewarm failed (%s): %s", reason, error)
-
-
-def _schedule_policy_feed_warmup(reason: str, payload: dict | None = None):
-    policy_feed_warmup_executor.submit(_prewarm_policy_feed_cache, reason, payload)
-
-
 def _safe_json_load(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -218,26 +355,22 @@ def _safe_json_load(path: Path) -> dict:
 
 
 def _success_response(result=None, message="요청에 성공했습니다.", code="SUCCESS-200"):
-    return jsonify(
-        {
-            "isSuccess": True,
-            "code": code,
-            "message": message,
-            "result": {} if result is None else result,
-        }
-    )
+    return {
+        "isSuccess": True,
+        "code": code,
+        "message": message,
+        "result": {} if result is None else result,
+    }
 
 
 def _error_response(message="요청에 실패했습니다.", code="FAIL-001", status_code=500):
-    return (
-        jsonify(
-            {
-                "isSuccess": False,
-                "code": code,
-                "message": message,
-            }
-        ),
-        status_code,
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "isSuccess": False,
+            "code": code,
+            "message": message,
+        },
     )
 
 
@@ -616,28 +749,12 @@ def run_pipeline() -> dict:
         run_lock.release()
 
 
-scheduler = build_scheduler(run_pipeline)
-
-# 하루 1회 캐시를 새로 계산해 첫 요청 지연을 줄인다.
-scheduler.add_job(
-    lambda: _schedule_policy_feed_warmup("daily-refresh"),
-    trigger="cron",
-    hour=int(os.getenv("POLICY_FEED_WARMUP_HOUR", "0")),
-    minute=int(os.getenv("POLICY_FEED_WARMUP_MINUTE", "5")),
-    id="policy_feed_daily_prewarm",
-    replace_existing=True,
-)
-
-# 서버 시작 후 즉시 기본 정책 피드를 백그라운드에서 준비한다.
-_schedule_policy_feed_warmup("startup")
-
-
 @app.get(f"{ML_PREFIX}/health")
 def health():
     return _success_response(
         {
             "status": "healthy",
-            "scheduler_running": scheduler.running,
+            "scheduler_running": False,
             "timestamp": datetime.utcnow().isoformat() + "Z",
         },
         message="데이터-ML 헬스체크에 성공했습니다.",
@@ -664,8 +781,6 @@ def run_predict_endpoint():
     try:
         result = run_prediction_now()
         if result.get("status") == "success":
-            _invalidate_policy_feed_cache("predict-run-success")
-            _schedule_policy_feed_warmup("predict-run-success")
             return _success_response(_remove_message_fields(result), message="예측 실행에 성공했습니다.")
         return _error_response(status_code=500)
     finally:
@@ -673,28 +788,44 @@ def run_predict_endpoint():
 
 
 @app.post(f"{ML_PREFIX}/content/policy-feed")
-def policy_feed_endpoint():
-    payload = _normalize_policy_feed_payload(request.get_json(silent=True) or {})
-    cached = _get_cached_policy_feed(payload)
-    if cached is not None:
-        return _success_response(_remove_message_fields(cached), message="정책 피드 조회에 성공했습니다.")
+async def policy_feed_endpoint(request: Request):
+    try:
+        request_body = await request.json()
+    except Exception:
+        request_body = {}
 
-    snapshot = _load_policy_feed_snapshot(payload)
-    if snapshot is not None:
-        _set_cached_policy_feed(payload, snapshot)
-        _schedule_policy_feed_warmup("snapshot-served", payload)
-        return _success_response(_remove_message_fields(snapshot), message="저장된 정책 피드 조회에 성공했습니다.")
+    payload = _normalize_policy_feed_payload(request_body or {})
+    if not run_lock.acquire(blocking=False):
+        return _error_response("이미 다른 작업이 실행 중입니다.", status_code=409)
 
-    _schedule_policy_feed_warmup("cache-miss-request", payload)
-    return _success_response(
-        _remove_message_fields(_empty_policy_feed_response(payload, status="warming")),
-        message="정책 피드를 준비 중입니다.",
-        code="SUCCESS-202",
-    )
+    try:
+        try:
+            prediction_result = run_prediction_now()
+            if prediction_result.get("status") != "success":
+                logger.warning("policy-feed prediction failed: %s", prediction_result)
+                return _error_response(status_code=500)
+
+            policy_feed_result = _build_policy_feed(payload)
+            _set_cached_policy_feed(payload, policy_feed_result)
+
+            policy_event = _build_policy_event_from_feed(payload, policy_feed_result, prediction_result)
+            saved_event = _save_policy_event_to_postgres(policy_event)
+            if saved_event.get("id") is not None:
+                _send_webhook_to_api_server(int(saved_event["id"]), saved_event.get("keyword", policy_event["keyword"]))
+
+            return _success_response(
+                _remove_message_fields(policy_feed_result),
+                message="정책 피드 조회에 성공했습니다.",
+            )
+        except Exception as error:
+            logger.exception("policy-feed request failed: %s", error)
+            return _error_response(status_code=500)
+    finally:
+        run_lock.release()
 
 
 @app.post(f"{ML_PREFIX}/signal")
-def signal_endpoint():
+async def signal_endpoint(request: Request):
     """외부 신호 수신 즉시 파이프라인 실행.
 
     body 예시:
@@ -703,12 +834,14 @@ def signal_endpoint():
       "source": "webhook"
     }
     """
-    payload = request.get_json(silent=True) or {}
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
     result = run_pipeline()
     result["signal"] = payload
     if result.get("status") == "success":
-        _invalidate_policy_feed_cache("signal-received")
-        _schedule_policy_feed_warmup("signal-received")
         return _success_response(_remove_message_fields(result), message="외부 신호 기반 파이프라인 실행에 성공했습니다.")
     if result.get("status") == "busy":
         return _error_response("이미 다른 작업이 실행 중입니다.", status_code=409)
@@ -716,4 +849,6 @@ def signal_endpoint():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("ML_API_PORT", "9000")), debug=False, use_reloader=False)
+    import uvicorn
+
+    uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("ML_API_PORT", "9000")), reload=False)

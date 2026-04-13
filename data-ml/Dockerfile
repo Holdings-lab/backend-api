@@ -14,11 +14,10 @@ COPY . .
 
 ENV PYTHONUNBUFFERED=1
 ENV ML_API_PORT=9000
-ENV SCHEDULE_MODE=hourly
 
 EXPOSE 9000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:9000/ml/health || exit 1
 
-CMD ["python", "app.py"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9000"]

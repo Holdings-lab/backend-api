@@ -2,12 +2,11 @@
   "info": {
     "name": "Holdings-lab Backend APIs",
     "_postman_id": "7c3f2b7c-f56f-4e99-b8f1-3f8e9e2ea223",
-    "description": "api-server (/api), ai-engine (/ai), data-ml (/ml) endpoints",
+    "description": "api-server (/api), data-ml (/ml) endpoints",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     { "key": "apiBaseUrl", "value": "http://localhost:8080" },
-    { "key": "aiBaseUrl", "value": "http://localhost:8000" },
     { "key": "mlBaseUrl", "value": "http://localhost:9000" },
     { "key": "userId", "value": "1" },
     { "key": "eventId", "value": "101" },
@@ -248,35 +247,6 @@
               "raw": "{\n  \"eventId\": {{eventId}},\n  \"keyword\": \"fomc\"\n}"
             },
             "url": "{{apiBaseUrl}}/api/internal/webhook/event"
-          }
-        }
-      ]
-    },
-    {
-      "name": "AI Engine (direct)",
-      "item": [
-        {
-          "name": "GET /ai/health",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{aiBaseUrl}}/ai/health"
-          }
-        },
-        {
-          "name": "GET /ai/test-trigger",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{aiBaseUrl}}/ai/test-trigger"
-          }
-        },
-        {
-          "name": "GET /ai/events",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{aiBaseUrl}}/ai/events"
           }
         }
       ]
