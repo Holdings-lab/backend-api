@@ -20,6 +20,7 @@ public class ApiSuccessMetaResolver {
             new ApiSuccessMetaRule(HttpMethod.GET, "/api/auth/accounts", "AUTH-ACCOUNTS-200", "계정 목록 조회에 성공했습니다."),
 
             new ApiSuccessMetaRule(HttpMethod.GET, "/api/home", "HOME-GET-200", "홈 정보 조회에 성공했습니다."),
+            new ApiSuccessMetaRule(HttpMethod.GET, "/api/home/briefing", "HOME-BRIEFING-200", "홈 브리핑 조회에 성공했습니다."),
                 new ApiSuccessMetaRule(HttpMethod.GET, "/api/health", "HEALTH-GET-200", "헬스체크에 성공했습니다."),
 
             new ApiSuccessMetaRule(HttpMethod.GET, "/api/events", "EVENTS-GET-200", "이벤트 목록 조회에 성공했습니다."),

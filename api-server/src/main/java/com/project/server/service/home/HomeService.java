@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
@@ -27,12 +28,11 @@ public class HomeService {
 
     public HomeDto.HomeResponse getHome(Long userId) {
         String name = resolveDisplayName(userId);
-        PolicyEventEntity featuredEvent = policyEventJpaRepository.findById(101L)
-                .or(() -> policyEventJpaRepository.findTopByOrderByCreatedAtDesc())
+        PolicyEventEntity featuredEvent = policyEventJpaRepository.findTopByOrderByCreatedAtDesc()
                 .orElse(null);
 
-        String featuredTitle = featuredEvent == null ? "FOMC 금리결정" : featuredEvent.getTitle();
-        String featuredSummary = featuredEvent == null ? "예상 5.25% · 발표 전" : featuredEvent.getAnalysisSummary();
+        String featuredTitle = featuredEvent == null ? "정책 이벤트 데이터 대기" : featuredEvent.getTitle();
+        String featuredSummary = featuredEvent == null ? "정책 이벤트 수집 후 요약이 표시됩니다." : featuredEvent.getAnalysisSummary();
         String dDayText = formatDDay(featuredEvent == null ? LocalDateTime.now().plusHours(2).plusMinutes(15) : featuredEvent.getCreatedAt().plusHours(24));
 
         List<UserWatchAssetEntity> watchAssets = userWatchAssetRepository.findByUserIdOrderByDisplayOrderAsc(userId);
@@ -52,6 +52,9 @@ public class HomeService {
             dDayText = featured.dDayText();
         }
 
+                List<HomeDto.InsightCard> insights = buildInsights(featuredEvent, watchAssetImpacts.size());
+                List<HomeDto.ReasonItem> reasonItems = buildReasonItems(featuredSummary);
+
         return HomeDto.HomeResponse.builder()
                 .userGreeting(HomeDto.UserGreeting.builder()
                         .displayName(name)
@@ -62,7 +65,7 @@ public class HomeService {
                         .label("오늘의 핵심 이벤트")
                         .dDayText(dDayText)
                         .title(featuredTitle)
-                        .tags(featured == null ? List.of("미국", "금리", "매우높음") : featured.tags())
+                        .tags(featured == null ? buildTags(featuredEvent) : featured.tags())
                         .summary(featuredSummary)
                         .metaText("약 45초 · 4번의 탭 · 내 자산 " + watchAssetImpacts.size() + "개 연결")
                         .build())
@@ -73,19 +76,11 @@ public class HomeService {
                         .ctaText("이어서 학습하기")
                         .build())
                 .watchAssetImpacts(watchAssetImpacts)
-                .threeInsights(List.of(
-                        HomeDto.InsightCard.builder().title("62%").subtitle("방향성").detail("성장주 하락").build(),
-                        HomeDto.InsightCard.builder().title("74%").subtitle("변동성").detail("장기채 확대").build(),
-                        HomeDto.InsightCard.builder().title("중간").subtitle("신뢰도").detail("유사 18건").build()
-                ))
+                .threeInsights(insights)
                 .reasonPanel(HomeDto.ReasonPanel.builder()
                         .title("왜 이렇게 봤나")
-                        .sourceText("Federal Reserve · 오늘 18:45 갱신")
-                        .items(List.of(
-                                HomeDto.ReasonItem.builder().rank(1).label("점도표 상향 가능성").score(40).build(),
-                                HomeDto.ReasonItem.builder().rank(2).label("서비스 물가 끈적임").score(28).build(),
-                                HomeDto.ReasonItem.builder().rank(3).label("고용 탄탄함").score(18).build()
-                        ))
+                        .sourceText("policy_events 테이블 · 최신 데이터 기반")
+                        .items(reasonItems)
                         .ctaText("쉬운 설명 보기")
                         .build())
                 .predictionReview(HomeDto.PredictionReview.builder()
@@ -121,4 +116,53 @@ public class HomeService {
         }
         return "지웅";
     }
+
+        private List<String> buildTags(PolicyEventEntity featuredEvent) {
+                if (featuredEvent == null) {
+                        return List.of("데이터대기", "정책", "기본");
+                }
+                String keyword = featuredEvent.getKeyword() == null ? "정책" : featuredEvent.getKeyword();
+                String impactTag = featuredEvent.getImpactScore() == null
+                                ? "보통"
+                                : (featuredEvent.getImpactScore() >= 70 ? "매우높음" : featuredEvent.getImpactScore() >= 50 ? "높음" : "보통");
+                return List.of("정책", keyword, impactTag);
+        }
+
+        private List<HomeDto.InsightCard> buildInsights(PolicyEventEntity featuredEvent, int linkedAssetCount) {
+                double impact = featuredEvent == null || featuredEvent.getImpactScore() == null ? 50.0 : featuredEvent.getImpactScore();
+                int direction = (int) Math.round(Math.max(5, Math.min(95, impact)));
+                int volatility = (int) Math.round(Math.max(10, Math.min(95, impact * 0.9 + linkedAssetCount * 4.0)));
+                String confidence = impact >= 75 ? "높음" : impact >= 55 ? "중간" : "낮음";
+
+                String detail = featuredEvent == null || featuredEvent.getKeyword() == null || featuredEvent.getKeyword().isBlank()
+                                ? "정책 이벤트 반영"
+                                : featuredEvent.getKeyword().toUpperCase(Locale.ROOT) + " 영향 반영";
+
+                return List.of(
+                                HomeDto.InsightCard.builder().title(direction + "%").subtitle("방향성").detail(detail).build(),
+                                HomeDto.InsightCard.builder().title(volatility + "%").subtitle("변동성").detail("관심자산 " + linkedAssetCount + "개 반영").build(),
+                                HomeDto.InsightCard.builder().title(confidence).subtitle("신뢰도").detail("DB 최신 이벤트 기반").build()
+                );
+        }
+
+        private List<HomeDto.ReasonItem> buildReasonItems(String summary) {
+                if (summary == null || summary.isBlank()) {
+                        return List.of(
+                                        HomeDto.ReasonItem.builder().rank(1).label("정책 원문 요약 반영").score(40).build(),
+                                        HomeDto.ReasonItem.builder().rank(2).label("관심 자산 민감도 반영").score(30).build(),
+                                        HomeDto.ReasonItem.builder().rank(3).label("최신 이벤트 우선순위 반영").score(20).build()
+                        );
+                }
+
+                String compact = summary.replace("\n", " ").trim();
+                String item1 = compact.length() > 18 ? compact.substring(0, 18) : compact;
+                String item2 = compact.length() > 38 ? compact.substring(18, 38) : "시장 변동성 채널 반영";
+                String item3 = compact.length() > 58 ? compact.substring(38, 58) : "관심 자산 노출도 반영";
+
+                return List.of(
+                                HomeDto.ReasonItem.builder().rank(1).label(item1).score(40).build(),
+                                HomeDto.ReasonItem.builder().rank(2).label(item2).score(28).build(),
+                                HomeDto.ReasonItem.builder().rank(3).label(item3).score(18).build()
+                );
+        }
 }
