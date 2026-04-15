@@ -43,8 +43,8 @@ public class ApiSuccessMetaResolver {
 
             // Admin APIs
             new ApiSuccessMetaRule(HttpMethod.POST, "/admin/accounts/add", "ADMIN-ACCOUNT-ADD-200", "계정이 성공적으로 추가되었습니다."),
-            new ApiSuccessMetaRule(HttpMethod.POST, "/admin/accounts/delete/*", "ADMIN-ACCOUNT-DELETE-200", "계정이 성공적으로 삭제되었습니다."),
-            new ApiSuccessMetaRule(HttpMethod.GET, "/admin/accounts/list", "ADMIN-ACCOUNT-LIST-200", "사용자 목록 조회에 성공했습니다."),
+                new ApiSuccessMetaRule(HttpMethod.DELETE, "/admin/accounts/*", "ADMIN-ACCOUNT-DELETE-200", "계정이 성공적으로 삭제되었습니다."),
+                new ApiSuccessMetaRule(HttpMethod.GET, "/admin/accounts", "ADMIN-ACCOUNT-LIST-200", "사용자 목록 조회에 성공했습니다."),
             new ApiSuccessMetaRule(HttpMethod.PATCH, "/admin/accounts/*/fcm-token", "ADMIN-FCM-UPDATE-200", "FCM 토큰이 업데이트되었습니다."),
             new ApiSuccessMetaRule(HttpMethod.POST, "/admin/accounts/change-password", "ADMIN-PASSWORD-200", "비밀번호가 변경되었습니다."),
             new ApiSuccessMetaRule(HttpMethod.POST, "/admin/notifications/send", "ADMIN-NOTIFICATION-SEND-200", "알림이 성공적으로 전송되었습니다."),

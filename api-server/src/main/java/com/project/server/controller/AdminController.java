@@ -8,6 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 /**
  * Admin API Controller
  * 관리자 전용 API로 계정 관리, 알림 전송 등의 기능을 수행합니다.
@@ -25,11 +27,11 @@ public class AdminController {
 
     // ==================== 계정 관리 ====================
 
-    /**
-     * 계정 추가 (Email 검증 우회)
-     * POST /admin/accounts/add
-     */
-    @PostMapping("/accounts/add")
+            /**
+             * 계정 추가 (Email 검증 우회)
+             * POST /admin/accounts/add
+             */
+            @PostMapping("/accounts/add")
     public ResponseEntity<AdminDto.CreateAccountResponse> createAccount(
             @Valid @RequestBody AdminDto.CreateAccountRequest request
     ) {
@@ -38,11 +40,11 @@ public class AdminController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 계정 삭제
-     * POST /admin/accounts/delete/{userId}
-     */
-    @PostMapping("/accounts/delete/{userId}")
+            /**
+             * 계정 삭제
+             * DELETE /admin/accounts/{userId}
+             */
+            @DeleteMapping("/accounts/{userId}")
     public ResponseEntity<AdminDto.DeleteAccountResponse> deleteAccount(
             @PathVariable Long userId
     ) {
@@ -53,9 +55,9 @@ public class AdminController {
 
     /**
      * 사용자 목록 조회
-     * GET /admin/accounts/list
+     * GET /admin/accounts
      */
-    @GetMapping("/accounts/list")
+    @GetMapping("/accounts")
     public ResponseEntity<AdminDto.UserListResponse> getUserList(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "100") int size
@@ -94,13 +96,13 @@ public class AdminController {
 
     // ==================== 알림 관리 ====================
 
-    /**
-     * 특정 메시지로 알림 전송
-     * POST /admin/notifications/send
-     * 
-     * userIds가 null 또는 empty면 모든 사용자에게 전송
-     */
-    @PostMapping("/notifications/send")
+            /**
+             * 특정 메시지로 알림 전송
+             * POST /admin/notifications/send
+             *
+             * userIds가 null 또는 empty면 모든 사용자에게 전송
+             */
+            @PostMapping("/notifications/send")
     public ResponseEntity<AdminDto.SendNotificationResponse> sendNotification(
             @Valid @RequestBody AdminDto.SendNotificationRequest request
     ) {
@@ -118,7 +120,7 @@ public class AdminController {
      * GET /admin/health
      */
     @GetMapping("/health")
-    public ResponseEntity<String> health() {
-        return ResponseEntity.ok("Admin API is running");
+        public ResponseEntity<Map<String, String>> health() {
+                return ResponseEntity.ok(Map.of("status", "Admin API is running"));
     }
 }
