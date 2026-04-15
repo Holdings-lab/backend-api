@@ -16,6 +16,7 @@ public class ApiSuccessMetaResolver {
             new ApiSuccessMetaRule(HttpMethod.POST, "/api/auth/login", "AUTH-LOGIN-200", "로그인에 성공했습니다."),
             new ApiSuccessMetaRule(HttpMethod.POST, "/api/auth/register-fcm-token", "AUTH-FCM-200", "FCM 토큰이 등록되었습니다."),
             new ApiSuccessMetaRule(HttpMethod.PATCH, "/api/auth/users/*/nickname", "AUTH-NICKNAME-200", "닉네임이 변경되었습니다."),
+            new ApiSuccessMetaRule(HttpMethod.POST, "/api/auth/users/*/change-password", "AUTH-PASSWORD-200", "비밀번호가 변경되었습니다."),
             new ApiSuccessMetaRule(HttpMethod.DELETE, "/api/auth/delete/*", "AUTH-DELETE-200", "회원 탈퇴가 완료되었습니다."),
             new ApiSuccessMetaRule(HttpMethod.GET, "/api/auth/accounts", "AUTH-ACCOUNTS-200", "계정 목록 조회에 성공했습니다."),
 
@@ -38,7 +39,16 @@ public class ApiSuccessMetaResolver {
             new ApiSuccessMetaRule(HttpMethod.POST, "/api/ai/trigger", "AI-TRIGGER-200", "AI 파이프라인 실행에 성공했습니다."),
                 new ApiSuccessMetaRule(HttpMethod.POST, "/api/ai/train-regression", "AI-TRAIN-200", "회귀 학습 실행 요청에 성공했습니다."),
                 new ApiSuccessMetaRule(HttpMethod.POST, "/api/content/policy-feed", "CONTENT-FEED-200", "정책 피드 조회에 성공했습니다."),
-            new ApiSuccessMetaRule(HttpMethod.POST, "/api/internal/webhook/event", "WEBHOOK-EVENT-200", "Webhook 처리가 완료되었습니다.")
+            new ApiSuccessMetaRule(HttpMethod.POST, "/api/internal/webhook/event", "WEBHOOK-EVENT-200", "Webhook 처리가 완료되었습니다."),
+
+            // Admin APIs
+            new ApiSuccessMetaRule(HttpMethod.POST, "/admin/accounts/add", "ADMIN-ACCOUNT-ADD-200", "계정이 성공적으로 추가되었습니다."),
+            new ApiSuccessMetaRule(HttpMethod.POST, "/admin/accounts/delete/*", "ADMIN-ACCOUNT-DELETE-200", "계정이 성공적으로 삭제되었습니다."),
+            new ApiSuccessMetaRule(HttpMethod.GET, "/admin/accounts/list", "ADMIN-ACCOUNT-LIST-200", "사용자 목록 조회에 성공했습니다."),
+            new ApiSuccessMetaRule(HttpMethod.PATCH, "/admin/accounts/*/fcm-token", "ADMIN-FCM-UPDATE-200", "FCM 토큰이 업데이트되었습니다."),
+            new ApiSuccessMetaRule(HttpMethod.POST, "/admin/accounts/change-password", "ADMIN-PASSWORD-200", "비밀번호가 변경되었습니다."),
+            new ApiSuccessMetaRule(HttpMethod.POST, "/admin/notifications/send", "ADMIN-NOTIFICATION-SEND-200", "알림이 성공적으로 전송되었습니다."),
+            new ApiSuccessMetaRule(HttpMethod.GET, "/admin/health", "ADMIN-HEALTH-200", "Admin API 상태 확인에 성공했습니다.")
     );
 
     public ApiSuccessMeta resolve(HttpMethod method, String path) {
