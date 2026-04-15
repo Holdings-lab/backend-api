@@ -49,6 +49,15 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/users/{userId}/change-password")
+    public ResponseEntity<AuthDto.AuthResponse> changePassword(
+            @PathVariable Long userId,
+            @Valid @RequestBody AuthDto.ChangePasswordRequest request
+    ) {
+        AuthDto.AuthResponse response = authService.changePassword(userId, request.getCurrentPassword(), request.getNewPassword());
+        return ResponseEntity.ok(response);
+    }
+
     @GetMapping("/accounts")
     public ResponseEntity<List<AuthDto.AccountInfo>> getAccounts() {
         List<AuthDto.AccountInfo> accounts = authService.getAllAccounts();

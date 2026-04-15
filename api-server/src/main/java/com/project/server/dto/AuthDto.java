@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.Email;
 import lombok.Builder;
 import lombok.Data;
 
@@ -26,6 +27,7 @@ public class AuthDto {
     @Builder
     public static class RegisterRequest {
         @NotBlank(message = "이메일은 필수입니다.")
+        @Email(message = "유효한 이메일 형식이 아닙니다.")
         private String email;
 
         @NotBlank(message = "닉네임은 필수입니다.")
@@ -123,5 +125,15 @@ public class AuthDto {
         private String key;
         private String title;
         private String description;
+    }
+
+    @Data
+    @Builder
+    public static class ChangePasswordRequest {
+        @NotBlank(message = "현재 비밀번호는 필수입니다.")
+        private String currentPassword;
+
+        @NotBlank(message = "새 비밀번호는 필수입니다.")
+        private String newPassword;
     }
 }

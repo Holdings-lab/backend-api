@@ -148,7 +148,7 @@ public class AuthService {
 
         String displayName = (user != null && user.getNickname() != null && !user.getNickname().isBlank())
                 ? user.getNickname()
-            : (user != null ? user.getEmail() : "지웅");
+            : (user != null ? user.getEmail() : "사용자");
 
         String avatarText = profile == null ? "JY" : profile.getAvatarText();
         int weeklyLearningCount = profile == null ? 6 : profile.getWeeklyLearningCount();
@@ -190,6 +190,32 @@ public class AuthService {
                         AuthDto.SettingMenuItem.builder().key("transparency").title("데이터 출처/모델 투명성").description("출처, 모델 버전 확인").build(),
                         AuthDto.SettingMenuItem.builder().key("account").title("계정 설정").description("보안, 닉네임, 로그아웃").build()
                 ))
+                .build();
+    }
+
+    /**
+     * 비밀번호 변경 (사용자가 자신의 비밀번호 변경)
+     */
+    public AuthDto.AuthResponse changePassword(Long userId, String currentPassword, String newPassword) {
+        UserEntity user = userJpaRepository.findById(userId).orElse(null);
+
+        if (user == null) {
+            throw ApiException.badRequest("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
+        }
+
+        // 현재 비밀번호 검증
+        if (!user.getPassword().equals(currentPassword)) {
+            throw ApiException.badRequest("현재 비밀번호가 일치하지 않습니다.", "AUTH_INVALID_PASSWORD");
+        }
+
+        user.setPassword(newPassword);
+        userJpaRepository.save(user);
+        log.info("사용자 비밀번호 변경: {}", user.getEmail());
+
+        return AuthDto.AuthResponse.builder()
+                .userId(user.getId())
+                .email(user.getEmail())
+                .nickname(user.getNickname())
                 .build();
     }
 }
