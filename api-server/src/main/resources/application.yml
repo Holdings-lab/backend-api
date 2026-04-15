@@ -48,3 +48,8 @@ integration:
   ml:
     # data-ml Flask API 베이스 URL
     base-url: ${ML_API_BASE_URL:http://localhost:9000}
+
+admin:
+  notification-history:
+    retention-days: ${NOTIFICATION_HISTORY_RETENTION_DAYS:30}
+    cleanup-cron: ${NOTIFICATION_HISTORY_CLEANUP_CRON:0 0 3 * * *}
