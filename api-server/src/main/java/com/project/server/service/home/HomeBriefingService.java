@@ -40,7 +40,8 @@ public class HomeBriefingService {
         String profileInitial = resolveProfileInitial(userName);
 
         List<AssetPosition> positions = loadAssetPositions(userId);
-        List<PolicyEventEntity> events = deduplicateByNormalizedTitle(policyEventJpaRepository.findTop20ByOrderByCreatedAtDesc());
+        List<PolicyEventEntity> events = deduplicateByNormalizedTitle(
+                policyEventJpaRepository.findTop20ByOrderByCreatedAtDesc());
         if (events.isEmpty()) {
             events = List.of(PolicyEventEntity.builder()
                     .id(0L)
@@ -64,7 +65,8 @@ public class HomeBriefingService {
         String riskLabel = aggregateRisk >= 75 ? "위험" : aggregateRisk >= 50 ? "주의" : "양호";
 
         Map<String, Integer> themeExposures = calculateThemeExposures(positions);
-        double weightedReturn = positions.stream().mapToDouble(position -> position.weight() * position.changePercent()).sum();
+        double weightedReturn = positions.stream().mapToDouble(position -> position.weight() * position.changePercent())
+                .sum();
 
         HomeBriefingDto.QuickInterpretation quickInterpretation = buildQuickInterpretation(featured);
         HomeBriefingDto.DetailTabs detailTabs = buildDetailTabs(featured);
@@ -79,7 +81,8 @@ public class HomeBriefingService {
                 .featuredCard(HomeBriefingDto.FeaturedSignalCard.builder()
                         .signalTitle(featured.displayTitle())
                         .myAssetExposurePercent(featured.exposurePercent())
-                        .recommendedAction(mapActionToAppTerm(featured.direction(), featured.volatility(), featured.confidence()))
+                        .recommendedAction(
+                                mapActionToAppTerm(featured.direction(), featured.volatility(), featured.confidence()))
                         .judgement(mapJudgement(featured.direction(), featured.confidence()))
                         .upsideProbability(featured.upsideProbability())
                         .downsideProbability(featured.downsideProbability())
@@ -93,10 +96,12 @@ public class HomeBriefingService {
                         .currentRiskLabel(riskLabel)
                         .currentRiskSummary(buildRiskSummary(riskLabel, aggregateRisk, featured.confidence()))
                         .themeExposureBars(List.of(
-                                HomeBriefingDto.ThemeExposureBar.builder().theme("금리").exposurePercent(themeExposures.getOrDefault("금리", 0)).build(),
-                                HomeBriefingDto.ThemeExposureBar.builder().theme("반도체").exposurePercent(themeExposures.getOrDefault("반도체", 0)).build(),
-                                HomeBriefingDto.ThemeExposureBar.builder().theme("달러").exposurePercent(themeExposures.getOrDefault("달러", 0)).build()
-                        ))
+                                HomeBriefingDto.ThemeExposureBar.builder().theme("금리")
+                                        .exposurePercent(themeExposures.getOrDefault("금리", 0)).build(),
+                                HomeBriefingDto.ThemeExposureBar.builder().theme("반도체")
+                                        .exposurePercent(themeExposures.getOrDefault("반도체", 0)).build(),
+                                HomeBriefingDto.ThemeExposureBar.builder().theme("달러")
+                                        .exposurePercent(themeExposures.getOrDefault("달러", 0)).build()))
                         .build())
                 .secondarySignals(secondary.stream().map(event -> HomeBriefingDto.SecondarySignalItem.builder()
                         .title(event.displayTitle())
@@ -160,8 +165,7 @@ public class HomeBriefingService {
                 priority,
                 mapShortJudgement(direction, confidence),
                 reason,
-                theme
-        );
+                theme);
     }
 
     private String sanitizeTitle(String title, Theme theme) {
@@ -183,8 +187,10 @@ public class HomeBriefingService {
         if (ranked.isEmpty()) {
             return 30;
         }
-        double topSignalWeight = ranked.stream().limit(3).mapToDouble(ScoredEvent::priority).sum() / Math.max(1, Math.min(3, ranked.size()));
-        double exposureWeight = positions.stream().mapToDouble(position -> Math.abs(position.changePercent()) * position.weight()).sum() * 14;
+        double topSignalWeight = ranked.stream().limit(3).mapToDouble(ScoredEvent::priority).sum()
+                / Math.max(1, Math.min(3, ranked.size()));
+        double exposureWeight = positions.stream()
+                .mapToDouble(position -> Math.abs(position.changePercent()) * position.weight()).sum() * 14;
         return clamp((int) Math.round(topSignalWeight * 0.5 + exposureWeight * 0.5));
     }
 
@@ -217,10 +223,12 @@ public class HomeBriefingService {
                 .myAssetImpact("내 자산 영향권 " + featured.exposurePercent() + "% · " + featured.shortJudgement())
                 .coreReason(featured.oneLineReason())
                 .keyNumbers(List.of(
-                        HomeBriefingDto.KeyNumberItem.builder().label("상승 가능성").baseline(featured.upsideProbability() + "%").description("이벤트 및 민감도 합산 추정치").build(),
-                        HomeBriefingDto.KeyNumberItem.builder().label("하락 가능성").baseline(featured.downsideProbability() + "%").description("반대 시나리오 확률").build(),
-                        HomeBriefingDto.KeyNumberItem.builder().label("변동성").baseline(featured.volatility() + "pt").description("정책 영향 강도 기반 위험 추정").build()
-                ))
+                        HomeBriefingDto.KeyNumberItem.builder().label("상승 가능성")
+                                .baseline(featured.upsideProbability() + "%").description("이벤트 및 민감도 합산 추정치").build(),
+                        HomeBriefingDto.KeyNumberItem.builder().label("하락 가능성")
+                                .baseline(featured.downsideProbability() + "%").description("반대 시나리오 확률").build(),
+                        HomeBriefingDto.KeyNumberItem.builder().label("변동성").baseline(featured.volatility() + "pt")
+                                .description("정책 영향 강도 기반 위험 추정").build()))
                 .revisitTime("발표 후 30분 내 재확인, 이후 장 마감 전 한 번 더 점검 권장")
                 .weakenCondition("핵심 수치가 컨센서스와 반대로 나오거나 시장 반응 강도가 절반 미만이면 판단이 약화됩니다.")
                 .tip(mapActionToAppTerm(featured.direction(), featured.volatility(), featured.confidence()))
@@ -237,24 +245,24 @@ public class HomeBriefingService {
                         .build())
                 .evidenceTab(HomeBriefingDto.EvidenceTab.builder()
                         .impactPaths(List.of(
-                                HomeBriefingDto.ImpactPathItem.builder().icon("policy").title("정책 변화").description(themeLabel + " 변수 변화 신호 감지").build(),
-                                HomeBriefingDto.ImpactPathItem.builder().icon("macro").title("거시 변수").description("금리/달러/변동성 채널로 전이").build(),
-                                HomeBriefingDto.ImpactPathItem.builder().icon("industry").title("산업/ETF").description("민감도가 높은 ETF 및 자산군 우선 반응").build(),
-                                HomeBriefingDto.ImpactPathItem.builder().icon("portfolio").title("내 자산").description("보유 비중과 결합해 영향권 계산").build()
-                        ))
+                                HomeBriefingDto.ImpactPathItem.builder().icon("policy").title("정책 변화")
+                                        .description(themeLabel + " 변수 변화 신호 감지").build(),
+                                HomeBriefingDto.ImpactPathItem.builder().icon("macro").title("거시 변수")
+                                        .description("금리/달러/변동성 채널로 전이").build(),
+                                HomeBriefingDto.ImpactPathItem.builder().icon("industry").title("산업/ETF")
+                                        .description("민감도가 높은 ETF 및 자산군 우선 반응").build(),
+                                HomeBriefingDto.ImpactPathItem.builder().icon("portfolio").title("내 자산")
+                                        .description("보유 비중과 결합해 영향권 계산").build()))
                         .coreEvidences(List.of(
                                 featured.oneLineReason(),
                                 "유사 이벤트 대비 신뢰도 " + featured.confidence() + "%로 산출",
-                                "노출 비중 " + featured.exposurePercent() + "% 구간 자산군에서 반응 민감도 우위"
-                        ))
+                                "노출 비중 " + featured.exposurePercent() + "% 구간 자산군에서 반응 민감도 우위"))
                         .counterEvidences(List.of(
                                 "시장 컨센서스가 이미 가격에 반영되었을 가능성",
-                                "동일 시점의 반대 거시 이슈(고용/환율)로 효과 상쇄 가능"
-                        ))
+                                "동일 시점의 반대 거시 이슈(고용/환율)로 효과 상쇄 가능"))
                         .invalidationConditions(List.of(
                                 "발표 직후 핵심 지표가 기준선에서 크게 이탈하지 않을 때",
-                                "1시간 내 시장 반응 강도가 30% 이하로 유지될 때"
-                        ))
+                                "1시간 내 시장 반응 강도가 30% 이하로 유지될 때"))
                         .build())
                 .build();
     }
@@ -263,13 +271,15 @@ public class HomeBriefingService {
         String timestamp = LocalDateTime.now().format(DATE_TIME_FORMATTER);
         return HomeBriefingDto.CheckpointTab.builder()
                 .policyCheckpoints(List.of(
-                        HomeBriefingDto.CheckpointItem.builder().title("정책 발표 핵심 수치").threshold("컨센서스 대비 ±0.25p").reason("기준선 이탈 시 방향성 재평가").build(),
-                        HomeBriefingDto.CheckpointItem.builder().title("가이던스 톤").threshold("매파/비둘기 전환 문구").reason("행동 추천 신뢰도 보정").build()
-                ))
+                        HomeBriefingDto.CheckpointItem.builder().title("정책 발표 핵심 수치").threshold("컨센서스 대비 ±0.25p")
+                                .reason("기준선 이탈 시 방향성 재평가").build(),
+                        HomeBriefingDto.CheckpointItem.builder().title("가이던스 톤").threshold("매파/비둘기 전환 문구")
+                                .reason("행동 추천 신뢰도 보정").build()))
                 .marketCheckpoints(List.of(
-                        HomeBriefingDto.CheckpointItem.builder().title("장기채 ETF 반응").threshold("30분 변동률 1.0% 이상").reason("금리 민감 자산 반응 확인").build(),
-                        HomeBriefingDto.CheckpointItem.builder().title("달러 인덱스 반응").threshold("동시 0.4% 이상 변동").reason("환율 채널 동조 여부 확인").build()
-                ))
+                        HomeBriefingDto.CheckpointItem.builder().title("장기채 ETF 반응").threshold("30분 변동률 1.0% 이상")
+                                .reason("금리 민감 자산 반응 확인").build(),
+                        HomeBriefingDto.CheckpointItem.builder().title("달러 인덱스 반응").threshold("동시 0.4% 이상 변동")
+                                .reason("환율 채널 동조 여부 확인").build()))
                 .revisitAlert("발표 +30분, 장중 +3시간, 장마감 전 재점검 알림 규칙 생성")
                 .reflectionStatus(HomeBriefingDto.ReflectionStatus.builder()
                         .updatedAt(timestamp)
@@ -306,11 +316,11 @@ public class HomeBriefingService {
         List<WatchAssetDto.Asset> selected = watchAssets.isEmpty()
                 ? watchAssetSelectionService.getSelectedAssets(userId)
                 : watchAssets.stream()
-                .map(asset -> WatchAssetDto.Asset.builder()
-                        .assetName(asset.getAssetName())
-                        .changePercent(asset.getChangePercent())
-                        .build())
-                .toList();
+                        .map(asset -> WatchAssetDto.Asset.builder()
+                                .assetName(asset.getAssetName())
+                                .changePercent(asset.getChangePercent())
+                                .build())
+                        .toList();
 
         if (selected.isEmpty()) {
             return List.of(new AssetPosition("현금성 자산", 1.0, 0.0));
@@ -323,7 +333,8 @@ public class HomeBriefingService {
     }
 
     private Theme classifyTheme(PolicyEventEntity event) {
-        String token = ((event.getKeyword() == null ? "" : event.getKeyword()) + " " + (event.getTitle() == null ? "" : event.getTitle())).toLowerCase(Locale.ROOT);
+        String token = ((event.getKeyword() == null ? "" : event.getKeyword()) + " "
+                + (event.getTitle() == null ? "" : event.getTitle())).toLowerCase(Locale.ROOT);
         if (token.contains("semiconductor") || token.contains("반도체") || token.contains("chip")) {
             return Theme.SEMICONDUCTOR;
         }
@@ -340,26 +351,37 @@ public class HomeBriefingService {
         String normalized = assetName == null ? "" : assetName.toLowerCase(Locale.ROOT);
         return switch (theme) {
             case RATE -> {
-                if (normalized.contains("장기채")) yield 90;
-                if (normalized.contains("나스닥") || normalized.contains("성장")) yield 75;
-                if (normalized.contains("코스피")) yield 45;
-                if (normalized.contains("달러")) yield 35;
+                if (normalized.contains("장기채"))
+                    yield 90;
+                if (normalized.contains("나스닥") || normalized.contains("성장"))
+                    yield 75;
+                if (normalized.contains("코스피"))
+                    yield 45;
+                if (normalized.contains("달러"))
+                    yield 35;
                 yield 30;
             }
             case DOLLAR -> {
-                if (normalized.contains("달러")) yield 92;
-                if (normalized.contains("금")) yield 70;
-                if (normalized.contains("나스닥")) yield 40;
+                if (normalized.contains("달러"))
+                    yield 92;
+                if (normalized.contains("금"))
+                    yield 70;
+                if (normalized.contains("나스닥"))
+                    yield 40;
                 yield 35;
             }
             case SEMICONDUCTOR -> {
-                if (normalized.contains("나스닥") || normalized.contains("성장")) yield 82;
-                if (normalized.contains("코스피")) yield 60;
+                if (normalized.contains("나스닥") || normalized.contains("성장"))
+                    yield 82;
+                if (normalized.contains("코스피"))
+                    yield 60;
                 yield 30;
             }
             case EMPLOYMENT -> {
-                if (normalized.contains("나스닥")) yield 68;
-                if (normalized.contains("장기채")) yield 55;
+                if (normalized.contains("나스닥"))
+                    yield 68;
+                if (normalized.contains("장기채"))
+                    yield 55;
                 yield 30;
             }
         };
@@ -430,7 +452,8 @@ public class HomeBriefingService {
         }
     }
 
-    private record AssetPosition(String assetName, double weight, double changePercent) {}
+    private record AssetPosition(String assetName, double weight, double changePercent) {
+    }
 
     private record ScoredEvent(
             PolicyEventEntity event,
@@ -444,6 +467,6 @@ public class HomeBriefingService {
             double priority,
             String shortJudgement,
             String oneLineReason,
-            Theme theme
-    ) {}
+            Theme theme) {
+    }
 }
