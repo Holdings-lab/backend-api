@@ -36,8 +36,8 @@ public class AuthService {
         }
 
         UserEntity newUser = UserEntity.builder()
-            .email(normalizedEmail)
-            .nickname(normalizedNickname)
+                .email(normalizedEmail)
+                .nickname(normalizedNickname)
                 .password(request.getPassword()) // 실제로는 암호화해야 함
                 .build();
 
@@ -67,7 +67,7 @@ public class AuthService {
 
         return AuthDto.LoginResult.builder()
                 .userId(user.getId())
-            .email(user.getEmail())
+                .email(user.getEmail())
                 .nickname(user.getNickname())
                 .accessToken(UUID.randomUUID().toString())
                 .refreshToken(UUID.randomUUID().toString())
@@ -92,7 +92,7 @@ public class AuthService {
 
         return AuthDto.AuthResponse.builder()
                 .userId(user.getId())
-            .email(user.getEmail())
+                .email(user.getEmail())
                 .nickname(user.getNickname())
                 .build();
     }
@@ -105,11 +105,11 @@ public class AuthService {
         }
 
         userJpaRepository.deleteById(userId);
-    log.info("사용자 탈퇴: {}", user.getEmail());
+        log.info("사용자 탈퇴: {}", user.getEmail());
 
         return AuthDto.AuthResponse.builder()
                 .userId(userId)
-        .email(user.getEmail())
+                .email(user.getEmail())
                 .nickname(user.getNickname())
                 .build();
     }
@@ -125,7 +125,7 @@ public class AuthService {
 
         return AuthDto.AuthResponse.builder()
                 .userId(user.getId())
-            .email(user.getEmail())
+                .email(user.getEmail())
                 .nickname(user.getNickname())
                 .build();
     }
@@ -135,7 +135,7 @@ public class AuthService {
         return users.stream()
                 .map(user -> AuthDto.AccountInfo.builder()
                         .userId(user.getId())
-                .email(user.getEmail())
+                        .email(user.getEmail())
                         .nickname(user.getNickname())
                         .build())
                 .collect(Collectors.toList());
@@ -148,7 +148,7 @@ public class AuthService {
 
         String displayName = (user != null && user.getNickname() != null && !user.getNickname().isBlank())
                 ? user.getNickname()
-            : (user != null ? user.getEmail() : "사용자");
+                : (user != null ? user.getEmail() : "사용자");
 
         String avatarText = profile == null ? "JY" : profile.getAvatarText();
         int weeklyLearningCount = profile == null ? 6 : profile.getWeeklyLearningCount();
@@ -156,18 +156,18 @@ public class AuthService {
         String weakTopic = profile == null ? "환율" : profile.getWeakTopic();
 
         List<AuthDto.WatchAssetReturn> watchAssetReturns = watchAssets.isEmpty()
-            ? watchAssetSelectionService.getSelectedAssets(userId).stream()
-            .map(asset -> AuthDto.WatchAssetReturn.builder()
-                .assetName(asset.getAssetName())
-                .changePercent(asset.getChangePercent())
-                .build())
-            .toList()
-            : watchAssets.stream()
-            .map(asset -> AuthDto.WatchAssetReturn.builder()
-                .assetName(asset.getAssetName())
-                .changePercent(asset.getChangePercent())
-                .build())
-            .toList();
+                ? watchAssetSelectionService.getSelectedAssets(userId).stream()
+                        .map(asset -> AuthDto.WatchAssetReturn.builder()
+                                .assetName(asset.getAssetName())
+                                .changePercent(asset.getChangePercent())
+                                .build())
+                        .toList()
+                : watchAssets.stream()
+                        .map(asset -> AuthDto.WatchAssetReturn.builder()
+                                .assetName(asset.getAssetName())
+                                .changePercent(asset.getChangePercent())
+                                .build())
+                        .toList();
 
         return AuthDto.MeResponse.builder()
                 .profile(AuthDto.Profile.builder()
@@ -180,16 +180,20 @@ public class AuthService {
                 .studyStats(List.of(
                         AuthDto.StudyStat.builder().label("이번 주 학습").valueText(weeklyLearningCount + "회").build(),
                         AuthDto.StudyStat.builder().label("퀴즈 정답률").valueText(quizAccuracyPercent + "%").build(),
-                        AuthDto.StudyStat.builder().label("가장 약한 단원").valueText(weakTopic).build()
-                ))
+                        AuthDto.StudyStat.builder().label("가장 약한 단원").valueText(weakTopic).build()))
                 .settingsMenu(List.of(
-                        AuthDto.SettingMenuItem.builder().key("notification").title("알림 설정").description("발표 직전, 브리핑 거점, 학습 퀴즈").build(),
-                        AuthDto.SettingMenuItem.builder().key("simple_explain").title("쉬운 설명 기본값").description("켜짐").build(),
-                        AuthDto.SettingMenuItem.builder().key("color_mode").title("색상 모드").description("한국식 (빨강=상승)").build(),
-                        AuthDto.SettingMenuItem.builder().key("market_pref").title("시장/국가 선호").description("미국, 한국").build(),
-                        AuthDto.SettingMenuItem.builder().key("transparency").title("데이터 출처/모델 투명성").description("출처, 모델 버전 확인").build(),
-                        AuthDto.SettingMenuItem.builder().key("account").title("계정 설정").description("보안, 닉네임, 로그아웃").build()
-                ))
+                        AuthDto.SettingMenuItem.builder().key("notification").title("알림 설정")
+                                .description("발표 직전, 브리핑 거점, 학습 퀴즈").build(),
+                        AuthDto.SettingMenuItem.builder().key("simple_explain").title("쉬운 설명 기본값").description("켜짐")
+                                .build(),
+                        AuthDto.SettingMenuItem.builder().key("color_mode").title("색상 모드").description("한국식 (빨강=상승)")
+                                .build(),
+                        AuthDto.SettingMenuItem.builder().key("market_pref").title("시장/국가 선호").description("미국, 한국")
+                                .build(),
+                        AuthDto.SettingMenuItem.builder().key("transparency").title("데이터 출처/모델 투명성")
+                                .description("출처, 모델 버전 확인").build(),
+                        AuthDto.SettingMenuItem.builder().key("account").title("계정 설정").description("보안, 닉네임, 로그아웃")
+                                .build()))
                 .build();
     }
 
@@ -217,5 +221,70 @@ public class AuthService {
                 .email(user.getEmail())
                 .nickname(user.getNickname())
                 .build();
+    }
+
+    /**
+     * OAuth 로그인 (Apple, Google, 카카오)
+     */
+    public AuthDto.OAuthLoginResult oauthLogin(AuthDto.OAuthLoginRequest request) {
+        String provider = request.getProvider().toLowerCase();
+
+        // OAuth 제공자 검증
+        if (!provider.matches("apple|google|kakao")) {
+            throw ApiException.badRequest("지원하지 않는 OAuth 제공자입니다.", "AUTH_INVALID_OAUTH_PROVIDER");
+        }
+
+        // 실제로는 OAuth 제공자에서 토큰을 검증하고 사용자 정보를 받아야 함
+        // 현재는 시뮬레이션: authorizationCode로 OAuth 제공자와 통신
+        String oauthUserId = generateOAuthUserId(provider, request.getAuthorizationCode());
+        String oauthEmail = generateOAuthEmail(provider, oauthUserId);
+        String oauthNickname = generateOAuthNickname(provider, oauthUserId);
+
+        // 기존 사용자 조회 (OAuth 제공자 + ID 조합으로)
+        UserEntity user = userJpaRepository.findByEmail(oauthEmail).orElse(null);
+
+        boolean isNewUser = (user == null);
+
+        if (isNewUser) {
+            // 새로운 사용자 생성
+            user = UserEntity.builder()
+                    .email(oauthEmail)
+                    .nickname(oauthNickname)
+                    .password("oauth-" + provider) // OAuth 사용자는 실제 비밀번호 없음
+                    .oauthProvider(provider)
+                    .oauthId(oauthUserId)
+                    .build();
+            user = userJpaRepository.save(user);
+            log.info("새 OAuth 사용자 등록: provider={}, email={}", provider, oauthEmail);
+        } else {
+            // 기존 사용자 - OAuth 정보 업데이트
+            user.setOauthProvider(provider);
+            user.setOauthId(oauthUserId);
+            userJpaRepository.save(user);
+            log.info("OAuth 사용자 로그인: provider={}, email={}", provider, oauthEmail);
+        }
+
+        return AuthDto.OAuthLoginResult.builder()
+                .userId(user.getId())
+                .email(user.getEmail())
+                .nickname(user.getNickname())
+                .accessToken(UUID.randomUUID().toString())
+                .refreshToken(UUID.randomUUID().toString())
+                .onboardingCompleted(false)
+                .newUser(isNewUser)
+                .build();
+    }
+
+    // OAuth 시뮬레이션 헬퍼 메서드 (실제로는 외부 OAuth 제공자와 통신)
+    private String generateOAuthUserId(String provider, String authorizationCode) {
+        return provider + "_" + UUID.randomUUID().toString().substring(0, 12);
+    }
+
+    private String generateOAuthEmail(String provider, String oauthUserId) {
+        return oauthUserId + "@" + provider + "-oauth.com";
+    }
+
+    private String generateOAuthNickname(String provider, String oauthUserId) {
+        return provider.toUpperCase() + "_" + oauthUserId.substring(0, 8);
     }
 }

@@ -26,16 +26,8 @@ public class AuthDto {
     @Data
     @Builder
     public static class RegisterRequest {
-        @NotBlank(message = "이메일은 필수입니다.")
-        @Email(message = "유효한 이메일 형식이 아닙니다.")
         private String email;
-
-        @NotBlank(message = "닉네임은 필수입니다.")
-        @Size(min = 2, max = 20, message = "닉네임은 2자 이상 20자 이하여야 합니다.")
-        @Pattern(regexp = "^[a-zA-Z0-9가-힣 _-]+$", message = "닉네임은 한글, 영문, 숫자, 공백, _ - 만 사용할 수 있습니다.")
         private String nickname;
-
-        @NotBlank(message = "비밀번호는 필수입니다.")
         private String password;
     }
 
@@ -135,5 +127,29 @@ public class AuthDto {
 
         @NotBlank(message = "새 비밀번호는 필수입니다.")
         private String newPassword;
+    }
+
+    @Data
+    @Builder
+    public static class OAuthLoginRequest {
+        @NotBlank(message = "OAuth 제공자는 필수입니다. (apple, google, kakao)")
+        private String provider;
+
+        @NotBlank(message = "OAuth 인가 코드는 필수입니다.")
+        private String authorizationCode;
+
+        private String redirectUri;
+    }
+
+    @Data
+    @Builder
+    public static class OAuthLoginResult {
+        private Long userId;
+        private String email;
+        private String nickname;
+        private String accessToken;
+        private String refreshToken;
+        private boolean onboardingCompleted;
+        private boolean newUser;
     }
 }

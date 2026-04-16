@@ -33,4 +33,10 @@ public class UserEntity {
 
     @Column(name = "fcm_token", length = 1000)
     private String fcmToken;
+
+    @Column(name = "oauth_provider", length = 50)
+    private String oauthProvider;
+
+    @Column(name = "oauth_id", length = 255)
+    private String oauthId;
 }

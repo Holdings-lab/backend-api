@@ -1,5 +1,6 @@
 package com.project.server.controller;
 
+import org.springframework.http.HttpStatus;
 import com.project.server.dto.AuthDto;
 import com.project.server.service.auth.AuthService;
 import jakarta.validation.Valid;
@@ -19,7 +20,7 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<AuthDto.AuthResponse> register(@Valid @RequestBody AuthDto.RegisterRequest request) {
         AuthDto.AuthResponse response = authService.register(request);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @PostMapping("/login")
@@ -62,5 +63,12 @@ public class AuthController {
     public ResponseEntity<List<AuthDto.AccountInfo>> getAccounts() {
         List<AuthDto.AccountInfo> accounts = authService.getAllAccounts();
         return ResponseEntity.ok(accounts);
+    }
+
+    @PostMapping("/oauth-login")
+    public ResponseEntity<AuthDto.OAuthLoginResult> oauthLogin(@Valid @RequestBody AuthDto.OAuthLoginRequest request) {
+        AuthDto.OAuthLoginResult result = authService.oauthLogin(request);
+        HttpStatus status = result.isNewUser() ? HttpStatus.CREATED : HttpStatus.OK;
+        return ResponseEntity.status(status).body(result);
     }
 }

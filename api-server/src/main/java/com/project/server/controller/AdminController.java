@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
+import org.springframework.http.HttpStatus;
 
 /**
  * Admin API Controller
@@ -37,7 +38,7 @@ public class AdminController {
     ) {
         log.info("[Admin] 계정 추가 요청: {}", request.getEmail());
         AdminDto.CreateAccountResponse response = adminService.createAccount(request);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
             /**
