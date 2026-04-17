@@ -26,9 +26,45 @@ public class AuthDto {
     @Data
     @Builder
     public static class RegisterRequest {
+        @NotBlank(message = "이메일은 필수입니다.")
+        @Email(message = "이메일 형식이 유효하지 않습니다.")
         private String email;
+
+        @NotBlank(message = "닉네임은 필수입니다.")
+        @Size(min = 2, max = 20, message = "닉네임은 2자 이상 20자 이하여야 합니다.")
         private String nickname;
+
+        @NotBlank(message = "비밀번호는 필수입니다.")
+        @Size(min = 8, max = 100, message = "비밀번호는 8자 이상 100자 이하여야 합니다.")
         private String password;
+    }
+
+    @Data
+    @Builder
+    public static class EmailCodeSendRequest {
+        @NotBlank(message = "이메일은 필수입니다.")
+        @Email(message = "이메일 형식이 유효하지 않습니다.")
+        private String email;
+    }
+
+    @Data
+    @Builder
+    public static class EmailCodeVerifyRequest {
+        @NotBlank(message = "이메일은 필수입니다.")
+        @Email(message = "이메일 형식이 유효하지 않습니다.")
+        private String email;
+
+        @NotBlank(message = "인증번호는 필수입니다.")
+        @Pattern(regexp = "^\\d{6}$", message = "인증번호는 6자리 숫자여야 합니다.")
+        private String verificationCode;
+    }
+
+    @Data
+    @Builder
+    public static class EmailVerificationResponse {
+        private String email;
+        private boolean verified;
+        private String message;
     }
 
     @Data

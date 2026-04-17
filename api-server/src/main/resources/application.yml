@@ -23,6 +23,17 @@ spring:
   sql:
     init:
       mode: never
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
 
 # Management endpoints for health checks
 management:
@@ -53,3 +64,8 @@ admin:
   notification-history:
     retention-days: ${NOTIFICATION_HISTORY_RETENTION_DAYS:30}
     cleanup-cron: ${NOTIFICATION_HISTORY_CLEANUP_CRON:0 0 3 * * *}
+
+auth:
+  email:
+    from: ${AUTH_EMAIL_FROM:${MAIL_USERNAME:no-reply@holdings-lab.local}}
+    verify-code-expire-minutes: ${AUTH_VERIFY_CODE_EXPIRE_MINUTES:10}

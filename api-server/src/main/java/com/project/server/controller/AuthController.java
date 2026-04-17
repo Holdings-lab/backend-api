@@ -17,6 +17,22 @@ public class AuthController {
 
     private final AuthService authService;
 
+    @PostMapping("/email/send-code")
+    public ResponseEntity<AuthDto.EmailVerificationResponse> sendEmailVerificationCode(
+            @Valid @RequestBody AuthDto.EmailCodeSendRequest request
+    ) {
+        AuthDto.EmailVerificationResponse response = authService.sendEmailVerificationCode(request.getEmail());
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/email/verify-code")
+    public ResponseEntity<AuthDto.EmailVerificationResponse> verifyEmailCode(
+            @Valid @RequestBody AuthDto.EmailCodeVerifyRequest request
+    ) {
+        AuthDto.EmailVerificationResponse response = authService.verifyEmailCode(request.getEmail(), request.getVerificationCode());
+        return ResponseEntity.ok(response);
+    }
+
     @PostMapping("/register")
     public ResponseEntity<AuthDto.AuthResponse> register(@Valid @RequestBody AuthDto.RegisterRequest request) {
         AuthDto.AuthResponse response = authService.register(request);
