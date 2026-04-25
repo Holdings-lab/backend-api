@@ -21,4 +21,32 @@ public class InsightController {
     ) {
         return ResponseEntity.ok(insightService.getHeatmap(marketScope, country));
     }
+
+    @GetMapping("/view-tabs")
+    public ResponseEntity<java.util.List<String>> getViewTabs() {
+        return ResponseEntity.ok(insightService.getViewTabs());
+    }
+
+    @GetMapping("/country-filters")
+    public ResponseEntity<java.util.List<String>> getCountryFilters() {
+        return ResponseEntity.ok(insightService.getCountryFilters());
+    }
+
+    @GetMapping("/columns")
+    public ResponseEntity<java.util.List<String>> getColumns() {
+        return ResponseEntity.ok(insightService.getColumns());
+    }
+
+    @GetMapping("/rows")
+    public ResponseEntity<java.util.List<InsightDto.HeatmapRow>> getRows(
+            @RequestParam(name = "marketScope", defaultValue = "all") String marketScope,
+            @RequestParam(name = "country", defaultValue = "all") String country
+    ) {
+        return ResponseEntity.ok(insightService.getRows(marketScope, country));
+    }
+
+    @GetMapping("/legend")
+    public ResponseEntity<java.util.List<String>> getLegend() {
+        return ResponseEntity.ok(insightService.getLegend());
+    }
 }

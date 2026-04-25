@@ -33,10 +33,12 @@ def run_prediction_now() -> dict:
         errors="replace",
     )
 
+    message = "prediction completed" if completed.returncode == 0 else "prediction failed"
     return {
         "status": "success" if completed.returncode == 0 else "failed",
         "return_code": completed.returncode,
-        "message": "prediction completed" if completed.returncode == 0 else "prediction failed",
+        "message": message,
+        "script_path": str(script_path),
         "stdout_tail": (completed.stdout or "")[-3000:],
         "stderr_tail": (completed.stderr or "")[-3000:],
         "executed_at": datetime.utcnow().isoformat() + "Z",

@@ -28,6 +28,34 @@ public class UserPreferenceController {
         return ResponseEntity.ok(authService.getMe(userId));
     }
 
+    @GetMapping("/profile")
+    public ResponseEntity<AuthDto.Profile> getMeProfile(
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    ) {
+        return ResponseEntity.ok(authService.getMeProfile(userId));
+    }
+
+    @GetMapping("/watch-assets")
+    public ResponseEntity<java.util.List<AuthDto.WatchAssetReturn>> getMeWatchAssets(
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    ) {
+        return ResponseEntity.ok(authService.getMeWatchAssets(userId));
+    }
+
+    @GetMapping("/study-stats")
+    public ResponseEntity<java.util.List<AuthDto.StudyStat>> getMeStudyStats(
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    ) {
+        return ResponseEntity.ok(authService.getMeStudyStats(userId));
+    }
+
+    @GetMapping("/settings-menu")
+    public ResponseEntity<java.util.List<AuthDto.SettingMenuItem>> getMeSettingsMenu(
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    ) {
+        return ResponseEntity.ok(authService.getMeSettingsMenu(userId));
+    }
+
     @GetMapping("/settings/notifications")
     public ResponseEntity<UserPreferenceDto.NotificationSettingsResponse> getNotificationSettings(
             @RequestParam(name = "userId", defaultValue = "1") Long userId

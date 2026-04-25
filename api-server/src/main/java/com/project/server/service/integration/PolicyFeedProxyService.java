@@ -55,6 +55,41 @@ public class PolicyFeedProxyService {
         }
     }
 
+    public PolicyFeedDto.Source getSource(PolicyFeedDto.PolicyFeedRequest requestBody) {
+        return getPolicyFeed(requestBody).getSource();
+    }
+
+    public PolicyFeedDto.Summary getSummary(PolicyFeedDto.PolicyFeedRequest requestBody) {
+        return getPolicyFeed(requestBody).getSummary();
+    }
+
+    public PolicyFeedDto.Model getModel(PolicyFeedDto.PolicyFeedRequest requestBody) {
+        return getPolicyFeed(requestBody).getModel();
+    }
+
+    public PolicyFeedDto.Filters getFilters(PolicyFeedDto.PolicyFeedRequest requestBody) {
+        return getPolicyFeed(requestBody).getFilters();
+    }
+
+    public java.util.List<PolicyFeedDto.Card> getCards(PolicyFeedDto.PolicyFeedRequest requestBody) {
+        return getPolicyFeed(requestBody).getCards();
+    }
+
+    public PolicyFeedDto.Card getFeaturedCard(PolicyFeedDto.PolicyFeedRequest requestBody) {
+        java.util.List<PolicyFeedDto.Card> cards = getCards(requestBody);
+        if (cards == null || cards.isEmpty()) {
+            return null;
+        }
+        return cards.get(0);
+    }
+
+    public java.util.Map<String, String> getMeta(PolicyFeedDto.PolicyFeedRequest requestBody) {
+        PolicyFeedDto.PolicyFeedResponse response = getPolicyFeed(requestBody);
+        return java.util.Map.of(
+                "feedType", response.getFeedType() == null ? "" : response.getFeedType(),
+                "generatedAt", response.getGeneratedAt() == null ? "" : response.getGeneratedAt());
+    }
+
     private PolicyFeedDto.PolicyFeedResponse fallbackPolicyFeedFromDb(PolicyFeedDto.PolicyFeedRequest requestBody, String reason) {
         int limit = requestBody.getLimit() == null ? 20 : requestBody.getLimit();
         String category = isBlank(requestBody.getCategory()) ? "all" : requestBody.getCategory().trim();

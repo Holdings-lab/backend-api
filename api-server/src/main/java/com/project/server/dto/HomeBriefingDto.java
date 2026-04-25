@@ -22,6 +22,12 @@ public class HomeBriefingDto {
 
     @Data
     @Builder
+    public static class DisclaimerResponse {
+        private String disclaimer;
+    }
+
+    @Data
+    @Builder
     public static class HomeHeader {
         private String greeting;
         private String userName;

@@ -18,16 +18,34 @@ public class InsightService {
 
     private final PolicyEventJpaRepository policyEventJpaRepository;
 
-    public InsightDto.HeatmapResponse getHeatmap(String marketScope, String country) {
-        List<PolicyEventEntity> latestEvents = policyEventJpaRepository.findTop20ByOrderByCreatedAtDesc();
-        List<InsightDto.HeatmapRow> rows = buildRows(latestEvents);
+    public List<String> getViewTabs() {
+        return List.of("heatmap", "ranking", "network");
+    }
 
+    public List<String> getCountryFilters() {
+        return List.of("all", "us", "kr");
+    }
+
+    public List<String> getColumns() {
+        return List.of("주식", "장기채", "달러", "금");
+    }
+
+    public List<InsightDto.HeatmapRow> getRows(String marketScope, String country) {
+        List<PolicyEventEntity> latestEvents = policyEventJpaRepository.findTop20ByOrderByCreatedAtDesc();
+        return buildRows(latestEvents);
+    }
+
+    public List<String> getLegend() {
+        return List.of("매우높음", "높음", "보통", "낮음");
+    }
+
+    public InsightDto.HeatmapResponse getHeatmap(String marketScope, String country) {
         return InsightDto.HeatmapResponse.builder()
-                .viewTabs(List.of("heatmap", "ranking", "network"))
-                .countryFilters(List.of("all", "us", "kr"))
-                .columns(List.of("주식", "장기채", "달러", "금"))
-                .rows(rows)
-                .legend(List.of("매우높음", "높음", "보통", "낮음"))
+                .viewTabs(getViewTabs())
+                .countryFilters(getCountryFilters())
+                .columns(getColumns())
+                .rows(getRows(marketScope, country))
+                .legend(getLegend())
                 .build();
     }
 

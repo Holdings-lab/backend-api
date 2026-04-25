@@ -23,6 +23,25 @@ public class EventController {
         return ResponseEntity.ok(eventService.getEvents(userId, dateSegment, category));
     }
 
+    @GetMapping("/date-segments")
+    public ResponseEntity<java.util.List<String>> getDateSegments() {
+        return ResponseEntity.ok(eventService.getDateSegments());
+    }
+
+    @GetMapping("/categories")
+    public ResponseEntity<java.util.List<String>> getCategories() {
+        return ResponseEntity.ok(eventService.getCategories());
+    }
+
+    @GetMapping("/items")
+    public ResponseEntity<java.util.List<EventDto.EventItem>> getEventItems(
+            @RequestParam(name = "userId", defaultValue = "1") Long userId,
+            @RequestParam(name = "dateSegment", defaultValue = "today") String dateSegment,
+            @RequestParam(name = "category", defaultValue = "all") String category
+    ) {
+        return ResponseEntity.ok(eventService.getEventItems(userId, dateSegment, category));
+    }
+
     @PostMapping("/refresh")
     public ResponseEntity<EventDto.EventsResponse> refreshEvents(
             @RequestParam(name = "userId", defaultValue = "1") Long userId,

@@ -1,1 +1,21 @@
-{"target_ticker": "QQQ", "best_horizon": 15, "best_features": ["slope_60", "slope_120", "vix_level", "vol_10", "target_tlt_ratio_20", "bb_width", "macd_signal", "target_tlt_rel_ret", "tlt_ret_20", "drawdown", "tlt_to_ma_60", "vol_20", "macd_hist", "price_to_ma_120", "macd", "target_spy_ratio_20", "vix_ret_5", "hyg_ret", "vol_ratio", "spy_to_ma_60", "price_to_ma_60", "tlt_ret_5", "spy_ret_5", "spy_ret_20", "tlt_ret_1"]}
+{
+  "target_ticker": "QQQ",
+  "best_horizon": 15,
+  "best_features": [
+    "news_count",
+    "category_BIS",
+    "category_FOMC",
+    "category_UCSB",
+    "title_positive_prob",
+    "title_negative_prob",
+    "title_neutral_prob",
+    "title_sentiment_score",
+    "body_positive_prob",
+    "body_negative_prob",
+    "body_neutral_prob",
+    "body_sentiment_score",
+    "body_n_chunks"
+  ],
+  "model_file": "qqq_volatility_cluster_model.json",
+  "data_file": "D:\\Programming\\VSC_Project\\Holdings-lab\\backend-api\\data-ml\\data\\crawler\\features\\daily_news_features.csv"
+}

@@ -35,7 +35,55 @@ public class HomeBriefingService {
     private final PolicyEventJpaRepository policyEventJpaRepository;
     private final WatchAssetSelectionService watchAssetSelectionService;
 
+    public HomeBriefingDto.HomeHeader getHomeHeader(Long userId) {
+        return buildBriefingBundle(userId).homeHeader();
+    }
+
+    public HomeBriefingDto.FeaturedSignalCard getFeaturedCard(Long userId) {
+        return buildBriefingBundle(userId).featuredCard();
+    }
+
+    public HomeBriefingDto.PortfolioCard getPortfolioCard(Long userId) {
+        return buildBriefingBundle(userId).portfolioCard();
+    }
+
+    public List<HomeBriefingDto.SecondarySignalItem> getSecondarySignals(Long userId) {
+        return buildBriefingBundle(userId).secondarySignals();
+    }
+
+    public HomeBriefingDto.QuickInterpretation getQuickInterpretation(Long userId) {
+        return buildBriefingBundle(userId).quickInterpretation();
+    }
+
+    public HomeBriefingDto.DetailTabs getDetailTabs(Long userId) {
+        return buildBriefingBundle(userId).detailTabs();
+    }
+
+    public HomeBriefingDto.CheckpointTab getCheckpointTab(Long userId) {
+        return buildBriefingBundle(userId).checkpointTab();
+    }
+
+    public HomeBriefingDto.DisclaimerResponse getDisclaimer(Long userId) {
+        return HomeBriefingDto.DisclaimerResponse.builder()
+                .disclaimer(buildBriefingBundle(userId).disclaimer())
+                .build();
+    }
+
     public HomeBriefingDto.BriefingResponse getBriefing(Long userId) {
+        BriefingBundle bundle = buildBriefingBundle(userId);
+        return HomeBriefingDto.BriefingResponse.builder()
+                .homeHeader(bundle.homeHeader())
+                .featuredCard(bundle.featuredCard())
+                .portfolioCard(bundle.portfolioCard())
+                .secondarySignals(bundle.secondarySignals())
+                .quickInterpretation(bundle.quickInterpretation())
+                .detailTabs(bundle.detailTabs())
+                .checkpointTab(bundle.checkpointTab())
+                .disclaimer(bundle.disclaimer())
+                .build();
+    }
+
+    private BriefingBundle buildBriefingBundle(Long userId) {
         String userName = resolveUserName(userId);
         String profileInitial = resolveProfileInitial(userName);
 
@@ -72,48 +120,47 @@ public class HomeBriefingService {
         HomeBriefingDto.DetailTabs detailTabs = buildDetailTabs(featured);
         HomeBriefingDto.CheckpointTab checkpointTab = buildCheckpointTab(featured);
 
-        return HomeBriefingDto.BriefingResponse.builder()
-                .homeHeader(HomeBriefingDto.HomeHeader.builder()
-                        .greeting("안녕하세요, " + userName + "님")
-                        .userName(userName)
-                        .profileInitial(profileInitial)
-                        .build())
-                .featuredCard(HomeBriefingDto.FeaturedSignalCard.builder()
-                        .signalTitle(featured.displayTitle())
-                        .myAssetExposurePercent(featured.exposurePercent())
-                        .recommendedAction(
-                                mapActionToAppTerm(featured.direction(), featured.volatility(), featured.confidence()))
-                        .judgement(mapJudgement(featured.direction(), featured.confidence()))
-                        .upsideProbability(featured.upsideProbability())
-                        .downsideProbability(featured.downsideProbability())
-                        .volatility(featured.volatility())
-                        .confidence(featured.confidence())
-                        .coreReason(featured.oneLineReason())
-                        .build())
-                .portfolioCard(HomeBriefingDto.PortfolioCard.builder()
-                        .totalAsset(String.format(Locale.US, "%,.0f원", DEFAULT_TOTAL_ASSET))
-                        .returnRate(String.format(Locale.US, "%+.2f%%", weightedReturn))
-                        .currentRiskLabel(riskLabel)
-                        .currentRiskSummary(buildRiskSummary(riskLabel, aggregateRisk, featured.confidence()))
-                        .themeExposureBars(List.of(
-                                HomeBriefingDto.ThemeExposureBar.builder().theme("금리")
-                                        .exposurePercent(themeExposures.getOrDefault("금리", 0)).build(),
-                                HomeBriefingDto.ThemeExposureBar.builder().theme("반도체")
-                                        .exposurePercent(themeExposures.getOrDefault("반도체", 0)).build(),
-                                HomeBriefingDto.ThemeExposureBar.builder().theme("달러")
-                                        .exposurePercent(themeExposures.getOrDefault("달러", 0)).build()))
-                        .build())
-                .secondarySignals(secondary.stream().map(event -> HomeBriefingDto.SecondarySignalItem.builder()
-                        .title(event.displayTitle())
-                        .shortJudgement(event.shortJudgement())
-                        .exposurePercent(event.exposurePercent())
-                        .oneLineReason(event.oneLineReason())
-                        .build()).toList())
-                .quickInterpretation(quickInterpretation)
-                .detailTabs(detailTabs)
-                .checkpointTab(checkpointTab)
-                .disclaimer("본 정보는 투자 자문이 아니며, 학습 및 정보 제공 목적의 참고 자료입니다.")
-                .build();
+        return new BriefingBundle(
+            HomeBriefingDto.HomeHeader.builder()
+                .greeting("안녕하세요, " + userName + "님")
+                .userName(userName)
+                .profileInitial(profileInitial)
+                .build(),
+            HomeBriefingDto.FeaturedSignalCard.builder()
+                .signalTitle(featured.displayTitle())
+                .myAssetExposurePercent(featured.exposurePercent())
+                .recommendedAction(
+                    mapActionToAppTerm(featured.direction(), featured.volatility(), featured.confidence()))
+                .judgement(mapJudgement(featured.direction(), featured.confidence()))
+                .upsideProbability(featured.upsideProbability())
+                .downsideProbability(featured.downsideProbability())
+                .volatility(featured.volatility())
+                .confidence(featured.confidence())
+                .coreReason(featured.oneLineReason())
+                .build(),
+            HomeBriefingDto.PortfolioCard.builder()
+                .totalAsset(String.format(Locale.US, "%,.0f원", DEFAULT_TOTAL_ASSET))
+                .returnRate(String.format(Locale.US, "%+.2f%%", weightedReturn))
+                .currentRiskLabel(riskLabel)
+                .currentRiskSummary(buildRiskSummary(riskLabel, aggregateRisk, featured.confidence()))
+                .themeExposureBars(List.of(
+                    HomeBriefingDto.ThemeExposureBar.builder().theme("금리")
+                        .exposurePercent(themeExposures.getOrDefault("금리", 0)).build(),
+                    HomeBriefingDto.ThemeExposureBar.builder().theme("반도체")
+                        .exposurePercent(themeExposures.getOrDefault("반도체", 0)).build(),
+                    HomeBriefingDto.ThemeExposureBar.builder().theme("달러")
+                        .exposurePercent(themeExposures.getOrDefault("달러", 0)).build()))
+                .build(),
+            secondary.stream().map(event -> HomeBriefingDto.SecondarySignalItem.builder()
+                .title(event.displayTitle())
+                .shortJudgement(event.shortJudgement())
+                .exposurePercent(event.exposurePercent())
+                .oneLineReason(event.oneLineReason())
+                .build()).toList(),
+            quickInterpretation,
+            detailTabs,
+            checkpointTab,
+            "본 정보는 투자 자문이 아니며, 학습 및 정보 제공 목적의 참고 자료입니다.");
     }
 
     private List<PolicyEventEntity> deduplicateByNormalizedTitle(List<PolicyEventEntity> events) {
@@ -454,6 +501,17 @@ public class HomeBriefingService {
 
     private record AssetPosition(String assetName, double weight, double changePercent) {
     }
+
+        private record BriefingBundle(
+            HomeBriefingDto.HomeHeader homeHeader,
+            HomeBriefingDto.FeaturedSignalCard featuredCard,
+            HomeBriefingDto.PortfolioCard portfolioCard,
+            List<HomeBriefingDto.SecondarySignalItem> secondarySignals,
+            HomeBriefingDto.QuickInterpretation quickInterpretation,
+            HomeBriefingDto.DetailTabs detailTabs,
+            HomeBriefingDto.CheckpointTab checkpointTab,
+            String disclaimer) {
+        }
 
     private record ScoredEvent(
             PolicyEventEntity event,

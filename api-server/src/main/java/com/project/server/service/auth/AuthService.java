@@ -268,6 +268,22 @@ public class AuthService {
                 .build();
     }
 
+        public AuthDto.Profile getMeProfile(Long userId) {
+                return getMe(userId).getProfile();
+        }
+
+        public List<AuthDto.WatchAssetReturn> getMeWatchAssets(Long userId) {
+                return getMe(userId).getWatchAssets();
+        }
+
+        public List<AuthDto.StudyStat> getMeStudyStats(Long userId) {
+                return getMe(userId).getStudyStats();
+        }
+
+        public List<AuthDto.SettingMenuItem> getMeSettingsMenu(Long userId) {
+                return getMe(userId).getSettingsMenu();
+        }
+
     /**
      * 비밀번호 변경 (사용자가 자신의 비밀번호 변경)
      */
