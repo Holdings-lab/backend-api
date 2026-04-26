@@ -13,7 +13,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from crawler.service import run_crawl_now
 from scheduler import build_scheduler
@@ -74,22 +74,28 @@ def _safe_json_load(path: Path) -> dict:
 
 
 def _success_response(result=None, message="요청에 성공했습니다.", code="SUCCESS-200"):
-    return {
+    data = {
         "isSuccess": True,
         "code": code,
         "message": message,
         "result": {} if result is None else result,
     }
+    return Response(
+        content=json.dumps(data, ensure_ascii=False, indent=2),
+        media_type="application/json",
+    )
 
 
 def _error_response(message="요청에 실패했습니다.", code="FAIL-001", status_code=500):
-    return JSONResponse(
+    data = {
+        "isSuccess": False,
+        "code": code,
+        "message": message,
+    }
+    return Response(
         status_code=status_code,
-        content={
-            "isSuccess": False,
-            "code": code,
-            "message": message,
-        },
+        content=json.dumps(data, ensure_ascii=False, indent=2),
+        media_type="application/json",
     )
 
 
