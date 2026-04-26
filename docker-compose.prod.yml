@@ -1,5 +1,4 @@
 services:
-  # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
     container_name: pwa-postgres
@@ -9,23 +8,20 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5432:5432"
+    - 5432:5432
     volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    - postgres-data:/var/lib/postgresql/data
+    - ./postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test:
+      - CMD-SHELL
+      - pg_isready -U ${POSTGRES_USER:-postgres}
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - app-network
-
-  # Spring Boot API Server
+    - app-network
   api-server:
-    build:
-      context: ./api-server
-      dockerfile: Dockerfile
     container_name: pwa-api-server
     restart: always
     depends_on:
@@ -42,23 +38,23 @@ services:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
       FIREBASE_CONFIG_PATH: /app/config/serviceAccountKey.json
     ports:
-      - "8080:8080"
+    - 8080:8080
     volumes:
-      - ./api-server/src/main/resources/serviceAccountKey.json:/app/config/serviceAccountKey.json:ro
+    - ./api-server/src/main/resources/serviceAccountKey.json:/app/config/serviceAccountKey.json:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8080/api/health
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
     networks:
-      - app-network
-
-  # Python Data-ML Service (on-demand policy feed + batch APIs)
+    - app-network
+    image: ghcr.io/holdings-lab/api-server:latest
   data-ml:
-    build:
-      context: ./data-ml
-      dockerfile: Dockerfile
     container_name: pwa-data-ml
     restart: always
     environment:
@@ -72,20 +68,23 @@ services:
       WEBHOOK_URL: http://api-server:8080/api/internal/webhook/event
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
     ports:
-      - "9000:9000"
+    - 9000:9000
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/ml/health"]
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:9000/ml/health
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
     networks:
-      - app-network
-
+    - app-network
+    image: ghcr.io/holdings-lab/data-ml:latest
 networks:
   app-network:
     driver: bridge
-
 volumes:
   postgres-data:
     driver: local

@@ -12,24 +12,73 @@ on:
       - ".github/workflows/deploy-lightsail.yml"
 
 jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build and push API Server
+        uses: docker/build-push-action@v4
+        with:
+          context: ./api-server
+          push: true
+          tags: ghcr.io/holdings-lab/api-server:latest
+          cache-from: type=registry,ref=ghcr.io/holdings-lab/api-server:buildcache
+          cache-to: type=registry,ref=ghcr.io/holdings-lab/api-server:buildcache,mode=max
+
+      - name: Build and push Data ML
+        uses: docker/build-push-action@v4
+        with:
+          context: ./data-ml
+          push: true
+          tags: ghcr.io/holdings-lab/data-ml:latest
+          cache-from: type=registry,ref=ghcr.io/holdings-lab/data-ml:buildcache
+          cache-to: type=registry,ref=ghcr.io/holdings-lab/data-ml:buildcache,mode=max
+
   deploy:
+    needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
       - name: Deploy on AWS Lightsail instance via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.LIGHTSAIL_HOST }}
           username: ${{ secrets.LIGHTSAIL_USER }}
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           port: ${{ secrets.LIGHTSAIL_SSH_PORT }}
+          command_timeout: 30m
           script_stop: true
+          envs: GH_TOKEN
           script: |
             set -e
             cd ${{ secrets.LIGHTSAIL_APP_PATH }}
+            
+            # Log in to GHCR to pull images
+            echo $GH_TOKEN | docker login ghcr.io -u Holdings-lab --password-stdin
+            
             git fetch origin main
             git checkout main
             git reset --hard origin/main
-            docker compose -f docker-compose.prod.yml pull || true
-            docker compose -f docker-compose.prod.yml up -d --build postgres api-server data-ml
-            docker image prune -f
+            
+            # Pull pre-built images and restart containers
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            docker image prune -af
