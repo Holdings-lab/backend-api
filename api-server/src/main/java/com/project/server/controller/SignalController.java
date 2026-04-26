@@ -2,6 +2,7 @@ package com.project.server.controller;
 
 import com.project.server.service.event.SignalService;
 import com.project.server.service.event.SignalDetailService;
+import com.project.server.exception.ApiException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.*;
@@ -20,6 +21,13 @@ public class SignalController {
 
     @GetMapping("/{id}")
     public ResponseEntity<Map<String, Object>> getSignalDetail(@PathVariable String id) {
+        if (id == null || id.trim().isEmpty() || id.equals("0")) {
+            throw ApiException.badRequest("올바르지 않은 시그널 ID입니다.", "SIGNAL_INVALID_ID");
+        }
+        if (!id.startsWith("EVT-")) {
+            throw ApiException.notFound("존재하지 않는 시그널입니다.", "SIGNAL_NOT_FOUND");
+        }
+
         List<String> mockAssets = Arrays.asList("QQQ", "AAPL");
         double sensitivity = signalService.calculateAssetSensitivity(mockAssets);
         List<String> reasons = signalService.generateReasonCandidates(id);
