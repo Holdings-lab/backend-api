@@ -3,7 +3,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: pwa-postgres
-    restart: unless-stopped
+    restart: always
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-holdings}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -27,7 +27,7 @@ services:
       context: ./api-server
       dockerfile: Dockerfile
     container_name: pwa-api-server
-    restart: unless-stopped
+    restart: always
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,7 +60,7 @@ services:
       context: ./data-ml
       dockerfile: Dockerfile
     container_name: pwa-data-ml
-    restart: unless-stopped
+    restart: always
     environment:
       ML_API_PORT: 9000
       POSTGRES_HOST: postgres
