@@ -33,6 +33,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"예기치 못한 에러 발생: {exc}", exc_info=True)
+    return _error_response(
+        message="ML 서버 오류가 발생했습니다.", 
+        code="INTERNAL_SERVER_ERROR", 
+        status_code=500
+    )
+
 ML_PREFIX = "/ml"
 BASE_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
