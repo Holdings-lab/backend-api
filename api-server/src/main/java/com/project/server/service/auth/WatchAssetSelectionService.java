@@ -1,9 +1,12 @@
 package com.project.server.service.auth;
 
+import com.project.server.domain.UserEntity;
 import com.project.server.domain.UserWatchAssetEntity;
 import com.project.server.domain.WatchAssetCatalogEntity;
 import com.project.server.dto.WatchAssetDto;
+import com.project.server.exception.ApiException;
 import com.project.server.dto.HomeDto;
+import com.project.server.repository.UserJpaRepository;
 import com.project.server.repository.UserWatchAssetRepository;
 import com.project.server.repository.WatchAssetCatalogRepository;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -23,6 +27,7 @@ public class WatchAssetSelectionService {
 
     private final WatchAssetCatalogRepository watchAssetCatalogRepository;
     private final UserWatchAssetRepository userWatchAssetRepository;
+    private final UserJpaRepository userJpaRepository;
 
     @Transactional(readOnly = true)
     public List<WatchAssetDto.Asset> getAllAssets() {
@@ -68,12 +73,57 @@ public class WatchAssetSelectionService {
 
     @Transactional
     public List<WatchAssetDto.Asset> updateSelectedAssets(Long userId, List<String> assetNames) {
-        List<String> safeNames = assetNames == null ? List.of() : assetNames;
+        UserEntity user = userJpaRepository.findById(userId).orElse(null);
+
+        if (user == null) {
+            throw ApiException.notFound("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
+        }
+
+        if (assetNames == null || assetNames.isEmpty()) {
+            List<WatchAssetCatalogEntity> defaults = watchAssetCatalogRepository.findAllByOrderByDisplayOrderAsc()
+                .stream()
+                .limit(DEFAULT_SELECTION_SIZE)
+                .toList();
+
+            userWatchAssetRepository.deleteByUserId(userId);
+            List<UserWatchAssetEntity> saved = new ArrayList<>();
+            int displayOrder = 1;
+            for (WatchAssetCatalogEntity catalog : defaults) {
+            UserWatchAssetEntity entity = UserWatchAssetEntity.builder()
+                .userId(userId)
+                .assetName(catalog.getAssetName())
+                .changePercent(catalog.getDefaultChangePercent())
+                .signalText(toSignalText(catalog.getDefaultChangePercent()))
+                .displayOrder(displayOrder++)
+                .build();
+            saved.add(entity);
+            }
+
+            return userWatchAssetRepository.saveAll(saved).stream().map(this::toAsset).collect(Collectors.toList());
+        }
+
+        if (assetNames.stream().anyMatch(name -> name == null || name.isBlank())) {
+            throw ApiException.badRequest("자산명이 올바르지 않습니다.", "WATCH_ASSET_INVALID_NAME");
+        }
+
+        List<String> safeNames = assetNames.stream().distinct().toList();
         List<WatchAssetCatalogEntity> selectedCatalog = watchAssetCatalogRepository.findByAssetNameIn(safeNames)
                 .stream()
                 .sorted(Comparator.comparingInt(a -> safeNames.indexOf(a.getAssetName())))
                 .limit(DEFAULT_SELECTION_SIZE)
                 .toList();
+
+        Set<String> foundNames = selectedCatalog.stream()
+            .map(WatchAssetCatalogEntity::getAssetName)
+            .collect(Collectors.toSet());
+        List<String> missingNames = safeNames.stream()
+            .filter(name -> !foundNames.contains(name))
+            .toList();
+        if (!missingNames.isEmpty()) {
+            throw ApiException.badRequest(
+                "존재하지 않는 자산명입니다: " + String.join(", ", missingNames),
+                "WATCH_ASSET_NOT_FOUND");
+        }
 
         if (selectedCatalog.isEmpty()) {
             selectedCatalog = watchAssetCatalogRepository.findAllByOrderByDisplayOrderAsc()
@@ -100,7 +150,7 @@ public class WatchAssetSelectionService {
     }
 
     @Transactional
-    public List<HomeDto.WatchAssetImpact> getWatchImpacts(Long userId) {
+    public List<HomeDto.WatchAssetImpact> getWatchImpacts(Long userId) {        
         return getSelectedAssets(userId).stream()
                 .map(asset -> HomeDto.WatchAssetImpact.builder()
                         .assetName(asset.getAssetName())

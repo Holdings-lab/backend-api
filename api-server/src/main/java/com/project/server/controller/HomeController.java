@@ -25,22 +25,23 @@ public class HomeController {
     private final PortfolioService portfolioService;
 
     @GetMapping("/home")
-    public ResponseEntity<Map<String, Object>> getHomeIntegrated(@RequestParam(defaultValue = "사용자") String user) {
-        List<String> mockAssets = Arrays.asList("QQQ", "AAPL", "TSLA");
+    public ResponseEntity<Map<String, Object>> getHomeIntegrated(@RequestParam(name = "userId", required = true) Long userId) {
+        // 사용자 선택 자산 조회 (추후 실제 데이터 연동 필요)
+        List<String> userAssets = Arrays.asList("QQQ", "AAPL", "TSLA");
         
-        String greeting = userService.getUserGreeting(user);
-        String profileInitial = userService.getProfileInitial(user);
-        Map<String, Object> portfolio = portfolioService.aggregatePortfolio(user);
+        String greeting = userService.getUserGreeting(userId);
+        String profileInitial = userService.getProfileInitial(userId);
+        Map<String, Object> portfolio = portfolioService.aggregatePortfolio(userId);
         List<Map<String, Object>> rawSignals = signalService.collectPolicyNewsRaw();
-        String primaryEvent = "EVT-001";
-        double sensitivity = signalService.calculateAssetSensitivity(mockAssets);
-        Map<String, Object> metrics = signalService.calculateSignalMetrics(primaryEvent);
-        Map<String, Object> rankInfo = signalService.rankSignalsForUser(mockAssets, rawSignals);
+        String primaryEventId = "EVT-000001"; // 추후 최신 이벤트로 연동
+        double sensitivity = signalService.calculateAssetSensitivity(userAssets);
+        Map<String, Object> metrics = signalService.calculateSignalMetrics(primaryEventId);
+        Map<String, Object> rankInfo = signalService.rankSignalsForUser(userAssets, rawSignals);
         String formattedTitle = signalService.formatSignalTitle((String) rawSignals.get(0).get("rawTitle"));
-        double exposurePercent = signalService.calculateExposurePercent(mockAssets, sensitivity);
+        double exposurePercent = signalService.calculateExposurePercent(userAssets, sensitivity);
         Map<String, Object> actionPlan = signalService.generateActionPlan(metrics);
         Map<String, Object> risk = portfolioService.assessPortfolioRisk(metrics);
-        Map<String, Object> themeExposure = portfolioService.classifyThemeExposure(mockAssets, primaryEvent);
+        Map<String, Object> themeExposure = portfolioService.classifyThemeExposure(userAssets, primaryEventId);
         List<Map<String, Object>> secondarySignals = signalService.getSecondarySignals(rawSignals);
 
         Map<String, Object> response = new HashMap<>();
@@ -54,64 +55,64 @@ public class HomeController {
     }
 
     @GetMapping("/home/briefing")
-    public ResponseEntity<HomeBriefingDto.BriefingResponse> getHomeBriefing(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
-    ) {
+        public ResponseEntity<HomeBriefingDto.BriefingResponse> getHomeBriefing(
+            @RequestParam(name = "userId", required = true) Long userId
+        ) {
         return ResponseEntity.ok(homeBriefingService.getBriefing(userId));
     }
 
     @GetMapping("/home/header")
-    public ResponseEntity<HomeBriefingDto.HomeHeader> getHomeHeader(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
-    ) {
+        public ResponseEntity<HomeBriefingDto.HomeHeader> getHomeHeader(
+            @RequestParam(name = "userId", required = true) Long userId
+        ) {
         return ResponseEntity.ok(homeBriefingService.getHomeHeader(userId));
     }
 
     @GetMapping("/home/featured-card")
-    public ResponseEntity<HomeBriefingDto.FeaturedSignalCard> getFeaturedCard(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
-    ) {
+        public ResponseEntity<HomeBriefingDto.FeaturedSignalCard> getFeaturedCard(
+            @RequestParam(name = "userId", required = true) Long userId
+        ) {
         return ResponseEntity.ok(homeBriefingService.getFeaturedCard(userId));
     }
 
     @GetMapping("/home/portfolio-card")
-    public ResponseEntity<HomeBriefingDto.PortfolioCard> getPortfolioCard(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
-    ) {
+        public ResponseEntity<HomeBriefingDto.PortfolioCard> getPortfolioCard(
+            @RequestParam(name = "userId", required = true) Long userId
+        ) {
         return ResponseEntity.ok(homeBriefingService.getPortfolioCard(userId));
     }
 
     @GetMapping("/home/secondary-signals")
-    public ResponseEntity<java.util.List<HomeBriefingDto.SecondarySignalItem>> getSecondarySignals(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
-    ) {
+        public ResponseEntity<java.util.List<HomeBriefingDto.SecondarySignalItem>> getSecondarySignals(
+            @RequestParam(name = "userId", required = true) Long userId
+        ) {
         return ResponseEntity.ok(homeBriefingService.getSecondarySignals(userId));
     }
 
     @GetMapping("/home/quick-interpretation")
-    public ResponseEntity<HomeBriefingDto.QuickInterpretation> getQuickInterpretation(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
-    ) {
+        public ResponseEntity<HomeBriefingDto.QuickInterpretation> getQuickInterpretation(
+            @RequestParam(name = "userId", required = true) Long userId
+        ) {
         return ResponseEntity.ok(homeBriefingService.getQuickInterpretation(userId));
     }
 
     @GetMapping("/home/detail-tabs")
-    public ResponseEntity<HomeBriefingDto.DetailTabs> getDetailTabs(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
-    ) {
+        public ResponseEntity<HomeBriefingDto.DetailTabs> getDetailTabs(
+            @RequestParam(name = "userId", required = true) Long userId
+        ) {
         return ResponseEntity.ok(homeBriefingService.getDetailTabs(userId));
     }
 
     @GetMapping("/home/checkpoint-tab")
-    public ResponseEntity<HomeBriefingDto.CheckpointTab> getCheckpointTab(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
-    ) {
+        public ResponseEntity<HomeBriefingDto.CheckpointTab> getCheckpointTab(
+            @RequestParam(name = "userId", required = true) Long userId
+        ) {
         return ResponseEntity.ok(homeBriefingService.getCheckpointTab(userId));
     }
 
     @GetMapping("/home/disclaimer")
     public ResponseEntity<HomeBriefingDto.DisclaimerResponse> getDisclaimer(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
+            @RequestParam(name = "userId", required = true) Long userId
     ) {
         return ResponseEntity.ok(homeBriefingService.getDisclaimer(userId));
     }

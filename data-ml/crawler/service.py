@@ -364,21 +364,14 @@ def _build_daily_news_features(merged_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def run_crawl_now() -> dict:
-    rows = _build_fake_policy_rows(count=12)
-    base_df = pd.DataFrame(rows)
+    if not MERGED_FINBERT_PATH.exists():
+        return {
+            "status": "failed",
+            "message": "merged_finbert.csv 파일이 존재하지 않습니다.",
+            "executed_at": datetime.utcnow().isoformat() + "Z",
+        }
 
-    # Keep fake policy source, but convert text features with FinBERT like root/data-ml.
-    title_df = pd.DataFrame(_analyze_titles(base_df["title"].tolist()))
-    body_df = pd.DataFrame(_analyze_bodies(base_df["body"].tolist()))
-    new_df = pd.concat([base_df, title_df, body_df], axis=1)
-
-    if MERGED_FINBERT_PATH.exists():
-        old_df = pd.read_csv(MERGED_FINBERT_PATH)
-        merged = pd.concat([new_df, old_df], ignore_index=True)
-        merged = merged.drop_duplicates(subset=["date", "title", "link"], keep="first")
-    else:
-        merged = new_df
-
+    merged = pd.read_csv(MERGED_FINBERT_PATH)
     merged = merged.sort_values(by=["date", "title"], ascending=[False, True]).head(1500)
     merged.to_csv(MERGED_FINBERT_PATH, index=False, encoding="utf-8-sig")
 
@@ -388,8 +381,8 @@ def run_crawl_now() -> dict:
 
     return {
         "status": "success",
-        "message": "가짜 정책 데이터를 생성하고 FinBERT로 피처 변환 후 merged_finbert.csv에 저장했습니다.",
-        "generated_count": int(len(new_df)),
+        "message": "기존 merged_finbert.csv 파일을 읽어 피처를 업데이트했습니다.",
+        "generated_count": 0,
         "total_rows": int(len(merged)),
         "output_path": str(MERGED_FINBERT_PATH),
         "daily_features_path": str(DAILY_NEWS_FEATURES_PATH),

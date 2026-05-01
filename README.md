@@ -107,10 +107,10 @@ api-server/
 │     │     │  ├─ UserNotificationSettingRepository.java
 │     │     │  ├─ UserProfileRepository.java
 │     │     │  └─ UserWatchAssetRepository.java
-│     │     └─ service/
+│     │     ├─ service/
 │     │        ├─ auth/
 │     │        │  ├─ AuthService.java
-│     │        │  ├─ NotificationSettingsService.java
+│     │        │  ├─ SettingsService.java
 │     │        │  ├─ UserPreferenceService.java
 │     │        │  └─ WatchAssetSelectionService.java
 │     │        ├─ event/

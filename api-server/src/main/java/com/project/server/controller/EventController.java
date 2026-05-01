@@ -15,8 +15,8 @@ public class EventController {
     private final EventService eventService;
 
     @GetMapping
-    public ResponseEntity<EventDto.EventsResponse> getEvents(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId,
+        public ResponseEntity<EventDto.EventsResponse> getEvents(
+            @RequestParam(name = "userId", required = true) Long userId,
             @RequestParam(name = "dateSegment", defaultValue = "today") String dateSegment,
             @RequestParam(name = "category", defaultValue = "all") String category
     ) {
@@ -34,17 +34,17 @@ public class EventController {
     }
 
     @GetMapping("/items")
-    public ResponseEntity<java.util.List<EventDto.EventItem>> getEventItems(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId,
+        public ResponseEntity<java.util.List<EventDto.EventItem>> getEventItems(
+            @RequestParam(name = "userId", required = true) Long userId,
             @RequestParam(name = "dateSegment", defaultValue = "today") String dateSegment,
             @RequestParam(name = "category", defaultValue = "all") String category
-    ) {
+        ) {
         return ResponseEntity.ok(eventService.getEventItems(userId, dateSegment, category));
     }
 
     @PostMapping("/refresh")
     public ResponseEntity<EventDto.EventsResponse> refreshEvents(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId,
+            @RequestParam(name = "userId", required = true) Long userId,
             @RequestParam(name = "dateSegment", defaultValue = "today") String dateSegment,
             @RequestParam(name = "category", defaultValue = "all") String category
     ) {
@@ -53,7 +53,7 @@ public class EventController {
 
         @PostMapping("/{eventId}/alerts")
     public ResponseEntity<EventDto.EventAlertResponse> updateEventAlert(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId,
+            @RequestParam(name = "userId", required = true) Long userId,
             @PathVariable("eventId") Long eventId,
             @RequestBody EventDto.UpdateEventAlertRequest request
     ) {

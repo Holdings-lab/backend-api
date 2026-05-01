@@ -17,6 +17,7 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -29,61 +30,65 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AuthService {
 
-        private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final UserJpaRepository userJpaRepository;
     private final UserProfileRepository userProfileRepository;
     private final UserWatchAssetRepository userWatchAssetRepository;
-        private final EmailVerificationCodeRepository emailVerificationCodeRepository;
+    private final EmailVerificationCodeRepository emailVerificationCodeRepository;
     private final WatchAssetSelectionService watchAssetSelectionService;
-        private final PasswordEncoder passwordEncoder;
-        private final JavaMailSender mailSender;
+    private final PasswordEncoder passwordEncoder;
+    private final JavaMailSender mailSender;
+    private final SettingsService settingsService;
 
-        @Value("${auth.email.from}")
-        private String authMailFrom;
+    @Value("${auth.email.from}")
+    private String authMailFrom;
 
-        @Value("${auth.email.verify-code-expire-minutes:10}")
-        private long verifyCodeExpireMinutes;
+    @Value("${auth.email.verify-code-expire-minutes:10}")
+    private long verifyCodeExpireMinutes;
 
-        public AuthDto.EmailVerificationResponse sendEmailVerificationCode(String email) {
-                String normalizedEmail = email.trim().toLowerCase();
+    @Transactional
+    public AuthDto.EmailVerificationResponse sendEmailVerificationCode(String email) {
+        String normalizedEmail = email.trim().toLowerCase();
 
-                if (userJpaRepository.findByEmail(normalizedEmail).isPresent()) {
-                        throw ApiException.conflict("이미 존재하는 이메일입니다.", "AUTH_EMAIL_DUPLICATED");
-                }
-
-                String verificationCode = generateVerificationCode();
-                LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(verifyCodeExpireMinutes);
-
-                emailVerificationCodeRepository.deleteByEmail(normalizedEmail);
-                emailVerificationCodeRepository.save(EmailVerificationCodeEntity.builder()
-                                .email(normalizedEmail)
-                                .verificationCode(verificationCode)
-                                .expiresAt(expiresAt)
-                                .build());
-
-                sendVerificationEmail(normalizedEmail, verificationCode);
-
-                log.info("이메일 인증코드 발송: email={}", normalizedEmail);
-
-                return AuthDto.EmailVerificationResponse.builder()
-                                .email(normalizedEmail)
-                                .verified(false)
-                                .message("인증번호를 이메일로 전송했습니다.")
-                                .build();
+        if (userJpaRepository.findByEmail(normalizedEmail).isPresent()) {
+            throw ApiException.conflict("이미 존재하는 이메일입니다.", "AUTH_EMAIL_DUPLICATED");
         }
 
-        public AuthDto.EmailVerificationResponse verifyEmailCode(String email, String verificationCode) {
-                String normalizedEmail = email.trim().toLowerCase();
-                validateAndMarkVerified(normalizedEmail, verificationCode);
+        String verificationCode = generateVerificationCode();
+        LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(verifyCodeExpireMinutes);
 
-                return AuthDto.EmailVerificationResponse.builder()
-                                .email(normalizedEmail)
-                                .verified(true)
-                                .message("이메일 인증이 완료되었습니다.")
-                                .build();
-        }
+        emailVerificationCodeRepository.deleteByEmail(normalizedEmail);
+        emailVerificationCodeRepository.save(EmailVerificationCodeEntity.builder()
+                .email(normalizedEmail)
+                .verificationCode(verificationCode)
+                .expiresAt(expiresAt)
+                .build());
 
+        sendVerificationEmail(normalizedEmail, verificationCode);
+
+        log.info("이메일 인증코드 발송: email={}", normalizedEmail);
+
+        return AuthDto.EmailVerificationResponse.builder()
+                .email(normalizedEmail)
+                .verified(false)
+                .message("인증번호를 이메일로 전송했습니다.")
+                .build();
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public AuthDto.EmailVerificationResponse verifyEmailCode(String email, String verificationCode) {
+        String normalizedEmail = email.trim().toLowerCase();
+        validateAndMarkVerified(normalizedEmail, verificationCode);
+
+        return AuthDto.EmailVerificationResponse.builder()
+                .email(normalizedEmail)
+                .verified(true)
+                .message("이메일 인증이 완료되었습니다.")
+                .build();
+    }
+
+    @Transactional
     public AuthDto.AuthResponse register(AuthDto.RegisterRequest request) {
         String normalizedEmail = request.getEmail().trim().toLowerCase();
         String normalizedNickname = request.getNickname().trim();
@@ -120,17 +125,17 @@ public class AuthService {
             throw ApiException.notFound("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
         }
 
-                boolean passwordMatched = passwordEncoder.matches(request.getPassword(), user.getPassword());
-                if (!passwordMatched
-                                && !isBcryptHash(user.getPassword())
-                                && user.getPassword().equals(request.getPassword())) {
-                        user.setPassword(passwordEncoder.encode(request.getPassword()));
-                        userJpaRepository.save(user);
-                        passwordMatched = true;
-                        log.info("기존 평문 비밀번호를 해시로 업그레이드: {}", normalizedEmail);
-                }
+        boolean passwordMatched = passwordEncoder.matches(request.getPassword(), user.getPassword());
+        if (!passwordMatched
+                && !isBcryptHash(user.getPassword())
+                && user.getPassword().equals(request.getPassword())) {
+            user.setPassword(passwordEncoder.encode(request.getPassword()));
+            userJpaRepository.save(user);
+            passwordMatched = true;
+            log.info("기존 평문 비밀번호를 해시로 업그레이드: {}", normalizedEmail);
+        }
 
-                if (!passwordMatched) {
+        if (!passwordMatched) {
             throw ApiException.badRequest("비밀번호가 일치하지 않습니다.", "AUTH_INVALID_PASSWORD");
         }
 
@@ -150,7 +155,7 @@ public class AuthService {
         UserEntity user = userJpaRepository.findById(request.getUserId()).orElse(null);
 
         if (user == null) {
-            throw ApiException.badRequest("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
+            throw ApiException.notFound("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
         }
 
         // FCM 토큰 업데이트
@@ -172,7 +177,7 @@ public class AuthService {
         UserEntity user = userJpaRepository.findById(userId).orElse(null);
 
         if (user == null) {
-            throw ApiException.badRequest("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
+            throw ApiException.notFound("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
         }
 
         userJpaRepository.deleteById(userId);
@@ -188,7 +193,7 @@ public class AuthService {
     public AuthDto.AuthResponse updateNickname(Long userId, String nickname) {
         UserEntity user = userJpaRepository.findById(userId).orElse(null);
         if (user == null) {
-            throw ApiException.badRequest("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
+            throw ApiException.notFound("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
         }
 
         user.setNickname(nickname);
@@ -214,19 +219,33 @@ public class AuthService {
 
     public AuthDto.MeResponse getMe(Long userId) {
         UserEntity user = userJpaRepository.findById(userId).orElse(null);
+
+        if (user == null) {
+            throw ApiException.notFound("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
+        }
+
         UserProfileEntity profile = userProfileRepository.findByUserId(userId).orElse(null);
-        List<UserWatchAssetEntity> watchAssets = userWatchAssetRepository.findByUserIdOrderByDisplayOrderAsc(userId);
+
+        if (profile == null) {
+            throw ApiException.notFound("사용자 프로필을 찾을 수 없습니다.", "AUTH_PROFILE_NOT_FOUND");
+        }
+
+        List<UserWatchAssetEntity> watchAssets = userWatchAssetRepository
+                .findByUserIdOrderByDisplayOrderAsc(userId);
 
         String displayName = (user != null && user.getNickname() != null && !user.getNickname().isBlank())
                 ? user.getNickname()
                 : (user != null ? user.getEmail() : "사용자");
 
-        String avatarText = profile == null ? "JY" : profile.getAvatarText();
-        int weeklyLearningCount = profile == null ? 6 : profile.getWeeklyLearningCount();
-        int quizAccuracyPercent = profile == null ? 82 : profile.getQuizAccuracyPercent();
-        String weakTopic = profile == null ? "환율" : profile.getWeakTopic();
+        String avatarText = (profile != null && profile.getAvatarText() != null && !profile.getAvatarText().isBlank())
+                ? profile.getAvatarText()
+                : deriveAvatarInitials(displayName);
 
-        List<AuthDto.WatchAssetReturn> watchAssetReturns = watchAssets.isEmpty()
+        int weeklyLearningCount = profile != null ? profile.getWeeklyLearningCount() : 0;
+        int quizAccuracyPercent = profile != null ? profile.getQuizAccuracyPercent() : 0;
+        String weakTopic = profile != null ? profile.getWeakTopic() : null;
+
+        List<AuthDto.WatchAssetReturn> watchAssetReturns = (watchAssets == null || watchAssets.isEmpty())
                 ? watchAssetSelectionService.getSelectedAssets(userId).stream()
                         .map(asset -> AuthDto.WatchAssetReturn.builder()
                                 .assetName(asset.getAssetName())
@@ -240,49 +259,75 @@ public class AuthService {
                                 .build())
                         .toList();
 
+        String summaryText = String.format("이번 주 학습 %d회 · 퀴즈 정답률 %d%%",
+                weeklyLearningCount, quizAccuracyPercent);
+
+        // Build settings menu from DB-backed settings values
+        com.project.server.domain.UserNotificationSettingEntity notif = settingsService.getSettings(userId);
+
+        if (notif == null) {
+            throw ApiException.notFound("사용자 설정을 찾을 수 없습니다.", "AUTH_NOTIFICATION_SETTINGS_NOT_FOUND");
+        }
+
+        List<AuthDto.SettingMenuItem> settingsMenu = List.of(
+            AuthDto.SettingMenuItem.builder()
+                .key("notification")
+                .title("알림 설정")
+                .before30m(notif != null && notif.isBefore30m())
+                .importantEventBriefing(notif != null && notif.isImportantEventBriefing())
+                .learningReminder(notif != null && notif.isLearningReminder())
+                .build());
+
         return AuthDto.MeResponse.builder()
                 .profile(AuthDto.Profile.builder()
                         .avatarText(avatarText)
                         .name(displayName)
-                        .summaryText("이번 주 학습 " + weeklyLearningCount + "회 · 퀴즈 정답률 " + quizAccuracyPercent + "%")
+                        .summaryText(summaryText)
                         .build())
                 .watchAssets(watchAssetReturns)
                 .watchAssetsLinkText("추적 중 " + watchAssetReturns.size() + "개 자산")
                 .studyStats(List.of(
-                        AuthDto.StudyStat.builder().label("이번 주 학습").valueText(weeklyLearningCount + "회").build(),
-                        AuthDto.StudyStat.builder().label("퀴즈 정답률").valueText(quizAccuracyPercent + "%").build(),
-                        AuthDto.StudyStat.builder().label("가장 약한 단원").valueText(weakTopic).build()))
-                .settingsMenu(List.of(
-                        AuthDto.SettingMenuItem.builder().key("notification").title("알림 설정")
-                                .description("발표 직전, 브리핑 거점, 학습 퀴즈").build(),
-                        AuthDto.SettingMenuItem.builder().key("simple_explain").title("쉬운 설명 기본값").description("켜짐")
-                                .build(),
-                        AuthDto.SettingMenuItem.builder().key("color_mode").title("색상 모드").description("한국식 (빨강=상승)")
-                                .build(),
-                        AuthDto.SettingMenuItem.builder().key("market_pref").title("시장/국가 선호").description("미국, 한국")
-                                .build(),
-                        AuthDto.SettingMenuItem.builder().key("transparency").title("데이터 출처/모델 투명성")
-                                .description("출처, 모델 버전 확인").build(),
-                        AuthDto.SettingMenuItem.builder().key("account").title("계정 설정").description("보안, 닉네임, 로그아웃")
-                                .build()))
+                        AuthDto.StudyStat.builder().label("이번 주 학습")
+                                .valueText(weeklyLearningCount + "회").build(),
+                        AuthDto.StudyStat.builder().label("퀴즈 정답률")
+                                .valueText(quizAccuracyPercent + "%").build()))
+                .settingsMenu(settingsMenu)
                 .build();
     }
 
-        public AuthDto.Profile getMeProfile(Long userId) {
-                return getMe(userId).getProfile();
+    private String deriveAvatarInitials(String name) {
+        if (name == null || name.isBlank())
+            return "";
+        String[] parts = name.trim().split("\\s+");
+        if (parts.length == 1) {
+            return parts[0].substring(0, Math.min(2, parts[0].length())).toUpperCase();
+        } else {
+            String first = parts[0];
+            String second = parts[parts.length - 1];
+            String initials = "";
+            if (!first.isBlank())
+                initials += first.substring(0, 1);
+            if (!second.isBlank())
+                initials += second.substring(0, 1);
+            return initials.toUpperCase();
         }
+    }
 
-        public List<AuthDto.WatchAssetReturn> getMeWatchAssets(Long userId) {
-                return getMe(userId).getWatchAssets();
-        }
+    public AuthDto.Profile getMeProfile(Long userId) {
+        return getMe(userId).getProfile();
+    }
 
-        public List<AuthDto.StudyStat> getMeStudyStats(Long userId) {
-                return getMe(userId).getStudyStats();
-        }
+    public List<AuthDto.WatchAssetReturn> getMeWatchAssets(Long userId) {
+        return getMe(userId).getWatchAssets();
+    }
 
-        public List<AuthDto.SettingMenuItem> getMeSettingsMenu(Long userId) {
-                return getMe(userId).getSettingsMenu();
-        }
+    public List<AuthDto.StudyStat> getMeStudyStats(Long userId) {
+        return getMe(userId).getStudyStats();
+    }
+
+    public List<AuthDto.SettingMenuItem> getMeSettings(Long userId) {
+        return getMe(userId).getSettingsMenu();
+    }
 
     /**
      * 비밀번호 변경 (사용자가 자신의 비밀번호 변경)
@@ -291,22 +336,22 @@ public class AuthService {
         UserEntity user = userJpaRepository.findById(userId).orElse(null);
 
         if (user == null) {
-            throw ApiException.badRequest("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
+            throw ApiException.notFound("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND");
         }
 
         // 현재 비밀번호 검증
-                boolean currentPasswordMatched = passwordEncoder.matches(currentPassword, user.getPassword());
-                if (!currentPasswordMatched
-                                && !isBcryptHash(user.getPassword())
-                                && user.getPassword().equals(currentPassword)) {
-                        currentPasswordMatched = true;
-                }
-
-                if (!currentPasswordMatched) {
-            throw ApiException.badRequest("현재 비밀번호가 일치하지 않습니다.", "AUTH_INVALID_PASSWORD");
+        boolean currentPasswordMatched = passwordEncoder.matches(currentPassword, user.getPassword());
+        if (!currentPasswordMatched
+                && !isBcryptHash(user.getPassword())
+                && user.getPassword().equals(currentPassword)) {
+            currentPasswordMatched = true;
         }
 
-                user.setPassword(passwordEncoder.encode(newPassword));
+        if (!currentPasswordMatched) {
+            throw ApiException.unauthorized("현재 비밀번호가 일치하지 않습니다.", "AUTH_INVALID_PASSWORD");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
         userJpaRepository.save(user);
         log.info("사용자 비밀번호 변경: {}", user.getEmail());
 
@@ -382,60 +427,65 @@ public class AuthService {
         return provider.toUpperCase() + "_" + oauthUserId.substring(0, 8);
     }
 
-        private void sendVerificationEmail(String email, String code) {
-                try {
-                        SimpleMailMessage mailMessage = new SimpleMailMessage();
-                        mailMessage.setFrom(authMailFrom);
-                        mailMessage.setTo(email);
-                        mailMessage.setSubject("[Holdings Lab] 이메일 인증번호 안내");
-                        mailMessage.setText("Holdings Lab 이메일 인증 안내\n\n"
-                                        + "인증번호: " + code + "\n"
-                                        + "유효시간: " + verifyCodeExpireMinutes + "분\n\n"
-                                        + "앱의 인증번호 입력란에 위 코드를 입력해주세요.\n"
-                                        + "본인이 요청하지 않았다면 이 메일을 무시하셔도 됩니다.");
-                        mailSender.send(mailMessage);
-                } catch (Exception ex) {
-                        log.error("이메일 인증코드 발송 실패: email={}", email, ex);
-                        throw ApiException.badRequest("이메일 발송에 실패했습니다. 메일 설정을 확인해주세요.", "AUTH_EMAIL_SEND_FAILED");
-                }
+    private void sendVerificationEmail(String email, String code) {
+        try {
+            SimpleMailMessage mailMessage = new SimpleMailMessage();
+            mailMessage.setFrom(authMailFrom);
+            mailMessage.setTo(email);
+            mailMessage.setSubject("[Holdings Lab] 이메일 인증번호 안내");
+            mailMessage.setText("Holdings Lab 이메일 인증 안내\n\n"
+                    + "인증번호: " + code + "\n"
+                    + "유효시간: " + verifyCodeExpireMinutes + "분\n\n"
+                    + "앱의 인증번호 입력란에 위 코드를 입력해주세요.\n"
+                    + "본인이 요청하지 않았다면 이 메일을 무시하셔도 됩니다.");
+            mailSender.send(mailMessage);
+        } catch (Exception ex) {
+            log.error("이메일 인증코드 발송 실패: email={}", email, ex);
+            throw ApiException.badRequest("이메일 발송에 실패했습니다. 메일 설정을 확인해주세요.", "AUTH_EMAIL_SEND_FAILED");
+        }
+    }
+
+    private void validateAndMarkVerified(String normalizedEmail, String verificationCode) {
+        EmailVerificationCodeEntity emailCode = emailVerificationCodeRepository
+                .findTopByEmailOrderByIdDesc(normalizedEmail)
+                .orElseThrow(() -> ApiException.badRequest("이메일 인증요청이 필요합니다.",
+                        "AUTH_EMAIL_VERIFICATION_REQUIRED"));
+
+        if (emailCode.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw ApiException.badRequest("인증번호가 만료되었습니다.", "AUTH_EMAIL_CODE_EXPIRED");
         }
 
-        private void validateAndMarkVerified(String normalizedEmail, String verificationCode) {
-                EmailVerificationCodeEntity emailCode = emailVerificationCodeRepository.findTopByEmailOrderByIdDesc(normalizedEmail)
-                                .orElseThrow(() -> ApiException.badRequest("이메일 인증요청이 필요합니다.", "AUTH_EMAIL_VERIFICATION_REQUIRED"));
-
-                if (emailCode.getExpiresAt().isBefore(LocalDateTime.now())) {
-                        throw ApiException.badRequest("인증번호가 만료되었습니다.", "AUTH_EMAIL_CODE_EXPIRED");
-                }
-
-                if (!emailCode.getVerificationCode().equals(verificationCode)) {
-                        throw ApiException.badRequest("인증번호가 일치하지 않습니다.", "AUTH_EMAIL_CODE_INVALID");
-                }
-
-                emailCode.setVerifiedAt(LocalDateTime.now());
-                emailVerificationCodeRepository.save(emailCode);
+        if (!emailCode.getVerificationCode().equals(verificationCode)) {
+            throw ApiException.badRequest("인증번호가 일치하지 않습니다.", "AUTH_EMAIL_CODE_INVALID");
         }
 
-        private void ensureEmailVerifiedForRegistration(String normalizedEmail) {
-                EmailVerificationCodeEntity emailCode = emailVerificationCodeRepository.findTopByEmailOrderByIdDesc(normalizedEmail)
-                                .orElseThrow(() -> ApiException.badRequest("이메일 인증이 필요합니다.", "AUTH_EMAIL_VERIFICATION_REQUIRED"));
+        emailCode.setVerifiedAt(LocalDateTime.now());
+        emailVerificationCodeRepository.save(emailCode);
+    }
 
-                if (emailCode.getExpiresAt().isBefore(LocalDateTime.now())) {
-                        throw ApiException.badRequest("이메일 인증이 만료되었습니다. 다시 인증해주세요.", "AUTH_EMAIL_CODE_EXPIRED");
-                }
+    private void ensureEmailVerifiedForRegistration(String normalizedEmail) {
+        EmailVerificationCodeEntity emailCode = emailVerificationCodeRepository
+                .findTopByEmailOrderByIdDesc(normalizedEmail)
+                .orElseThrow(() -> ApiException.badRequest("이메일 인증이 필요합니다.",
+                        "AUTH_EMAIL_VERIFICATION_REQUIRED"));
 
-                if (emailCode.getVerifiedAt() == null) {
-                        throw ApiException.badRequest("이메일 인증번호 확인이 필요합니다.", "AUTH_EMAIL_NOT_VERIFIED");
-                }
+        if (emailCode.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw ApiException.badRequest("이메일 인증이 만료되었습니다. 다시 인증해주세요.", "AUTH_EMAIL_CODE_EXPIRED");
         }
 
-        private String generateVerificationCode() {
-                int random = SECURE_RANDOM.nextInt(900000) + 100000;
-                return Integer.toString(random);
+        if (emailCode.getVerifiedAt() == null) {
+            throw ApiException.badRequest("이메일 인증번호 확인이 필요합니다.", "AUTH_EMAIL_NOT_VERIFIED");
         }
+    }
 
-        private boolean isBcryptHash(String password) {
-                return password != null
-                                && (password.startsWith("$2a$") || password.startsWith("$2b$") || password.startsWith("$2y$"));
-        }
+    private String generateVerificationCode() {
+        int random = SECURE_RANDOM.nextInt(900000) + 100000;
+        return Integer.toString(random);
+    }
+
+    private boolean isBcryptHash(String password) {
+        return password != null
+                && (password.startsWith("$2a$") || password.startsWith("$2b$")
+                        || password.startsWith("$2y$"));
+    }
 }

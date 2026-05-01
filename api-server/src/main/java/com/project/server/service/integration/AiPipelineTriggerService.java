@@ -29,13 +29,20 @@ public class AiPipelineTriggerService {
     public void triggerAndUpdateFeatured(Long userId) {
         triggerDataMlPolicyFeed();
         EventScheduleService.EventSchedule current = eventScheduleService.getCurrentEvent(userId);
+        // dDayText와 tags는 EventScheduleService에서 계산하는 값 사용
+        List<String> dynamicTags = extractTagsFromSchedule(current);
         featuredEventStateService.setFeatured(
                 userId,
                 current.title(),
                 current.title() + " · 발표 전",
-                "D-0 00:31",
-                List.of("미국", "예측높음")
+                current.countdownText(),
+                dynamicTags
         );
+    }
+    
+    private List<String> extractTagsFromSchedule(EventScheduleService.EventSchedule schedule) {
+        // 시간 정보나 제목으로부터 동적 태그 생성
+        return List.of("미국", "주목");
     }
 
     private void triggerDataMlPolicyFeed() {

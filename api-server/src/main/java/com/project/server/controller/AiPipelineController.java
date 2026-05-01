@@ -18,7 +18,7 @@ public class AiPipelineController {
 
     @PostMapping("/trigger")
     public ResponseEntity<ActionDto.ActionResponse> triggerAi(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
+            @RequestParam(name = "userId", required = true) Long userId
     ) {
         aiPipelineTriggerService.triggerAndUpdateFeatured(userId);
         return ResponseEntity.ok(ActionDto.ActionResponse.builder()

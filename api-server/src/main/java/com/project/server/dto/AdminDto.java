@@ -4,8 +4,10 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.List;
 
@@ -13,6 +15,8 @@ public class AdminDto {
 
     @Data
     @Builder
+    @NoArgsConstructor // Jackson을 위한 기본 생성자 추가
+    @AllArgsConstructor // Builder를 위한 전체 생성자 추가
     public static class CreateAccountRequest {
         @NotBlank(message = "이메일은 필수입니다.")
         private String email;
@@ -24,7 +28,8 @@ public class AdminDto {
         @NotBlank(message = "비밀번호는 필수입니다.")
         private String password;
 
-        private String fcmToken;
+        @Builder.Default
+        private String fcmToken = "";
     }
 
     @Data

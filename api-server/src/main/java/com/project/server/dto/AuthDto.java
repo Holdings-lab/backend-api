@@ -152,7 +152,9 @@ public class AuthDto {
     public static class SettingMenuItem {
         private String key;
         private String title;
-        private String description;
+        private Boolean before30m;
+        private Boolean importantEventBriefing;
+        private Boolean learningReminder;
     }
 
     @Data

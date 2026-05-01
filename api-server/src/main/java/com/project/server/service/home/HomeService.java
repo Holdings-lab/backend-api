@@ -23,8 +23,9 @@ public class HomeService {
     private final UserJpaRepository userJpaRepository;
     private final PolicyEventJpaRepository policyEventJpaRepository;
     private final UserWatchAssetRepository userWatchAssetRepository;
-        private final WatchAssetSelectionService watchAssetSelectionService;
-        private final FeaturedEventStateService featuredEventStateService;
+    private final WatchAssetSelectionService watchAssetSelectionService;
+    private final FeaturedEventStateService featuredEventStateService;
+    private final com.project.server.service.integration.MlPredictionProxyService mlPredictionProxyService;
 
     public HomeDto.HomeResponse getHome(Long userId) {
         String name = resolveDisplayName(userId);
@@ -128,22 +129,35 @@ public class HomeService {
                 return List.of("정책", keyword, impactTag);
         }
 
-        private List<HomeDto.InsightCard> buildInsights(PolicyEventEntity featuredEvent, int linkedAssetCount) {
-                double impact = featuredEvent == null || featuredEvent.getImpactScore() == null ? 50.0 : featuredEvent.getImpactScore();
-                int direction = (int) Math.round(Math.max(5, Math.min(95, impact)));
-                int volatility = (int) Math.round(Math.max(10, Math.min(95, impact * 0.9 + linkedAssetCount * 4.0)));
-                String confidence = impact >= 75 ? "높음" : impact >= 55 ? "중간" : "낮음";
+    private List<HomeDto.InsightCard> buildInsights(PolicyEventEntity featuredEvent, int linkedAssetCount) {
+        com.fasterxml.jackson.databind.JsonNode mlResult = mlPredictionProxyService.fetchPredictionResult();
 
-                String detail = featuredEvent == null || featuredEvent.getKeyword() == null || featuredEvent.getKeyword().isBlank()
-                                ? "정책 이벤트 반영"
-                                : featuredEvent.getKeyword().toUpperCase(Locale.ROOT) + " 영향 반영";
+        double impact = featuredEvent == null || featuredEvent.getImpactScore() == null ? 50.0 : featuredEvent.getImpactScore();
+        int direction = (int) Math.round(Math.max(5, Math.min(95, impact)));
+        int volatility = (int) Math.round(Math.max(10, Math.min(95, impact * 0.9 + linkedAssetCount * 4.0)));
+        String confidence = impact >= 75 ? "높음" : impact >= 55 ? "중간" : "낮음";
 
-                return List.of(
-                                HomeDto.InsightCard.builder().title(direction + "%").subtitle("방향성").detail(detail).build(),
-                                HomeDto.InsightCard.builder().title(volatility + "%").subtitle("변동성").detail("관심자산 " + linkedAssetCount + "개 반영").build(),
-                                HomeDto.InsightCard.builder().title(confidence).subtitle("신뢰도").detail("DB 최신 이벤트 기반").build()
-                );
+        String detail = featuredEvent == null || featuredEvent.getKeyword() == null || featuredEvent.getKeyword().isBlank()
+                ? "정책 이벤트 반영"
+                : featuredEvent.getKeyword().toUpperCase(Locale.ROOT) + " 영향 반영";
+
+        if (mlResult != null && !mlResult.isMissingNode()) {
+            double accuracy = mlResult.path("metrics").path("directionAccuracy").asDouble(0.0);
+            double mlScore = Math.abs(mlResult.path("metrics").path("policyScore").asDouble(0.0));
+            double topProb = mlResult.path("metrics").path("topLabelProbability").asDouble(0.0);
+            
+            confidence = accuracy >= 0.75 ? "높음" : accuracy >= 0.55 ? "중간" : "낮음";
+            volatility = (int) Math.round(Math.max(10, Math.min(95, mlScore * 2000)));
+            direction = (int) Math.round(Math.max(5, Math.min(95, topProb * 100)));
+            detail = "data-ml 최신 분석 반영";
         }
+
+        return List.of(
+                HomeDto.InsightCard.builder().title(direction + "%").subtitle("상승확률").detail(detail).build(),
+                HomeDto.InsightCard.builder().title(volatility + "%").subtitle("변동성").detail("ML 예측 반영").build(),
+                HomeDto.InsightCard.builder().title(confidence).subtitle("신뢰도").detail("DB 최신 이벤트 기반").build()
+        );
+    }
 
         private List<HomeDto.ReasonItem> buildReasonItems(String summary) {
                 if (summary == null || summary.isBlank()) {

@@ -34,6 +34,7 @@ public class HomeBriefingService {
     private final UserWatchAssetRepository userWatchAssetRepository;
     private final PolicyEventJpaRepository policyEventJpaRepository;
     private final WatchAssetSelectionService watchAssetSelectionService;
+    private final com.project.server.service.integration.MlPredictionProxyService mlPredictionProxyService;
 
     public HomeBriefingDto.HomeHeader getHomeHeader(Long userId) {
         return buildBriefingBundle(userId).homeHeader();
@@ -101,8 +102,10 @@ public class HomeBriefingService {
                     .build());
         }
 
+        com.fasterxml.jackson.databind.JsonNode mlResult = mlPredictionProxyService.fetchPredictionResult();
+
         List<ScoredEvent> ranked = events.stream()
-                .map(event -> scoreEvent(event, positions))
+                .map(event -> scoreEvent(event, positions, mlResult))
                 .sorted(Comparator.comparingDouble(ScoredEvent::priority).reversed())
                 .toList();
 
@@ -185,7 +188,7 @@ public class HomeBriefingService {
                 .trim();
     }
 
-    private ScoredEvent scoreEvent(PolicyEventEntity event, List<AssetPosition> positions) {
+    private ScoredEvent scoreEvent(PolicyEventEntity event, List<AssetPosition> positions, com.fasterxml.jackson.databind.JsonNode mlResult) {
         double impact = safeImpact(event);
         Theme theme = classifyTheme(event);
         int exposure = clamp((int) Math.round(positions.stream()
@@ -194,6 +197,14 @@ public class HomeBriefingService {
 
         int volatility = clamp((int) Math.round(impact * 0.9 + (theme == Theme.DOLLAR ? 10 : 0)));
         int confidence = clamp((int) Math.round(55 + impact * 0.35));
+        
+        if (mlResult != null && !mlResult.isMissingNode()) {
+            double accuracy = mlResult.path("metrics").path("directionAccuracy").asDouble(0.0);
+            double mlScore = Math.abs(mlResult.path("metrics").path("policyScore").asDouble(0.0));
+            confidence = clamp((int) Math.round(accuracy * 100));
+            volatility = clamp((int) Math.round(mlScore * 2000)); // Scale up small mlScore to a volatility index
+        }
+
         int upside = clamp((int) Math.round((impact + exposure) / 2.0));
         int downside = clamp(100 - upside);
         String direction = upside >= downside ? "상승" : "하락";

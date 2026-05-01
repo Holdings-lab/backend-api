@@ -1,20 +1,11 @@
 package com.project.server.dto;
 
-import lombok.Builder;
 import lombok.Data;
 
 public class UserPreferenceDto {
 
     @Data
-    @Builder
-    public static class NotificationSettingsResponse {
-        private boolean before30m;
-        private boolean importantEventBriefing;
-        private boolean learningReminder;
-    }
-
-    @Data
-    public static class UpdateNotificationSettingsRequest {
+    public static class UpdateSettingsRequest {
         private boolean before30m;
         private boolean importantEventBriefing;
         private boolean learningReminder;

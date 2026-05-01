@@ -11,49 +11,36 @@ import java.util.*;
 @RestController
 @RequestMapping("/api/signals")
 public class SignalController {
-    private final SignalService signalService;
     private final SignalDetailService signalDetailService;
 
-    public SignalController(SignalService signalService, SignalDetailService signalDetailService) {
-        this.signalService = signalService;
+    public SignalController(SignalDetailService signalDetailService) {
         this.signalDetailService = signalDetailService;
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Map<String, Object>> getSignalDetail(@PathVariable String id) {
-        if (id == null || id.trim().isEmpty() || id.equals("0")) {
+    public ResponseEntity<Map<String, Object>> getSignalDetail(@PathVariable("id") String idParam) {
+        if (idParam == null || idParam.trim().isEmpty()) {
             throw ApiException.badRequest("올바르지 않은 시그널 ID입니다.", "SIGNAL_INVALID_ID");
         }
-        if (!id.startsWith("EVT-")) {
-            throw ApiException.notFound("존재하지 않는 시그널입니다.", "SIGNAL_NOT_FOUND");
+
+        // Parse: "EVT-001" 또는 "001" 형식 모두 허용
+        String numericStr = idParam.trim();
+        if (numericStr.startsWith("EVT-")) {
+            numericStr = numericStr.substring(4);
+        }
+
+        long signalId;
+        try {
+            signalId = Long.parseLong(numericStr);
+            if (signalId <= 0) {
+                throw ApiException.badRequest("올바르지 않은 시그널 ID입니다.", "SIGNAL_INVALID_ID");
+            }
+        } catch (NumberFormatException e) {
+            throw ApiException.badRequest("올바르지 않은 시그널 ID입니다.", "SIGNAL_INVALID_ID");
         }
 
         List<String> mockAssets = Arrays.asList("QQQ", "AAPL");
-        double sensitivity = signalService.calculateAssetSensitivity(mockAssets);
-        List<String> reasons = signalService.generateReasonCandidates(id);
-        
-        Map<String, Object> decisionBadge = signalDetailService.formatDecisionBadge(new HashMap<>());
-        Map<String, Object> impactZone = signalDetailService.generateImpactZoneDesc(mockAssets, sensitivity);
-        String keyReason = signalDetailService.summarizeKeyReason(reasons);
-        Map<String, Object> keyNumbers = signalDetailService.extractKeyNumbers("text");
-        String revisitTime = signalDetailService.formatRevisitTime("time");
-        String weakeningCondition = signalDetailService.extractWeakeningConditions("cond");
-        String behaviorTips = signalDetailService.generateBehaviorTips("label");
-        List<Map<String, Object>> impactPath = signalDetailService.extractImpactPath("path");
-        List<String> refinedEvidence = signalDetailService.refineKeyEvidence(Arrays.asList("ev1"));
-        Map<String, Object> counterArguments = signalDetailService.generateCounterArguments(id);
-        List<String> invalidationRules = signalDetailService.formatInvalidationRules("rules");
-        List<Map<String, Object>> policyCheckpoints = signalDetailService.classifyPolicyCheckpoints("text");
-        List<Map<String, Object>> marketIndicators = signalDetailService.mapMarketIndicators(new HashMap<>());
-        String notifyRules = signalDetailService.generateNotifyRules("time");
-        Map<String, Object> systemStatus = signalDetailService.getSystemStatus();
-        String disclaimer = signalDetailService.getStaticDisclaimer();
-
-        Map<String, Object> response = new HashMap<>();
-        response.put("id", id);
-        response.put("fastInterpretation", Map.of("badge", decisionBadge, "impactZone", impactZone, "keyReason", keyReason, "keyNumbers", keyNumbers, "revisitTime", revisitTime, "weakeningCondition", weakeningCondition, "behaviorTips", behaviorTips));
-        response.put("detailedEvidence", Map.of("impactPath", impactPath, "refinedEvidence", refinedEvidence, "counterArguments", counterArguments, "invalidationRules", invalidationRules));
-        response.put("checkpointMetadata", Map.of("policyCheckpoints", policyCheckpoints, "marketIndicators", marketIndicators, "notifyRules", notifyRules, "systemStatus", systemStatus, "disclaimer", disclaimer));
+        Map<String, Object> response = signalDetailService.getDynamicSignalDetail(idParam, mockAssets);
         return ResponseEntity.ok(response);
     }
 }

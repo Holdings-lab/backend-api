@@ -21,54 +21,47 @@ public class UserPreferenceController {
     private final AuthService authService;
     private final WatchAssetSelectionService watchAssetSelectionService;
 
-    @GetMapping
-    public ResponseEntity<AuthDto.MeResponse> getMe(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    @GetMapping("/{userId}")
+    public ResponseEntity<AuthDto.MeResponse> getMeByPath(
+            @PathVariable("userId") Long userId
     ) {
         return ResponseEntity.ok(authService.getMe(userId));
     }
 
-    @GetMapping("/profile")
-    public ResponseEntity<AuthDto.Profile> getMeProfile(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
-    ) {
+    @GetMapping("/{userId}/profile")
+        public ResponseEntity<AuthDto.Profile> getMeProfile(
+            @PathVariable("userId") Long userId
+        ) {
         return ResponseEntity.ok(authService.getMeProfile(userId));
     }
 
-    @GetMapping("/watch-assets")
-    public ResponseEntity<java.util.List<AuthDto.WatchAssetReturn>> getMeWatchAssets(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
-    ) {
+    @GetMapping("/{userId}/watch-assets")
+        public ResponseEntity<java.util.List<AuthDto.WatchAssetReturn>> getMeWatchAssets(
+            @PathVariable("userId") Long userId
+        ) {
         return ResponseEntity.ok(authService.getMeWatchAssets(userId));
     }
 
-    @GetMapping("/study-stats")
-    public ResponseEntity<java.util.List<AuthDto.StudyStat>> getMeStudyStats(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
-    ) {
+    @GetMapping("/{userId}/study-stats")
+        public ResponseEntity<java.util.List<AuthDto.StudyStat>> getMeStudyStats(
+            @PathVariable("userId"  ) Long userId
+        ) {
         return ResponseEntity.ok(authService.getMeStudyStats(userId));
     }
 
-    @GetMapping("/settings-menu")
-    public ResponseEntity<java.util.List<AuthDto.SettingMenuItem>> getMeSettingsMenu(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    @GetMapping("/{userId}/settings")
+    public ResponseEntity<java.util.List<AuthDto.SettingMenuItem>> getSettings(
+            @PathVariable("userId") Long userId
     ) {
-        return ResponseEntity.ok(authService.getMeSettingsMenu(userId));
+        return ResponseEntity.ok(authService.getMeSettings(userId));
     }
 
-    @GetMapping("/settings/notifications")
-    public ResponseEntity<UserPreferenceDto.NotificationSettingsResponse> getNotificationSettings(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    @PatchMapping("/{userId}/settings")
+    public ResponseEntity<java.util.List<AuthDto.SettingMenuItem>> updateSettings(
+            @PathVariable("userId") Long userId,
+            @RequestBody UserPreferenceDto.UpdateSettingsRequest request
     ) {
-        return ResponseEntity.ok(userPreferenceService.getNotificationSettings(userId));
-    }
-
-    @PatchMapping("/settings/notifications")
-    public ResponseEntity<UserPreferenceDto.NotificationSettingsResponse> updateNotificationSettings(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId,
-            @RequestBody UserPreferenceDto.UpdateNotificationSettingsRequest request
-    ) {
-        return ResponseEntity.ok(userPreferenceService.updateNotificationSettings(userId, request));
+        return ResponseEntity.ok(userPreferenceService.updateSettings(userId, request));
     }
 
     @GetMapping("/watch-assets/options")
@@ -80,9 +73,9 @@ public class UserPreferenceController {
         );
     }
 
-    @PostMapping("/watch-assets")
+    @PostMapping("/{userId}/watch-assets")
     public ResponseEntity<ActionDto.ActionResponse> updateWatchAssets(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId,
+            @PathVariable("userId") Long userId,
             @RequestBody WatchAssetDto.UpdateWatchAssetsRequest request
     ) {
         watchAssetSelectionService.updateSelectedAssets(userId, request.getAssetNames());

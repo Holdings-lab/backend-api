@@ -17,6 +17,7 @@ import java.util.stream.Collectors;
 public class InsightService {
 
     private final PolicyEventJpaRepository policyEventJpaRepository;
+    private final com.project.server.service.integration.MlPredictionProxyService mlPredictionProxyService;
 
     public List<String> getViewTabs() {
         return List.of("heatmap", "ranking", "network");
@@ -81,11 +82,18 @@ public class InsightService {
     }
 
     private List<String> buildCells(double avgImpact, String eventType) {
+        com.fasterxml.jackson.databind.JsonNode mlResult = mlPredictionProxyService.fetchPredictionResult();
+        double mlImpact = avgImpact;
+        if (mlResult != null && !mlResult.isMissingNode()) {
+            double policyScore = mlResult.path("metrics").path("policyScore").asDouble(0.0);
+            mlImpact = avgImpact + Math.abs(policyScore) * 1000; // Boost impact based on ML score
+        }
+
         int seed = Math.abs(eventType.hashCode() % 12);
-        double stock = avgImpact + (seed % 4 - 1) * 4.0;
-        double bond = avgImpact + ((seed + 1) % 4 - 1) * 5.0;
-        double dollar = avgImpact + ((seed + 2) % 4 - 1) * 3.0;
-        double gold = avgImpact + ((seed + 3) % 4 - 1) * 2.0;
+        double stock = mlImpact + (seed % 4 - 1) * 4.0;
+        double bond = mlImpact + ((seed + 1) % 4 - 1) * 5.0;
+        double dollar = mlImpact + ((seed + 2) % 4 - 1) * 3.0;
+        double gold = mlImpact + ((seed + 3) % 4 - 1) * 2.0;
 
         return List.of(level(stock), level(bond), level(dollar), level(gold));
     }

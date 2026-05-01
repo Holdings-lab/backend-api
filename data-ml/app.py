@@ -370,19 +370,19 @@ def health():
             "scheduler_running": bool(scheduler_instance and scheduler_instance.running),
             "timestamp": datetime.utcnow().isoformat() + "Z",
         },
-        message="데이터-ML 헬스체크에 성공했습니다.",
+        message="ML 헬스 체크에 성공했습니다.",
     )
 
 
 @app.post(f"{ML_PREFIX}/crawl/run")
 def run_crawl_endpoint():
     if not run_lock.acquire(blocking=False):
-        return _error_response("이미 다른 작업이 실행 중입니다.", status_code=409)
+        return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_CRAWL_BUSY", status_code=409)
     try:
         result = run_crawl_now()
         if result.get("status") == "success":
             return _success_response(_remove_message_fields(result), message="크롤링 실행에 성공했습니다.")
-        return _error_response(status_code=500)
+        return _error_response(message="크롤링 실행에 실패했습니다.", code="ML_CRAWL_FAILED", status_code=500)
     finally:
         run_lock.release()
 
@@ -390,12 +390,12 @@ def run_crawl_endpoint():
 @app.post(f"{ML_PREFIX}/predict/run")
 def run_predict_endpoint():
     if not run_lock.acquire(blocking=False):
-        return _error_response("이미 다른 작업이 실행 중입니다.", status_code=409)
+        return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_PREDICT_BUSY", status_code=409)
     try:
         result = run_prediction_now()
         if result.get("status") == "success":
             return _success_response(_remove_message_fields(result), message="예측 실행에 성공했습니다.")
-        return _error_response(status_code=500)
+        return _error_response(message="예측 실행에 실패했습니다.", code="ML_PREDICT_FAILED", status_code=500)
     finally:
         run_lock.release()
 
@@ -404,7 +404,7 @@ def run_predict_endpoint():
 def get_predict_result_endpoint():
     summary = _safe_json_load(TRAINING_SUMMARY_PATH)
     if not summary:
-        return _error_response("예측 결과가 존재하지 않습니다.", status_code=404)
+        return _error_response("예측 결과가 존재하지 않습니다.", code="ML_PREDICT_RESULT_NOT_FOUND", status_code=404)
     return _success_response(summary, message="예측 연산 결과를 성공적으로 불러왔습니다.")
 
 
@@ -419,7 +419,7 @@ async def policy_feed_endpoint(request: Request):
     return _success_response(_remove_message_fields(result), message="정책 피드 조회에 성공했습니다.")
 
 
-@app.post(f"{ML_PREFIX}/signal")
+@app.post(f"{ML_PREFIX}/pipeline")
 async def signal_endpoint(request: Request):
     try:
         payload = await request.json()
@@ -428,10 +428,10 @@ async def signal_endpoint(request: Request):
 
     result = run_pipeline(trigger=_safe_str(payload.get("source"), "manual"))
     if result.get("status") == "busy":
-        return _error_response("이미 다른 작업이 실행 중입니다.", status_code=409)
+        return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_PIPELINE_BUSY", status_code=409)
     if result.get("status") == "success":
         return _success_response(_remove_message_fields(result), message="외부 신호 기반 파이프라인 실행에 성공했습니다.")
-    return _error_response(status_code=500)
+    return _error_response(message="파이프라인 실행에 실패했습니다.", code="ML_PIPELINE_FAILED", status_code=500)
 
 
 if __name__ == "__main__":

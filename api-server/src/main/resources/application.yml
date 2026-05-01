@@ -26,8 +26,8 @@ spring:
   mail:
     host: ${MAIL_HOST:smtp.gmail.com}
     port: ${MAIL_PORT:587}
-    username: ${MAIL_USERNAME:}
-    password: ${MAIL_PASSWORD:}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
     properties:
       mail:
         smtp:
@@ -67,5 +67,5 @@ admin:
 
 auth:
   email:
-    from: ${AUTH_EMAIL_FROM:${MAIL_USERNAME:no-reply@holdings-lab.local}}
-    verify-code-expire-minutes: ${AUTH_VERIFY_CODE_EXPIRE_MINUTES:10}
+    from: ${MAIL_USERNAME}
+    verify-code-expire-minutes: ${AUTH_VERIFY_CODE_EXPIRE_MINUTES:3}

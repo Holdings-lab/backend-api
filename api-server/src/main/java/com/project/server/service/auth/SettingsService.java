@@ -8,12 +8,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
-public class NotificationSettingsService {
+public class SettingsService {
 
     private final UserNotificationSettingRepository notificationSettingRepository;
 
     @Transactional(readOnly = true)
-    public UserNotificationSettingEntity getNotificationSettings(Long userId) {
+    public UserNotificationSettingEntity getSettings(Long userId) {
         return notificationSettingRepository.findByUserId(userId)
                 .orElseGet(() -> UserNotificationSettingEntity.builder()
                         .userId(userId)
@@ -24,10 +24,10 @@ public class NotificationSettingsService {
     }
 
     @Transactional
-    public UserNotificationSettingEntity upsertNotificationSettings(Long userId,
-                                                                    Boolean before30m,
-                                                                    Boolean importantEventBriefing,
-                                                                    Boolean learningReminder) {
+    public UserNotificationSettingEntity upsertSettings(Long userId,
+            Boolean before30m,
+            Boolean importantEventBriefing,
+            Boolean learningReminder) {
         UserNotificationSettingEntity current = notificationSettingRepository.findByUserId(userId)
                 .orElseGet(() -> UserNotificationSettingEntity.builder()
                         .userId(userId)

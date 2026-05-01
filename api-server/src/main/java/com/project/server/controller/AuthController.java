@@ -19,17 +19,16 @@ public class AuthController {
 
     @PostMapping("/email/send-code")
     public ResponseEntity<AuthDto.EmailVerificationResponse> sendEmailVerificationCode(
-            @Valid @RequestBody AuthDto.EmailCodeSendRequest request
-    ) {
+            @Valid @RequestBody AuthDto.EmailCodeSendRequest request) {
         AuthDto.EmailVerificationResponse response = authService.sendEmailVerificationCode(request.getEmail());
         return ResponseEntity.ok(response);
     }
 
     @PostMapping("/email/verify-code")
     public ResponseEntity<AuthDto.EmailVerificationResponse> verifyEmailCode(
-            @Valid @RequestBody AuthDto.EmailCodeVerifyRequest request
-    ) {
-        AuthDto.EmailVerificationResponse response = authService.verifyEmailCode(request.getEmail(), request.getVerificationCode());
+            @Valid @RequestBody AuthDto.EmailCodeVerifyRequest request) {
+        AuthDto.EmailVerificationResponse response = authService.verifyEmailCode(request.getEmail(),
+                request.getVerificationCode());
         return ResponseEntity.ok(response);
     }
 
@@ -54,8 +53,7 @@ public class AuthController {
     @PatchMapping("/users/{userId}/nickname")
     public ResponseEntity<AuthDto.AuthResponse> updateNickname(
             @PathVariable Long userId,
-            @Valid @RequestBody AuthDto.UpdateNicknameRequest request
-    ) {
+            @Valid @RequestBody AuthDto.UpdateNicknameRequest request) {
         AuthDto.AuthResponse response = authService.updateNickname(userId, request.getNickname());
         return ResponseEntity.ok(response);
     }
@@ -69,9 +67,9 @@ public class AuthController {
     @PostMapping("/users/{userId}/change-password")
     public ResponseEntity<AuthDto.AuthResponse> changePassword(
             @PathVariable Long userId,
-            @Valid @RequestBody AuthDto.ChangePasswordRequest request
-    ) {
-        AuthDto.AuthResponse response = authService.changePassword(userId, request.getCurrentPassword(), request.getNewPassword());
+            @Valid @RequestBody AuthDto.ChangePasswordRequest request) {
+        AuthDto.AuthResponse response = authService.changePassword(userId, request.getCurrentPassword(),
+                request.getNewPassword());
         return ResponseEntity.ok(response);
     }
 

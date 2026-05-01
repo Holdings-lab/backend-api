@@ -17,19 +17,27 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ApiResponse<Object>> handleApiException(ApiException ex) {
         log.warn("API 예외 발생: code={}, message={}", ex.getErrorCode(), ex.getMessage());
-    return buildErrorResponse(ex.getStatus());
+        return ResponseEntity.status(ex.getStatus()).body(
+                ApiResponse.error(ex.getErrorCode(), ex.getMessage())
+        );
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Object>> handleValidationException(MethodArgumentNotValidException ex) {
-        log.warn("요청 검증 실패: {}", ex.getMessage());
-        return buildErrorResponse(HttpStatus.BAD_REQUEST);
+        String errorMessage = ex.getBindingResult().getAllErrors().get(0).getDefaultMessage();
+        log.warn("요청 검증 실패: {}", errorMessage);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                ApiResponse.error(ErrorResponseCode.INVALID_REQUEST_BODY.getCode(), errorMessage)
+        );
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Object>> handleNotReadable(HttpMessageNotReadableException ex) {
         log.warn("요청 본문 파싱 실패: {}", ex.getMessage());
-        return buildErrorResponse(HttpStatus.BAD_REQUEST);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
+                ApiResponse.error(ErrorResponseCode.INVALID_REQUEST_BODY.getCode(),
+                        ErrorResponseCode.INVALID_REQUEST_BODY.getMessage())
+        );
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
