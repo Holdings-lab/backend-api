@@ -37,6 +37,8 @@ services:
       ML_API_BASE_URL: http://data-ml:9000
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
       FIREBASE_CONFIG_PATH: /app/config/serviceAccountKey.json
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
     ports:
     - 8080:8080
     volumes:
