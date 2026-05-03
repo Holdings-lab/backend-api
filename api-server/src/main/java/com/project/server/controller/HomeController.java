@@ -1,14 +1,8 @@
 package com.project.server.controller;
 
 import com.project.server.dto.HomeBriefingDto;
-import com.project.server.dto.HomeDto;
-import com.project.server.service.home.HomeBriefingService;
 import com.project.server.service.home.HomeService;
 import lombok.RequiredArgsConstructor;
-import com.project.server.service.user.UserService;
-import com.project.server.service.event.SignalService;
-import com.project.server.service.portfolio.PortfolioService;
-import java.util.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,101 +13,114 @@ import org.springframework.web.bind.annotation.*;
 public class HomeController {
 
     private final HomeService homeService;
-    private final HomeBriefingService homeBriefingService;
-    private final UserService userService;
-    private final SignalService signalService;
-    private final PortfolioService portfolioService;
 
-    @GetMapping("/home")
-    public ResponseEntity<Map<String, Object>> getHomeIntegrated(@RequestParam(name = "userId", required = true) Long userId) {
-        // 사용자 선택 자산 조회 (추후 실제 데이터 연동 필요)
-        List<String> userAssets = Arrays.asList("QQQ", "AAPL", "TSLA");
-        
-        String greeting = userService.getUserGreeting(userId);
-        String profileInitial = userService.getProfileInitial(userId);
-        Map<String, Object> portfolio = portfolioService.aggregatePortfolio(userId);
-        List<Map<String, Object>> rawSignals = signalService.collectPolicyNewsRaw();
-        String primaryEventId = "EVT-000001"; // 추후 최신 이벤트로 연동
-        double sensitivity = signalService.calculateAssetSensitivity(userAssets);
-        Map<String, Object> metrics = signalService.calculateSignalMetrics(primaryEventId);
-        Map<String, Object> rankInfo = signalService.rankSignalsForUser(userAssets, rawSignals);
-        String formattedTitle = signalService.formatSignalTitle((String) rawSignals.get(0).get("rawTitle"));
-        double exposurePercent = signalService.calculateExposurePercent(userAssets, sensitivity);
-        Map<String, Object> actionPlan = signalService.generateActionPlan(metrics);
-        Map<String, Object> risk = portfolioService.assessPortfolioRisk(metrics);
-        Map<String, Object> themeExposure = portfolioService.classifyThemeExposure(userAssets, primaryEventId);
-        List<Map<String, Object>> secondarySignals = signalService.getSecondarySignals(rawSignals);
-
-        Map<String, Object> response = new HashMap<>();
-        response.put("user", Map.of("greeting", greeting, "profileInitial", profileInitial));
-        response.put("portfolio", portfolio);
-        response.put("portfolioRisk", risk);
-        response.put("themeExposure", themeExposure);
-        response.put("primarySignal", Map.of("title", formattedTitle, "exposurePercent", exposurePercent, "actionPlan", actionPlan, "rankInfo", rankInfo));
-        response.put("secondarySignals", secondarySignals);
-        return ResponseEntity.ok(response);
-    }
-
-    @GetMapping("/home/briefing")
-        public ResponseEntity<HomeBriefingDto.BriefingResponse> getHomeBriefing(
-            @RequestParam(name = "userId", required = true) Long userId
-        ) {
-        return ResponseEntity.ok(homeBriefingService.getBriefing(userId));
-    }
-
-    @GetMapping("/home/header")
-        public ResponseEntity<HomeBriefingDto.HomeHeader> getHomeHeader(
-            @RequestParam(name = "userId", required = true) Long userId
-        ) {
-        return ResponseEntity.ok(homeBriefingService.getHomeHeader(userId));
-    }
-
-    @GetMapping("/home/featured-card")
-        public ResponseEntity<HomeBriefingDto.FeaturedSignalCard> getFeaturedCard(
-            @RequestParam(name = "userId", required = true) Long userId
-        ) {
-        return ResponseEntity.ok(homeBriefingService.getFeaturedCard(userId));
-    }
-
-    @GetMapping("/home/portfolio-card")
-        public ResponseEntity<HomeBriefingDto.PortfolioCard> getPortfolioCard(
-            @RequestParam(name = "userId", required = true) Long userId
-        ) {
-        return ResponseEntity.ok(homeBriefingService.getPortfolioCard(userId));
-    }
-
-    @GetMapping("/home/secondary-signals")
-        public ResponseEntity<java.util.List<HomeBriefingDto.SecondarySignalItem>> getSecondarySignals(
-            @RequestParam(name = "userId", required = true) Long userId
-        ) {
-        return ResponseEntity.ok(homeBriefingService.getSecondarySignals(userId));
-    }
-
-    @GetMapping("/home/quick-interpretation")
-        public ResponseEntity<HomeBriefingDto.QuickInterpretation> getQuickInterpretation(
-            @RequestParam(name = "userId", required = true) Long userId
-        ) {
-        return ResponseEntity.ok(homeBriefingService.getQuickInterpretation(userId));
-    }
-
-    @GetMapping("/home/detail-tabs")
-        public ResponseEntity<HomeBriefingDto.DetailTabs> getDetailTabs(
-            @RequestParam(name = "userId", required = true) Long userId
-        ) {
-        return ResponseEntity.ok(homeBriefingService.getDetailTabs(userId));
-    }
-
-    @GetMapping("/home/checkpoint-tab")
-        public ResponseEntity<HomeBriefingDto.CheckpointTab> getCheckpointTab(
-            @RequestParam(name = "userId", required = true) Long userId
-        ) {
-        return ResponseEntity.ok(homeBriefingService.getCheckpointTab(userId));
-    }
-
-    @GetMapping("/home/disclaimer")
-    public ResponseEntity<HomeBriefingDto.DisclaimerResponse> getDisclaimer(
-            @RequestParam(name = "userId", required = true) Long userId
+    /**
+     * 사용자의 홈 화면 통합 조회
+     * 사용자의 프로필, 포트폴리오, 감시 자산, 정책 신호 등의 전체 홈 데이터를 반환합니다.
+     */
+    @GetMapping("/home/{userId}")
+    public ResponseEntity<com.project.server.dto.HomeDto.HomeResponse> getHomeIntegrated(
+            @PathVariable("userId") Long userId
     ) {
-        return ResponseEntity.ok(homeBriefingService.getDisclaimer(userId));
+        return ResponseEntity.ok(homeService.getHome(userId));
+    }
+
+    /**
+     * 홈 브리핑 통합 조회
+     * 주요 신호, 포트폴리오, 보조 신호, 분석, 체크포인트 등을 포함한 상세 브리핑 데이터를 반환합니다.
+     */
+    @GetMapping("/home/{userId}/briefing")
+    public ResponseEntity<HomeBriefingDto.BriefingResponse> getHomeBriefing(
+            @PathVariable("userId") Long userId
+    ) {
+        return ResponseEntity.ok(homeService.getBriefing(userId));
+    }
+
+    /**
+     * 홈 헤더 조회
+     * 인사말, 사용자명, 프로필 초성 정보를 반환합니다.
+     */
+    @GetMapping("/home/{userId}/header")
+    public ResponseEntity<HomeBriefingDto.HomeHeader> getHomeHeader(
+            @PathVariable("userId") Long userId
+    ) {
+        return ResponseEntity.ok(homeService.getHomeHeader(userId));
+    }
+
+    /**
+     * 주요 정책 신호 카드 조회
+     * 현재 최우선 정책 이벤트의 신호 강도, 판단, 자산 노출도, 상승/하락 확률 등을 반환합니다.
+     */
+    @GetMapping("/home/{userId}/featured-card")
+    public ResponseEntity<HomeBriefingDto.FeaturedSignalCard> getFeaturedCard(
+            @PathVariable("userId") Long userId
+    ) {
+        return ResponseEntity.ok(homeService.getFeaturedCard(userId));
+    }
+
+    /**
+     * 포트폴리오 카드 조회
+     * 총 자산, 일일 수익률, 현재 위험 등급, 테마별 노출도를 반환합니다.
+     */
+    @GetMapping("/home/{userId}/portfolio-card")
+    public ResponseEntity<HomeBriefingDto.PortfolioCard> getPortfolioCard(
+            @PathVariable("userId") Long userId
+    ) {
+        return ResponseEntity.ok(homeService.getPortfolioCard(userId));
+    }
+
+    /**
+     * 보조 정책 신호 목록 조회
+     * 주요 신호 외 추가 정책 이벤트들의 신호 목록을 반환합니다.
+     */
+    @GetMapping("/home/{userId}/secondary-signals")
+    public ResponseEntity<java.util.List<HomeBriefingDto.SecondarySignalItem>> getSecondarySignals(
+            @PathVariable("userId") Long userId
+    ) {
+        return ResponseEntity.ok(homeService.getSecondarySignals(userId));
+    }
+
+    /**
+     * 빠른 해석 조회
+     * 신호 판단, 자산 영향도, 핵심 근거, 주요 수치, 재확인 시점 등을 반환합니다.
+     */
+    @GetMapping("/home/{userId}/quick-interpretation")
+    public ResponseEntity<HomeBriefingDto.QuickInterpretation> getQuickInterpretation(
+            @PathVariable("userId") Long userId
+    ) {
+        return ResponseEntity.ok(homeService.getQuickInterpretation(userId));
+    }
+
+    /**
+     * 상세 분석 탭 조회
+     * 요약, 증거, 반박, 무효화 조건 등 신호에 대한 심화 분석을 반환합니다.
+     */
+    @GetMapping("/home/{userId}/detail-tabs")
+    public ResponseEntity<HomeBriefingDto.DetailTabs> getDetailTabs(
+            @PathVariable("userId") Long userId
+    ) {
+        return ResponseEntity.ok(homeService.getDetailTabs(userId));
+    }
+
+    /**
+     * 검증 포인트 탭 조회
+     * 정책/시장 체크포인트, 재방문 알림 규칙, 모델 실행 상태 등을 반환합니다.
+     */
+    @GetMapping("/home/{userId}/checkpoint-tab")
+    public ResponseEntity<HomeBriefingDto.CheckpointTab> getCheckpointTab(
+            @PathVariable("userId") Long userId
+    ) {
+        return ResponseEntity.ok(homeService.getCheckpointTab(userId));
+    }
+
+    /**
+     * 면책 조항 조회
+     * 투자 자문이 아님을 명시하는 법적 면책 사항을 반환합니다.
+     */
+    @GetMapping("/home/{userId}/disclaimer")
+    public ResponseEntity<HomeBriefingDto.DisclaimerResponse> getDisclaimer(
+            @PathVariable("userId") Long userId
+    ) {
+        return ResponseEntity.ok(homeService.getDisclaimer(userId));
     }
 }
