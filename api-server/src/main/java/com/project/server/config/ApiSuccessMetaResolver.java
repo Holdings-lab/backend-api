@@ -33,8 +33,6 @@ public class ApiSuccessMetaResolver {
                         new ApiSuccessMetaRule(HttpMethod.GET, "/api/health", "HEALTH-GET-200", "헬스체크에 성공했습니다."),
 
                         new ApiSuccessMetaRule(HttpMethod.GET, "/api/events", "EVENTS-GET-200", "이벤트 목록 조회에 성공했습니다."),
-                        new ApiSuccessMetaRule(HttpMethod.POST, "/api/events/refresh", "EVENTS-REFRESH-200",
-                                        "이벤트 새로고침에 성공했습니다."),
                         new ApiSuccessMetaRule(HttpMethod.POST, "/api/events/*/alerts", "EVENTS-ALERT-200",
                                         "이벤트 알림 설정이 저장되었습니다."),
 

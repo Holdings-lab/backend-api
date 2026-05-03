@@ -1,10 +1,15 @@
 package com.project.server.controller;
 
 import com.project.server.dto.EventDto;
+import com.project.server.exception.ApiException;
 import com.project.server.service.event.EventService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.*;
+
+import jakarta.servlet.http.HttpServletRequest;
+import java.util.Set;
 
 @CrossOrigin(origins = "*")
 @RestController
@@ -14,49 +19,78 @@ public class EventController {
 
     private final EventService eventService;
 
-    @GetMapping
-        public ResponseEntity<EventDto.EventsResponse> getEvents(
-            @RequestParam(name = "userId", required = true) Long userId,
-            @RequestParam(name = "dateSegment", defaultValue = "today") String dateSegment,
-            @RequestParam(name = "category", defaultValue = "all") String category
-    ) {
+    /** 이벤트 목록 조회 */
+    @GetMapping("/{userId}")
+    public ResponseEntity<EventDto.EventsResponse> getEvents(
+            @PathVariable("userId") Long userId,
+            @RequestParam(name = "dateSegment", defaultValue = "all") String dateSegment,
+            @RequestParam(name = "category", defaultValue = "all") String category,
+            HttpServletRequest request) {
+        validateQueryParams(request, Set.of("dateSegment", "category"));
         return ResponseEntity.ok(eventService.getEvents(userId, dateSegment, category));
     }
 
-    @GetMapping("/date-segments")
-    public ResponseEntity<java.util.List<String>> getDateSegments() {
-        return ResponseEntity.ok(eventService.getDateSegments());
+    /** 날짜 구간 목록 조회 */
+    @GetMapping("/{userId}/date-segments")
+    public ResponseEntity<java.util.List<String>> getDateSegments(
+            @PathVariable("userId") Long userId) {
+        return ResponseEntity.ok(eventService.getDateSegments(userId));
     }
 
-    @GetMapping("/categories")
-    public ResponseEntity<java.util.List<String>> getCategories() {
-        return ResponseEntity.ok(eventService.getCategories());
+    /** 카테고리 목록 조회 */
+    @GetMapping("/{userId}/categories")
+    public ResponseEntity<java.util.List<String>> getCategories(
+            @PathVariable("userId") Long userId) {
+        return ResponseEntity.ok(eventService.getCategories(userId));
     }
 
-    @GetMapping("/items")
-        public ResponseEntity<java.util.List<EventDto.EventItem>> getEventItems(
-            @RequestParam(name = "userId", required = true) Long userId,
-            @RequestParam(name = "dateSegment", defaultValue = "today") String dateSegment,
-            @RequestParam(name = "category", defaultValue = "all") String category
-        ) {
+    /** 이벤트 아이템 목록 조회 */
+    @GetMapping("/{userId}/items")
+    public ResponseEntity<java.util.List<EventDto.EventItem>> getEventItems(
+            @PathVariable("userId") Long userId,
+            @RequestParam(name = "dateSegment", defaultValue = "all") String dateSegment,
+            @RequestParam(name = "category", defaultValue = "all") String category,
+            HttpServletRequest request) {
+        validateQueryParams(request, Set.of("dateSegment", "category"));
         return ResponseEntity.ok(eventService.getEventItems(userId, dateSegment, category));
     }
 
-    @PostMapping("/refresh")
-    public ResponseEntity<EventDto.EventsResponse> refreshEvents(
-            @RequestParam(name = "userId", required = true) Long userId,
-            @RequestParam(name = "dateSegment", defaultValue = "today") String dateSegment,
-            @RequestParam(name = "category", defaultValue = "all") String category
-    ) {
-        return ResponseEntity.ok(eventService.refreshEvents(userId, dateSegment, category));
+    /** 이벤트 알림 설정 변경 */
+    @PostMapping("/{userId}/{eventId}/alerts")
+    public ResponseEntity<EventDto.EventAlertResponse> updateEventAlert(
+            @PathVariable("userId") Long userId,
+            @PathVariable("eventId") Long eventId,
+            @RequestBody EventDto.UpdateEventAlertRequest request) {
+        return ResponseEntity.ok(eventService.updateEventAlert(userId, eventId, request.isEnabled()));
     }
 
-        @PostMapping("/{eventId}/alerts")
-    public ResponseEntity<EventDto.EventAlertResponse> updateEventAlert(
-            @RequestParam(name = "userId", required = true) Long userId,
-            @PathVariable("eventId") Long eventId,
-            @RequestBody EventDto.UpdateEventAlertRequest request
-    ) {
-        return ResponseEntity.ok(eventService.updateEventAlert(userId, eventId, request.isEnabled()));
+    /** 자산 관련 정책 조회 */
+    @GetMapping("/{userId}/assets/{assetName}/related-policies")
+    public ResponseEntity<EventDto.RelatedPoliciesResponse> getRelatedPoliciesByAsset(
+            @PathVariable("userId") Long userId,
+            @PathVariable("assetName") String assetName,
+            @RequestParam(name = "dateSegment", defaultValue = "all") String dateSegment,
+            @RequestParam(name = "category", defaultValue = "all") String category,
+            HttpServletRequest request) {
+        validateQueryParams(request, Set.of("dateSegment", "category"));
+        return ResponseEntity.ok(eventService.getRelatedPoliciesByAsset(userId, assetName, dateSegment, category));
+    }
+
+    /** 정책 관련 자산 조회 */
+    @GetMapping("/{userId}/policies/{eventId}/related-assets")
+    public ResponseEntity<EventDto.RelatedAssetsResponse> getRelatedAssetsByPolicy(
+            @PathVariable("userId") Long userId,
+            @PathVariable("eventId") Long eventId) {
+        return ResponseEntity.ok(eventService.getRelatedAssetsByPolicy(userId, eventId));
+    }
+
+    private void validateQueryParams(HttpServletRequest request, Set<String> allowedParams) {
+        for (String parameterName : request.getParameterMap().keySet()) {
+            if (!allowedParams.contains(parameterName)) {
+                throw ApiException.badRequest(
+                        "허용되지 않은 query param입니다: " + parameterName,
+                        "EVENT_INVALID_QUERY_PARAM");
+            }
+        }
     }
 }
