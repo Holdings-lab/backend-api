@@ -15,21 +15,13 @@ public class InsightController {
     private final InsightService insightService;
 
     @GetMapping("/heatmap")
-    public ResponseEntity<InsightDto.HeatmapResponse> getHeatmap(
-            @RequestParam(name = "marketScope", defaultValue = "all") String marketScope,
-            @RequestParam(name = "country", defaultValue = "all") String country
-    ) {
-        return ResponseEntity.ok(insightService.getHeatmap(marketScope, country));
+    public ResponseEntity<InsightDto.HeatmapResponse> getHeatmap() {
+        return ResponseEntity.ok(insightService.getHeatmap());
     }
 
     @GetMapping("/view-tabs")
     public ResponseEntity<java.util.List<String>> getViewTabs() {
         return ResponseEntity.ok(insightService.getViewTabs());
-    }
-
-    @GetMapping("/country-filters")
-    public ResponseEntity<java.util.List<String>> getCountryFilters() {
-        return ResponseEntity.ok(insightService.getCountryFilters());
     }
 
     @GetMapping("/columns")
@@ -38,11 +30,8 @@ public class InsightController {
     }
 
     @GetMapping("/rows")
-    public ResponseEntity<java.util.List<InsightDto.HeatmapRow>> getRows(
-            @RequestParam(name = "marketScope", defaultValue = "all") String marketScope,
-            @RequestParam(name = "country", defaultValue = "all") String country
-    ) {
-        return ResponseEntity.ok(insightService.getRows(marketScope, country));
+    public ResponseEntity<java.util.List<InsightDto.HeatmapRow>> getRows() {
+        return ResponseEntity.ok(insightService.getRows());
     }
 
     @GetMapping("/legend")

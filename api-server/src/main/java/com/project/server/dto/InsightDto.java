@@ -11,7 +11,6 @@ public class InsightDto {
     @Builder
     public static class HeatmapResponse {
         private List<String> viewTabs;
-        private List<String> countryFilters;
         private List<String> columns;
         private List<HeatmapRow> rows;
         private List<String> legend;
