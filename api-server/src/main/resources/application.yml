@@ -60,6 +60,15 @@ integration:
     # data-ml Flask API 베이스 URL
     base-url: ${ML_API_BASE_URL:http://localhost:9000}
 
+insight:
+  heatmap:
+    impact-scale-factor: ${INSIGHT_HEATMAP_IMPACT_SCALE_FACTOR:10.0}
+    ml-policy-weight: ${INSIGHT_HEATMAP_ML_POLICY_WEIGHT:100.0}
+    threshold:
+      very-high: ${INSIGHT_HEATMAP_THRESHOLD_VERY_HIGH:80.0}
+      high: ${INSIGHT_HEATMAP_THRESHOLD_HIGH:60.0}
+      medium: ${INSIGHT_HEATMAP_THRESHOLD_MEDIUM:40.0}
+
 admin:
   notification-history:
     retention-days: ${NOTIFICATION_HISTORY_RETENTION_DAYS:30}
