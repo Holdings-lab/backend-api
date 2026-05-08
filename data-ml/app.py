@@ -45,7 +45,10 @@ async def global_exception_handler(request: Request, exc: Exception):
 ML_PREFIX = "/ml"
 BASE_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
-MERGED_FINBERT_PATH = BASE_DIR / "merged_finbert.csv"
+MERGED_FINBERT_CANDIDATES = [
+    BASE_DIR / "merged_finbert.csv",
+    BASE_DIR / "data" / "crawler" / "features" / "merged_finbert.csv",
+]
 MODEL_METADATA_PATH = TRAINING_DIR / "qqq_model_metadata.json"
 TRAINING_SUMMARY_PATH = TRAINING_DIR / "qqq_training_summary.json"
 
@@ -116,11 +119,21 @@ def _remove_message_fields(value):
     return value
 
 
+def _resolve_merged_finbert_path() -> Path | None:
+    for candidate in MERGED_FINBERT_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _read_policy_feed_frame(payload: dict) -> pd.DataFrame:
-    if not MERGED_FINBERT_PATH.exists():
+    merged_finbert_path = _resolve_merged_finbert_path()
+    if merged_finbert_path is None:
+        logger.warning("[PolicyFeed] merged_finbert.csv not found. candidates=%s", [str(path) for path in MERGED_FINBERT_CANDIDATES])
         return pd.DataFrame()
 
-    df = pd.read_csv(MERGED_FINBERT_PATH)
+    logger.info("[PolicyFeed] using merged_finbert path: %s", merged_finbert_path)
+    df = pd.read_csv(merged_finbert_path)
     if df.empty:
         return df
 
@@ -440,16 +453,6 @@ def policy_feed_get_endpoint(
         "dateFrom": dateFrom,
         "dateTo": dateTo,
     }
-    return _policy_feed_response(payload)
-
-
-@app.post(f"{ML_PREFIX}/content/policy-feed")
-async def policy_feed_endpoint(request: Request):
-    try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
-
     return _policy_feed_response(payload)
 
 
