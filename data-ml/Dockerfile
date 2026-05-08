@@ -11,7 +11,6 @@ COPY backend-api/data-ml/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend-api/data-ml/. .
-COPY data-ml/data/crawler/features/merged_finbert.csv ./merged_finbert.csv
 
 ENV PYTHONUNBUFFERED=1
 ENV ML_API_PORT=9000
