@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.server.dto.PolicyFeedDto;
 import com.project.server.exception.ApiException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import com.project.server.repository.UserJpaRepository;
 import org.springframework.stereotype.Service;
@@ -13,6 +15,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -22,6 +25,8 @@ import java.util.Set;
 
 @Service
 public class PolicyFeedProxyService {
+
+    private static final Logger logger = LoggerFactory.getLogger(PolicyFeedProxyService.class);
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -233,33 +238,98 @@ public class PolicyFeedProxyService {
     private PolicyFeedDto.PolicyFeedResponse fetchPolicyFeedFromMl(PolicyFeedDto.PolicyFeedRequest request,
             String reason) {
         try {
-            String targetUrl = normalizeBaseUrl(mlBaseUrl) + "/ml/content/policy-feed";
-            String requestJson = objectMapper.writeValueAsString(request);
+            String targetUrl = buildPolicyFeedUrl(request);
+            logger.info("Policy feed ML request started. reason={}, targetUrl={}, userId={}, limit={}, category={}, dateFrom={}, dateTo={}",
+                    reason,
+                    targetUrl,
+                    request == null ? null : request.getUserId(),
+                    request == null ? null : request.getLimit(),
+                    request == null ? null : request.getCategory(),
+                    request == null ? null : request.getDateFrom(),
+                    request == null ? null : request.getDateTo());
+
             HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(targetUrl))
                     .timeout(Duration.ofSeconds(12))
-                    .header("Content-Type", "application/json")
                     .header("Accept", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(requestJson, StandardCharsets.UTF_8))
+                    .GET()
                     .build();
 
             HttpResponse<String> response = httpClient.send(httpRequest,
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() >= 400) {
+                logger.warn("Policy feed ML request returned error status. reason={}, targetUrl={}, statusCode={}, body={}",
+                        reason,
+                        targetUrl,
+                        response.statusCode(),
+                        response.body());
                 return null;
             }
 
             JsonNode root = objectMapper.readTree(response.body());
             JsonNode resultNode = root.has("result") ? root.get("result") : root;
             if (resultNode == null || resultNode.isNull()) {
+                logger.warn("Policy feed ML response has no result node. reason={}, targetUrl={}, responseBody={}",
+                        reason,
+                        targetUrl,
+                        response.body());
                 return null;
             }
-            return objectMapper.treeToValue(resultNode, PolicyFeedDto.PolicyFeedResponse.class);
+            PolicyFeedDto.PolicyFeedResponse mappedResponse = objectMapper.treeToValue(resultNode,
+                    PolicyFeedDto.PolicyFeedResponse.class);
+            if (mappedResponse == null) {
+                logger.warn("Policy feed ML response mapping returned null. reason={}, targetUrl={}, responseBody={}",
+                        reason,
+                        targetUrl,
+                        response.body());
+                return null;
+            }
+            return mappedResponse;
         } catch (ApiException ae) {
             throw ae;
         } catch (Exception exception) {
+            logger.error("Policy feed ML request failed with exception. reason={}, userId={}, message={}",
+                    reason,
+                    request == null ? null : request.getUserId(),
+                    exception.getMessage(),
+                    exception);
             return null;
         }
+    }
+
+    private String buildPolicyFeedUrl(PolicyFeedDto.PolicyFeedRequest request) {
+        StringBuilder urlBuilder = new StringBuilder(normalizeBaseUrl(mlBaseUrl))
+                .append("/ml/content/policy-feed");
+        StringBuilder queryBuilder = new StringBuilder();
+
+        appendQueryParam(queryBuilder, "userId", request.getUserId());
+        appendQueryParam(queryBuilder, "limit", request.getLimit());
+        appendQueryParam(queryBuilder, "category", request.getCategory());
+        appendQueryParam(queryBuilder, "dateFrom", request.getDateFrom());
+        appendQueryParam(queryBuilder, "dateTo", request.getDateTo());
+
+        if (queryBuilder.length() > 0) {
+            urlBuilder.append("?").append(queryBuilder);
+        }
+        return urlBuilder.toString();
+    }
+
+    private void appendQueryParam(StringBuilder queryBuilder, String name, Object value) {
+        if (value == null) {
+            return;
+        }
+
+        String text = value.toString();
+        if (text.isBlank()) {
+            return;
+        }
+
+        if (queryBuilder.length() > 0) {
+            queryBuilder.append("&");
+        }
+        queryBuilder.append(URLEncoder.encode(name, StandardCharsets.UTF_8))
+                .append("=")
+                .append(URLEncoder.encode(text, StandardCharsets.UTF_8));
     }
 
     private String normalizeBaseUrl(String baseUrl) {

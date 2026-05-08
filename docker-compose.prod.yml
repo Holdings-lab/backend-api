@@ -34,7 +34,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-holdings}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      ML_API_BASE_URL: http://data-ml:9000
+      ML_API_BASE_URL: ${ML_API_BASE_URL:http://data-ml:9000}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
       FIREBASE_CONFIG_PATH: /app/config/serviceAccountKey.json
       MAIL_USERNAME: ${MAIL_USERNAME}
