@@ -7,10 +7,10 @@ RUN apt-get update && apt-get install -y \
   curl \
   && rm -rf /var/lib/apt/lists/*
 
-COPY backend-api/data-ml/requirements.txt ./
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY backend-api/data-ml/. .
+COPY . .
 
 ENV PYTHONUNBUFFERED=1
 ENV ML_API_PORT=9000

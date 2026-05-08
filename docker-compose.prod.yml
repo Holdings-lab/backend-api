@@ -61,8 +61,8 @@ services:
     container_name: pwa-data-ml
     restart: always
     build:
-      context: ..
-      dockerfile: backend-api/data-ml/Dockerfile
+      context: ./data-ml
+      dockerfile: Dockerfile
     environment:
       ML_API_PORT: 9000
       POSTGRES_HOST: postgres
