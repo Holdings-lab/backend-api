@@ -107,6 +107,17 @@ public class AuthService {
                 .build();
 
         UserEntity saved = userJpaRepository.save(newUser);
+        
+        // 프로필 자동 생성
+        UserProfileEntity profile = UserProfileEntity.builder()
+                .userId(saved.getId())
+                .avatarText(deriveAvatarInitials(saved.getNickname()))
+                .weeklyLearningCount(0)
+                .quizAccuracyPercent(0)
+                .weakTopic("없음")
+                .build();
+        userProfileRepository.save(profile);
+        
         emailVerificationCodeRepository.deleteByEmail(normalizedEmail);
 
         log.info("새 사용자 등록: {}", normalizedEmail);
@@ -394,6 +405,17 @@ public class AuthService {
                     .oauthId(oauthUserId)
                     .build();
             user = userJpaRepository.save(user);
+            
+            // 프로필 자동 생성
+            UserProfileEntity profile = UserProfileEntity.builder()
+                    .userId(user.getId())
+                    .avatarText(deriveAvatarInitials(user.getNickname()))
+                    .weeklyLearningCount(0)
+                    .quizAccuracyPercent(0)
+                    .weakTopic("없음")
+                    .build();
+            userProfileRepository.save(profile);
+            
             log.info("새 OAuth 사용자 등록: provider={}, email={}", provider, oauthEmail);
         } else {
             // 기존 사용자 - OAuth 정보 업데이트

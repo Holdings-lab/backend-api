@@ -5,10 +5,12 @@ import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.Notification;
 import com.project.server.domain.NotificationHistoryEntity;
 import com.project.server.domain.UserEntity;
+import com.project.server.domain.UserProfileEntity;
 import com.project.server.dto.AdminDto;
 import com.project.server.exception.ApiException;
 import com.project.server.repository.NotificationHistoryRepository;
 import com.project.server.repository.UserJpaRepository;
+import com.project.server.repository.UserProfileRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,7 @@ public class AdminService {
 
     private final UserJpaRepository userJpaRepository;
     private final NotificationHistoryRepository notificationHistoryRepository;
+    private final UserProfileRepository userProfileRepository;
 
     @Transactional
     public AdminDto.CreateAccountResponse createAccount(AdminDto.CreateAccountRequest request) {
@@ -42,6 +45,17 @@ public class AdminService {
                 .build();
 
         UserEntity saved = userJpaRepository.save(newUser);
+        
+        // 프로필 자동 생성
+        UserProfileEntity profile = UserProfileEntity.builder()
+                .userId(saved.getId())
+                .avatarText(deriveAvatarInitials(saved.getNickname()))
+                .weeklyLearningCount(0)
+                .quizAccuracyPercent(0)
+                .weakTopic("없음")
+                .build();
+        userProfileRepository.save(profile);
+        
         log.info("[Admin] 계정 추가: {}", normalizedEmail);
 
         return AdminDto.CreateAccountResponse.builder()
@@ -209,5 +223,23 @@ public class AdminService {
                 .nickname(user.getNickname())
                 .message("비밀번호가 변경되었습니다.")
                 .build();
+    }
+
+    private String deriveAvatarInitials(String name) {
+        if (name == null || name.isBlank())
+            return "";
+        String[] parts = name.trim().split("\\s+");
+        if (parts.length == 1) {
+            return parts[0].substring(0, Math.min(2, parts[0].length())).toUpperCase();
+        } else {
+            String first = parts[0];
+            String second = parts[parts.length - 1];
+            String initials = "";
+            if (!first.isBlank())
+                initials += first.substring(0, 1);
+            if (!second.isBlank())
+                initials += second.substring(0, 1);
+            return initials.toUpperCase();
+        }
     }
 }
