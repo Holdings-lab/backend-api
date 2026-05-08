@@ -128,22 +128,30 @@ def _read_policy_feed_frame(payload: dict) -> pd.DataFrame:
     date_from = _safe_str(payload.get("dateFrom"), "")
     date_to = _safe_str(payload.get("dateTo"), "")
 
+    logger.info(f"[PolicyFeed] Initial rows: {len(df)}, category: {category}, dateFrom: {date_from}, dateTo: {date_to}")
+    
     if category.lower() != "all" and "category" in df.columns:
         df = df[df["category"].astype(str).str.lower() == category.lower()]
+        logger.info(f"[PolicyFeed] After category filter: {len(df)} rows")
 
     if "date" in df.columns and (date_from or date_to):
         date_series = pd.to_datetime(df["date"], errors="coerce")
         if date_from:
             df = df[date_series >= pd.to_datetime(date_from, errors="coerce")]
+            logger.info(f"[PolicyFeed] After dateFrom filter: {len(df)} rows")
         if date_to:
             df = df[date_series <= pd.to_datetime(date_to, errors="coerce")]
+            logger.info(f"[PolicyFeed] After dateTo filter: {len(df)} rows")
 
-    return df.sort_values(by=["date", "title"], ascending=[False, True], na_position="last")
+    sorted_df = df.sort_values(by=["date", "title"], ascending=[False, True], na_position="last")
+    logger.info(f"[PolicyFeed] Final rows: {len(sorted_df)}")
+    return sorted_df
 
 
 def _build_policy_feed(payload: dict) -> dict:
     limit = int(payload.get("limit") or 20)
     df = _read_policy_feed_frame(payload)
+    logger.info(f"[PolicyFeed] _build_policy_feed payload: {payload}")
 
     metadata = _safe_json_load(MODEL_METADATA_PATH)
     summary = _safe_json_load(TRAINING_SUMMARY_PATH)
@@ -408,6 +416,33 @@ def get_predict_result_endpoint():
     return _success_response(summary, message="예측 연산 결과를 성공적으로 불러왔습니다.")
 
 
+def _policy_feed_response(payload: dict):
+    result = _build_policy_feed(payload or {})
+
+    logger.info(f"[PolicyFeed] Endpoint received payload: {payload}")
+    logger.info(f"[PolicyFeed] Response cards count: {len(result.get('cards', []))}")
+
+    return _success_response(_remove_message_fields(result), message="정책 피드 조회에 성공했습니다.")
+
+
+@app.get(f"{ML_PREFIX}/content/policy-feed")
+def policy_feed_get_endpoint(
+    userId: int | None = None,
+    limit: int = 20,
+    category: str = "all",
+    dateFrom: str = "",
+    dateTo: str = "",
+):
+    payload = {
+        "userId": userId,
+        "limit": limit,
+        "category": category,
+        "dateFrom": dateFrom,
+        "dateTo": dateTo,
+    }
+    return _policy_feed_response(payload)
+
+
 @app.post(f"{ML_PREFIX}/content/policy-feed")
 async def policy_feed_endpoint(request: Request):
     try:
@@ -415,8 +450,7 @@ async def policy_feed_endpoint(request: Request):
     except Exception:
         payload = {}
 
-    result = _build_policy_feed(payload or {})
-    return _success_response(_remove_message_fields(result), message="정책 피드 조회에 성공했습니다.")
+    return _policy_feed_response(payload)
 
 
 @app.post(f"{ML_PREFIX}/pipeline")
