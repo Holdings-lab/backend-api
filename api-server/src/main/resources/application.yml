@@ -81,7 +81,7 @@ auth:
 
 # CODEF API 설정
 codef:
-  mode: ${CODEF_MODE:test}  # test, demo, prod
+  mode: ${CODEF_MODE}  # sandbox, demo, prod
   client-id: ${CODEF_CLIENT_ID}
   client-secret: ${CODEF_CLIENT_SECRET}
   sandbox:

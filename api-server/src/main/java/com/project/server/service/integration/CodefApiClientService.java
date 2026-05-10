@@ -25,11 +25,11 @@ public class CodefApiClientService {
 
   private final ObjectMapper objectMapper;
 
-  @Value("${codef.mode:test}")
+  @Value("${codef.mode}")
   private String codefMode;
 
-  @Value("${codef.test.base-url}")
-  private String testBaseUrl;
+  @Value("${codef.sandbox.base-url}")
+  private String sandboxBaseUrl;
 
   @Value("${codef.demo.base-url}")
   private String demoBaseUrl;
@@ -334,7 +334,7 @@ public class CodefApiClientService {
 
   private String getBaseUrl() {
     return switch (normalizeMode()) {
-      case "test" -> testBaseUrl;
+      case "sandbox" -> sandboxBaseUrl;
       case "demo" -> demoBaseUrl;
       case "prod" -> prodBaseUrl;
       default -> throw ApiException.badRequest("지원하지 않는 CODEF 모드입니다.", "CODEF_INVALID_MODE");
