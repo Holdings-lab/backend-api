@@ -78,3 +78,29 @@ auth:
   email:
     from: ${MAIL_USERNAME}
     verify-code-expire-minutes: ${AUTH_VERIFY_CODE_EXPIRE_MINUTES:3}
+
+# CODEF API 설정
+codef:
+  mode: ${CODEF_MODE:test}  # test, demo, prod
+  client-id: ${CODEF_CLIENT_ID}
+  client-secret: ${CODEF_CLIENT_SECRET}
+  sandbox:
+    base-url: https://sandbox.codef.io
+  demo:
+    base-url: https://demo-api.codef.com
+  prod:
+    base-url: https://api.codef.com
+  api:
+    timeout-seconds: ${CODEF_API_TIMEOUT:12}
+    max-retries: ${CODEF_MAX_RETRIES:3}
+  sync:
+    schedule-cron: ${CODEF_SYNC_CRON:0 0 12,18 * * *}  # 매일 정오, 18시
+    batch-size: ${CODEF_SYNC_BATCH_SIZE:10}
+
+# AES-256 암호화 설정 (CODEF 토큰 및 민감 정보 저장)
+crypto:
+  aes:
+    # 256-bit Base64-encoded AES key
+    # 생성 방법: java -cp . com.project.server.service.security.CryptoService.generateBase64EncodedKey()
+    # 또는 환경변수로 설정: export CRYPTO_AES_KEY="your-base64-encoded-256bit-key"
+    key: ${CRYPTO_AES_KEY:}

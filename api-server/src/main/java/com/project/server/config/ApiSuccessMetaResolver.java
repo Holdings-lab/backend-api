@@ -55,7 +55,7 @@ public class ApiSuccessMetaResolver {
                                         "AI 파이프라인 실행에 성공했습니다."),
                         new ApiSuccessMetaRule(HttpMethod.POST, "/api/ai/train-regression", "AI-TRAIN-200",
                                         "학습 실행 요청에 성공했습니다."),
-                        new ApiSuccessMetaRule(HttpMethod.POST, "/api/content/policy-feed", "CONTENT-FEED-200",
+                        new ApiSuccessMetaRule(HttpMethod.GET, "/api/content/*/policy-feed", "CONTENT-FEED-200",
                                         "정책 피드 조회에 성공했습니다."),
                         new ApiSuccessMetaRule(HttpMethod.POST, "/api/internal/webhook/event", "WEBHOOK-EVENT-200",
                                         "Webhook 처리가 완료되었습니다."),
