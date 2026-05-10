@@ -25,17 +25,8 @@ public class CodefApiClientService {
 
   private final ObjectMapper objectMapper;
 
-  @Value("${codef.mode}")
-  private String codefMode;
-
   @Value("${codef.sandbox.base-url}")
   private String sandboxBaseUrl;
-
-  @Value("${codef.demo.base-url}")
-  private String demoBaseUrl;
-
-  @Value("${codef.prod.base-url}")
-  private String prodBaseUrl;
 
   @Value("${codef.client-id:}")
   private String clientId;
@@ -50,161 +41,66 @@ public class CodefApiClientService {
   @Value("${codef.api.max-retries:3}")
   private int maxRetries;
 
-  // Cached admin (client_credentials) token
-  private volatile String cachedAdminToken;
-  private volatile long cachedAdminTokenExpiryEpochSec = 0L;
+  // Cached client_credentials token
+  private volatile String cachedAccessToken;
+  private volatile long cachedAccessTokenExpiryEpochSec = 0L;
 
   private final HttpClient httpClient = HttpClient.newBuilder()
       .connectTimeout(Duration.ofSeconds(3))
       .build();
 
-  /**
-   * CODEF OAuth 인증 URL 생성
-   */
-  public String generateAuthUrl(String state) {
-    ensureCredentialsConfigured();
-    String baseUrl = getBaseUrl();
-    String clientId = getClientId();
-    return String.format(
-        "%s/oauth/authorize?client_id=%s&response_type=code&state=%s&scope=account.balance,account.transaction",
-        baseUrl, clientId, state);
-  }
+  public static final Map<String, String> BROKER_ORG_CODES = Map.of(
+      "KIS", "0243",
+      "NH", "0247",
+      "KB", "0240",
+      "MIRAE", "0238",
+      "SAMSUNG", "0242",
+      "KIWOOM", "0264");
 
-  /**
-   * OAuth 콜백에서 받은 코드로 토큰 요청
-   */
-  public Map<String, Object> requestAccessToken(String code) {
-    try {
-      ensureCredentialsConfigured();
-      String clientId = getClientId();
-      String clientSecret = getClientSecret();
-
-      Map<String, String> body = new HashMap<>();
-      body.put("grant_type", "authorization_code");
-      body.put("code", code);
-      body.put("client_id", clientId);
-      body.put("client_secret", clientSecret);
-
-      String requestBody = objectMapper.writeValueAsString(body);
-      HttpRequest request = HttpRequest.newBuilder()
-          .uri(URI.create(tokenUrl))
-          .timeout(Duration.ofSeconds(apiTimeoutSeconds))
-          .header("Content-Type", "application/json")
-          .header("Accept", "application/json")
-          .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
-          .build();
-
-      HttpResponse<String> response = httpClient.send(request,
-          HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-
-      if (response.statusCode() != 200) {
-        log.error("CODEF token request failed: {}", response.body());
-        throw ApiException.internalServerError("CODEF 인증 실패", "CODEF_AUTH_FAILED");
-      }
-
-      JsonNode result = objectMapper.readTree(response.body());
-      Map<String, Object> tokenMap = new HashMap<>();
-      tokenMap.put("accessToken", result.path("access_token").asText());
-      tokenMap.put("tokenType", result.path("token_type").asText());
-      tokenMap.put("expiresIn", result.path("expires_in").asInt());
-      tokenMap.put("refreshToken", result.path("refresh_token").asText());
-      // connectedId may be returned in some CODEF responses
-      String connectedId = null;
-      if (result.has("connectedId")) {
-        connectedId = result.path("connectedId").asText(null);
-      } else if (result.has("connected_id")) {
-        connectedId = result.path("connected_id").asText(null);
-      }
-      tokenMap.put("connectedId", connectedId);
-
-      return tokenMap;
-    } catch (ApiException ae) {
-      throw ae;
-    } catch (Exception e) {
-      log.error("Error requesting CODEF access token", e);
-      throw ApiException.internalServerError("토큰 요청 실패", "CODEF_TOKEN_REQUEST_ERROR");
-    }
-  }
-
-  /**
-   * CODEF API 호출: 계좌 목록 조회
-   */
-  public JsonNode fetchAccountList(String accessToken) {
-    return callCodefApi("/oauth/account/list", accessToken, HttpRequest.BodyPublishers.noBody(), "GET");
+  private String getOrgCode(String brokerName) {
+    return BROKER_ORG_CODES.getOrDefault(brokerName.toUpperCase(), "0243");
   }
 
   /**
    * CODEF 스크래핑 방식: adminToken + connectedId로 계좌 목록 조회
    */
-  public JsonNode fetchAccountList(String adminToken, String connectedId) {
+  public JsonNode fetchAccountList(String accessToken, String connectedId, String brokerName) {
     Map<String, Object> params = new HashMap<>();
-    // organization code for KIS (한국투자증권) = 0243
-    params.put("organization", "0243");
+    params.put("organization", getOrgCode(brokerName));
     params.put("connectedId", connectedId);
 
-    return callCodefApi("/v1/kr/stock/a/account/account-list", adminToken, params, "POST");
+    return callCodefApi("/v1/kr/stock/a/account/account-list", accessToken, params, "POST");
   }
 
-  /**
-   * CODEF API 호출: 계좌 잔액 조회
-   */
-  public JsonNode fetchAccountBalance(String accessToken, String accountNumber) {
-    Map<String, String> params = new HashMap<>();
-    params.put("accountNumber", accountNumber);
-
-    return callCodefApi("/oauth/account/balance", accessToken, params, "POST");
-  }
-
-  public JsonNode fetchAccountBalance(String adminToken, String connectedId, String accountNumber) {
+  public JsonNode fetchAccountBalance(String accessToken, String connectedId, String brokerName, String accountNumber) {
     Map<String, Object> params = new HashMap<>();
-    params.put("organization", "0243");
+    params.put("organization", getOrgCode(brokerName));
     params.put("connectedId", connectedId);
     params.put("accountNumber", accountNumber);
 
-    return callCodefApi("/v1/kr/stock/a/account/balance", adminToken, params, "POST");
+    return callCodefApi("/v1/kr/stock/a/account/balance", accessToken, params, "POST");
   }
 
-  /**
-   * CODEF API 호출: 보유 자산 조회
-   */
-  public JsonNode fetchHoldingAssets(String accessToken, String accountNumber) {
-    Map<String, String> params = new HashMap<>();
-    params.put("accountNumber", accountNumber);
-
-    return callCodefApi("/oauth/account/holding", accessToken, params, "POST");
-  }
-
-  public JsonNode fetchHoldingAssets(String adminToken, String connectedId, String accountNumber) {
+  public JsonNode fetchHoldingAssets(String accessToken, String connectedId, String brokerName, String accountNumber) {
     Map<String, Object> params = new HashMap<>();
-    params.put("organization", "0243");
+    params.put("organization", getOrgCode(brokerName));
     params.put("connectedId", connectedId);
     params.put("accountNumber", accountNumber);
 
-    return callCodefApi("/v1/kr/stock/a/account/assets", adminToken, params, "POST");
+    return callCodefApi("/v1/kr/stock/a/account/assets", accessToken, params, "POST");
   }
 
-  /**
-   * CODEF API 호출: 거래 내역 조회
-   */
-  public JsonNode fetchTransactionHistory(String accessToken, String accountNumber, String fromDate, String toDate) {
-    Map<String, String> params = new HashMap<>();
-    params.put("accountNumber", accountNumber);
-    params.put("fromDate", fromDate);
-    params.put("toDate", toDate);
-
-    return callCodefApi("/oauth/account/transaction", accessToken, params, "POST");
-  }
-
-  public JsonNode fetchTransactionHistory(String adminToken, String connectedId, String accountNumber, String fromDate,
+  public JsonNode fetchTransactionHistory(String accessToken, String connectedId, String brokerName,
+      String accountNumber, String fromDate,
       String toDate) {
     Map<String, Object> params = new HashMap<>();
-    params.put("organization", "0243");
+    params.put("organization", getOrgCode(brokerName));
     params.put("connectedId", connectedId);
     params.put("accountNumber", accountNumber);
     params.put("fromDate", fromDate);
     params.put("toDate", toDate);
 
-    return callCodefApi("/v1/kr/stock/a/account/transaction", adminToken, params, "POST");
+    return callCodefApi("/v1/kr/stock/a/account/transaction", accessToken, params, "POST");
   }
 
   /**
@@ -273,19 +169,20 @@ public class CodefApiClientService {
   }
 
   /**
-   * 발급받은 client_credentials 기반 admin 토큰을 반환 (캐시)
+   * 발급받은 client_credentials 기반 토큰을 반환 (캐시)
    */
-  public String getAdminAccessToken() {
+  public String getAccessToken() {
     try {
       long nowSec = System.currentTimeMillis() / 1000L;
-      if (cachedAdminToken != null && nowSec < cachedAdminTokenExpiryEpochSec - 30) {
-        return cachedAdminToken;
+      // 토큰 만료 10분(600초) 전에 갱신하도록 설정
+      if (cachedAccessToken != null && nowSec < cachedAccessTokenExpiryEpochSec - 600) {
+        return cachedAccessToken;
       }
 
       synchronized (this) {
         nowSec = System.currentTimeMillis() / 1000L;
-        if (cachedAdminToken != null && nowSec < cachedAdminTokenExpiryEpochSec - 30) {
-          return cachedAdminToken;
+        if (cachedAccessToken != null && nowSec < cachedAccessTokenExpiryEpochSec - 600) {
+          return cachedAccessToken;
         }
 
         ensureCredentialsConfigured();
@@ -308,37 +205,32 @@ public class CodefApiClientService {
         HttpResponse<String> response = httpClient.send(request,
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         if (response.statusCode() != 200) {
-          log.error("CODEF admin token request failed: {}", response.body());
-          throw ApiException.internalServerError("CODEF admin 인증 실패", "CODEF_ADMIN_AUTH_FAILED");
+          log.error("CODEF access token request failed: {}", response.body());
+          throw ApiException.internalServerError("CODEF 인증 실패", "CODEF_AUTH_FAILED");
         }
 
-        JsonNode result = objectMapper.readTree(response.body());
-        String token = result.path("access_token").asText(null);
-        int expiresIn = result.path("expires_in").asInt(300);
+        JsonNode root = objectMapper.readTree(response.body());
+        String token = root.path("access_token").asText(null);
+        long expiresIn = root.path("expires_in").asLong(0);
 
         if (token == null) {
-          throw ApiException.internalServerError("CODEF admin 토큰 응답이 유효하지 않습니다.", "CODEF_ADMIN_TOKEN_INVALID");
+          throw ApiException.internalServerError("CODEF 토큰 응답이 유효하지 않습니다.", "CODEF_TOKEN_INVALID");
         }
 
-        cachedAdminToken = token;
-        cachedAdminTokenExpiryEpochSec = System.currentTimeMillis() / 1000L + expiresIn;
-        return cachedAdminToken;
+        cachedAccessToken = token;
+        cachedAccessTokenExpiryEpochSec = System.currentTimeMillis() / 1000L + expiresIn;
+        return cachedAccessToken;
       }
     } catch (ApiException ae) {
       throw ae;
     } catch (Exception e) {
-      log.error("Error requesting CODEF admin access token", e);
-      throw ApiException.internalServerError("CODEF admin 토큰 요청 실패", "CODEF_ADMIN_TOKEN_ERROR");
+      log.error("Error requesting CODEF access token", e);
+      throw ApiException.internalServerError("CODEF 토큰 요청 실패", "CODEF_TOKEN_ERROR");
     }
   }
 
   private String getBaseUrl() {
-    return switch (normalizeMode()) {
-      case "sandbox" -> sandboxBaseUrl;
-      case "demo" -> demoBaseUrl;
-      case "prod" -> prodBaseUrl;
-      default -> throw ApiException.badRequest("지원하지 않는 CODEF 모드입니다.", "CODEF_INVALID_MODE");
-    };
+    return sandboxBaseUrl;
   }
 
   private String getClientId() {
@@ -360,7 +252,4 @@ public class CodefApiClientService {
     }
   }
 
-  private String normalizeMode() {
-    return codefMode == null ? "test" : codefMode.trim().toLowerCase();
-  }
 }

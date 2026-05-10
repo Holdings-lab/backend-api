@@ -11,6 +11,8 @@ import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @Slf4j
 @RestControllerAdvice
@@ -49,10 +51,25 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Object>> handleNotReadable(HttpMessageNotReadableException ex) {
+        String detailMessage = ErrorResponseCode.INVALID_REQUEST_BODY.getMessage();
+        if (ex.getCause() instanceof com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException upe) {
+            detailMessage = String.format("알 수 없는 필드 '%s'가 포함되어 있습니다.", upe.getPropertyName());
+        } else if (ex.getCause() instanceof com.fasterxml.jackson.databind.exc.InvalidFormatException ife) {
+            detailMessage = String.format("필드 '%s'의 타입이 올바르지 않습니다. (예: 숫자 필드에 문자열 입력)", ife.getPath().isEmpty() ? "" : ife.getPath().get(0).getFieldName());
+        } else if (ex.getCause() instanceof com.fasterxml.jackson.core.JsonParseException) {
+            detailMessage = "JSON 형식이 올바르지 않습니다.";
+        }
+
         log.warn("요청 본문 파싱 실패: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
-                ApiResponse.error(ErrorResponseCode.INVALID_REQUEST_BODY.getCode(),
-                        ErrorResponseCode.INVALID_REQUEST_BODY.getMessage()));
+                ApiResponse.error(ErrorResponseCode.INVALID_REQUEST_BODY.getCode(), detailMessage));
+    }
+
+    @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
+    public ResponseEntity<ApiResponse<Object>> handleNotFoundException(Exception ex) {
+        log.warn("존재하지 않는 API 요청: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                ApiResponse.error(ErrorResponseCode.NOT_FOUND.getCode(), ErrorResponseCode.NOT_FOUND.getMessage()));
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

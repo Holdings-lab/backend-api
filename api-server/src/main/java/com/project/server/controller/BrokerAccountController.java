@@ -22,32 +22,20 @@ public class BrokerAccountController {
     private final PortfolioAggregationService portfolioAggregationService;
 
     /**
-     * 계좌 연동 (OAuth 또는 Direct 방식)
-     * - OAuth: connectedId 없음 → /oauth/authorize URL 반환
-     * - Direct: connectedId 있음 → 바로 계좌 조회 및 저장
+     * 계좌 연동 (최초 연동 및 추가 연동 통합)
+     * - connectedId가 있으면 최초 연동 (저장 및 연동)
+     * - connectedId가 없으면 추가 연동 (기존 저장된 connectedId 활용)
      */
     @PostMapping("/{userId}/accounts")
-    public ResponseEntity<?> linkAccount(
+    public ResponseEntity<List<BrokerAccountDto.BrokerAccountResponse>> linkAccount(
             @PathVariable Long userId,
             @RequestBody BrokerAccountDto.LinkRequest request) {
-        // connectedId가 있으면 Direct, 없으면 OAuth
+        List<BrokerAccountDto.BrokerAccountResponse> response;
         if (request.getConnectedId() != null && !request.getConnectedId().isEmpty()) {
-            BrokerAccountDto.BrokerAccountResponse response = brokerAccountService.directLinkAccount(userId, request);
-            return ResponseEntity.ok(response);
+            response = brokerAccountService.initialLink(userId, request);
         } else {
-            BrokerAccountDto.AuthResponse response = brokerAccountService.startOAuthLinking(userId, request);
-            return ResponseEntity.ok(response);
+            response = brokerAccountService.addLink(userId, request);
         }
-    }
-
-    /**
-     * OAuth 콜백 처리
-     */
-    @PostMapping("/{userId}/accounts/callback")
-    public ResponseEntity<BrokerAccountDto.BrokerAccountResponse> handleAuthCallback(
-            @PathVariable Long userId,
-            @RequestBody BrokerAccountDto.AuthCallbackRequest request) {
-        BrokerAccountDto.BrokerAccountResponse response = brokerAccountService.handleAuthCallback(userId, request);
         return ResponseEntity.ok(response);
     }
 
@@ -68,7 +56,7 @@ public class BrokerAccountController {
     public ResponseEntity<BrokerAccountDto.BrokerAccountDetailResponse> getAccount(
             @PathVariable Long userId,
             @PathVariable Long accountId) {
-        BrokerAccountDto.BrokerAccountDetailResponse response = brokerAccountService.getAccount(accountId);
+        BrokerAccountDto.BrokerAccountDetailResponse response = brokerAccountService.getAccount(userId, accountId);
         return ResponseEntity.ok(response);
     }
 
@@ -87,11 +75,11 @@ public class BrokerAccountController {
      * Primary 계좌 설정
      */
     @PutMapping("/{userId}/accounts/{accountId}/primary")
-    public ResponseEntity<Void> setPrimaryAccount(
+    public ResponseEntity<BrokerAccountDto.SetPrimaryAccountResponse> setPrimaryAccount(
             @PathVariable Long userId,
             @PathVariable Long accountId) {
-        brokerAccountService.setPrimaryAccount(userId, accountId);
-        return ResponseEntity.ok().build();
+        BrokerAccountDto.SetPrimaryAccountResponse response = brokerAccountService.setPrimaryAccount(userId, accountId);
+        return ResponseEntity.ok(response);
     }
 
     /**
@@ -100,10 +88,10 @@ public class BrokerAccountController {
     @PostMapping("/{userId}/accounts/{accountId}/sync")
     public ResponseEntity<BrokerAccountDto.SyncResponse> requestSync(
             @PathVariable Long userId,
-            @PathVariable Long accountId,
-            @RequestParam(defaultValue = "BALANCE,POSITION") String syncType) {
-        BrokerAccountDto.SyncResponse response = assetSyncService.requestSync(userId, accountId, syncType);
-        return ResponseEntity.accepted().body(response);
+            @PathVariable Long accountId) {
+        BrokerAccountDto.SyncResponse response = assetSyncService.requestSync(userId, accountId);
+        // 비동기 처리의 경우 accepted(202)가 맞으나, 현재 동기 처리 방식이므로 ok(200) 반환
+        return ResponseEntity.ok(response);
     }
 
     /**
@@ -113,7 +101,7 @@ public class BrokerAccountController {
     public ResponseEntity<BrokerAccountDto.SyncStatusResponse> getSyncStatus(
             @PathVariable Long userId,
             @PathVariable Long accountId,
-            @PathVariable String syncId) {
+            @PathVariable Long syncId) {
         BrokerAccountDto.SyncStatusResponse response = assetSyncService.getSyncStatus(userId, accountId, syncId);
         return ResponseEntity.ok(response);
     }
@@ -135,7 +123,8 @@ public class BrokerAccountController {
     @GetMapping("/{userId}/portfolio")
     public ResponseEntity<BrokerAccountDto.CombinedPortfolioResponse> getCombinedPortfolio(
             @PathVariable Long userId) {
-        BrokerAccountDto.CombinedPortfolioResponse response = portfolioAggregationService.getUserCombinedPortfolio(userId);
+        BrokerAccountDto.CombinedPortfolioResponse response = portfolioAggregationService
+                .getUserCombinedPortfolio(userId);
         return ResponseEntity.ok(response);
     }
 
@@ -146,7 +135,8 @@ public class BrokerAccountController {
     public ResponseEntity<BrokerAccountDto.AccountPortfolioDto> getAccountPortfolio(
             @PathVariable Long userId,
             @PathVariable Long accountId) {
-        BrokerAccountDto.AccountPortfolioDto response = portfolioAggregationService.getAccountPortfolio(userId, accountId);
+        BrokerAccountDto.AccountPortfolioDto response = portfolioAggregationService.getAccountPortfolio(userId,
+                accountId);
         return ResponseEntity.ok(response);
     }
 

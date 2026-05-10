@@ -12,6 +12,7 @@ import com.project.server.repository.AssetPositionRepository;
 import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.repository.CodefSyncHistoryRepository;
 import com.project.server.service.integration.CodefApiClientService;
+import com.project.server.service.security.CryptoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -36,32 +37,33 @@ public class AssetSyncService {
     private final AccountBalanceRepository accountBalanceRepository;
     private final CodefSyncHistoryRepository syncHistoryRepository;
     private final CodefApiClientService codefApiClientService;
+    private final CryptoService cryptoService;
 
     /**
      * 즉시 동기화 요청
      */
-    public BrokerAccountDto.SyncResponse requestSync(Long userId, Long accountId, String syncType) {
+    public BrokerAccountDto.SyncResponse requestSync(Long userId, Long accountId) {
         BrokerAccountEntity account = validateAccountAccess(userId, accountId);
 
         if (account.getCodefStatus() != BrokerAccountEntity.CodefStatus.CONNECTED) {
             throw ApiException.badRequest("연동되지 않은 계좌입니다.", "ACCOUNT_NOT_CONNECTED");
         }
 
-        String syncId = UUID.randomUUID().toString();
-
         // 동기화 시작 기록
         CodefSyncHistoryEntity history = CodefSyncHistoryEntity.builder()
                 .accountId(accountId)
                 .userId(userId)
-                .syncType(syncType)
+                .syncType("ALL")
                 .status(CodefSyncHistoryEntity.SyncStatus.PENDING)
                 .startedAt(LocalDateTime.now())
                 .build();
         syncHistoryRepository.save(history);
 
+        Long syncId = history.getId();
+
         // 비동기로 동기화 수행 (실제 구현에서는 별도 스레드/큐 사용)
         try {
-            performSync(account, syncType);
+            performSync(account);
 
             history.setStatus(CodefSyncHistoryEntity.SyncStatus.SUCCESS);
             history.setCompletedAt(LocalDateTime.now());
@@ -82,7 +84,7 @@ public class AssetSyncService {
         return BrokerAccountDto.SyncResponse.builder()
                 .syncId(syncId)
                 .status("STARTED")
-                .syncType(syncType)
+                .syncType("ALL")
                 .startedAt(LocalDateTime.now())
                 .build();
     }
@@ -99,7 +101,7 @@ public class AssetSyncService {
 
         connectedAccounts.forEach(account -> {
             try {
-                performSync(account, "BALANCE,POSITION");
+                performSync(account);
                 account.setLastSyncedAt(LocalDateTime.now());
                 brokerAccountRepository.save(account);
             } catch (Exception e) {
@@ -115,36 +117,30 @@ public class AssetSyncService {
     /**
      * 실제 동기화 수행
      */
-    private void performSync(BrokerAccountEntity account, String syncType) {
-        String adminToken = codefApiClientService.getAdminAccessToken();
+    private void performSync(BrokerAccountEntity account) {
+        String accessToken = codefApiClientService.getAccessToken();
         String connectedId = account.getConnectedId();
 
         if (connectedId == null || connectedId.isBlank()) {
-            throw new RuntimeException("Account missing connectedId for CODEF scraping");
+            throw ApiException.badRequest("연동 ID가 누락되었습니다.", "MISSING_CONNECTED_ID");
         }
 
-        if (syncType.contains("BALANCE") || syncType.equals("ALL")) {
-            syncBalance(account, adminToken, connectedId);
-        }
+        connectedId = cryptoService.decrypt(connectedId);
 
-        if (syncType.contains("POSITION") || syncType.equals("ALL")) {
-            syncPositions(account, adminToken, connectedId);
-        }
-
-        if (syncType.contains("HISTORY") || syncType.equals("ALL")) {
-            syncHistory(account, adminToken, connectedId);
-        }
+        syncBalance(account, accessToken, connectedId);
+        syncPositions(account, accessToken, connectedId);
+        syncHistory(account, accessToken, connectedId);
     }
 
     /**
      * 계좌 잔액 동기화
      */
-    private void syncBalance(BrokerAccountEntity account, String adminToken, String connectedId) {
+    private void syncBalance(BrokerAccountEntity account, String accessToken, String connectedId) {
         try {
-            JsonNode balanceData = codefApiClientService.fetchAccountBalance(adminToken, connectedId, account.getAccountNumber());
+            JsonNode balanceData = codefApiClientService.fetchAccountBalance(accessToken, connectedId, account.getBrokerName(), account.getAccountNumber());
 
             if (balanceData == null || !balanceData.has("result")) {
-                throw new RuntimeException("Invalid balance response");
+                throw ApiException.internalServerError("잔액 조회 응답이 올바르지 않습니다.", "INVALID_BALANCE_RESPONSE");
             }
 
             JsonNode data = balanceData.path("result").path("data");
@@ -169,19 +165,19 @@ public class AssetSyncService {
 
         } catch (Exception e) {
             log.error("Error syncing balance for account: {}", account.getId(), e);
-            throw new RuntimeException("Balance sync failed", e);
+            throw ApiException.internalServerError("잔액 동기화에 실패했습니다.", "BALANCE_SYNC_FAILED");
         }
     }
 
     /**
      * 보유 자산(포지션) 동기화
      */
-    private void syncPositions(BrokerAccountEntity account, String adminToken, String connectedId) {
+    private void syncPositions(BrokerAccountEntity account, String accessToken, String connectedId) {
         try {
-            JsonNode holdingData = codefApiClientService.fetchHoldingAssets(adminToken, connectedId, account.getAccountNumber());
+            JsonNode holdingData = codefApiClientService.fetchHoldingAssets(accessToken, connectedId, account.getBrokerName(), account.getAccountNumber());
 
             if (holdingData == null || !holdingData.has("result")) {
-                throw new RuntimeException("Invalid holding response");
+                throw ApiException.internalServerError("보유 자산 조회 응답이 올바르지 않습니다.", "INVALID_HOLDING_RESPONSE");
             }
 
             JsonNode positions = holdingData.path("result").path("data").path("holdings");
@@ -216,25 +212,26 @@ public class AssetSyncService {
 
         } catch (Exception e) {
             log.error("Error syncing positions for account: {}", account.getId(), e);
-            throw new RuntimeException("Position sync failed", e);
+            throw ApiException.internalServerError("자산 포지션 동기화에 실패했습니다.", "POSITION_SYNC_FAILED");
         }
     }
 
     /**
      * 거래 내역 동기화 (필요시)
      */
-        private void syncHistory(BrokerAccountEntity account, String adminToken, String connectedId) {
+    private void syncHistory(BrokerAccountEntity account, String accessToken, String connectedId) {
         try {
-            // 지난 90일 거래 내역 조회
-            LocalDate fromDate = LocalDate.now().minusDays(90);
-            LocalDate toDate = LocalDate.now();
+            // 최근 1개월 거래내역 조회
+            String toDate = LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+            String fromDate = LocalDate.now().minusMonths(1).format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
 
             JsonNode historyData = codefApiClientService.fetchTransactionHistory(
-                adminToken,
-                connectedId,
-                account.getAccountNumber(),
-                fromDate.toString(),
-                toDate.toString()
+                    accessToken,
+                    connectedId,
+                    account.getBrokerName(),
+                    account.getAccountNumber(),
+                    fromDate.toString(),
+                    toDate.toString()
             );
 
             if (historyData == null || !historyData.has("result")) {
@@ -255,13 +252,13 @@ public class AssetSyncService {
      * 동기화 상태 조회
      */
     @Transactional(readOnly = true)
-    public BrokerAccountDto.SyncStatusResponse getSyncStatus(Long userId, Long accountId, String syncId) {
+    public BrokerAccountDto.SyncStatusResponse getSyncStatus(Long userId, Long accountId, Long syncId) {
         validateAccountAccess(userId, accountId);
 
         List<CodefSyncHistoryEntity> histories = syncHistoryRepository.findByAccountIdOrderByCreatedAtDesc(accountId);
 
         CodefSyncHistoryEntity history = histories.stream()
-                .filter(h -> h.getId().toString().contains(syncId))
+                .filter(h -> h.getId().equals(syncId))
                 .findFirst()
                 .orElseThrow(() -> ApiException.notFound("동기화 기록을 찾을 수 없습니다.", "SYNC_NOT_FOUND"));
 
@@ -303,11 +300,18 @@ public class AssetSyncService {
      * 계좌 접근 권한 검증
      */
     private BrokerAccountEntity validateAccountAccess(Long userId, Long accountId) {
+        if (userId == null || userId <= 0) {
+            throw ApiException.badRequest("유효하지 않은 사용자 ID입니다.", "INVALID_USER_ID");
+        }
+        if (accountId == null || accountId <= 0) {
+            throw ApiException.badRequest("유효하지 않은 계좌 ID입니다.", "INVALID_ACCOUNT_ID");
+        }
+
         BrokerAccountEntity account = brokerAccountRepository.findById(accountId)
                 .orElseThrow(() -> ApiException.notFound("계좌를 찾을 수 없습니다.", "ACCOUNT_NOT_FOUND"));
 
         if (!account.getUserId().equals(userId)) {
-            throw ApiException.badRequest("접근 권한이 없습니다.", "FORBIDDEN_ACCESS");
+            throw ApiException.badRequest("해당 계좌의 소유자와 요청한 사용자가 일치하지 않습니다.", "USER_MISMATCH");
         }
 
         return account;

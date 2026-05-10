@@ -145,12 +145,7 @@ public class PortfolioAggregationService {
      * 특정 계좌의 포트폴리오 조회
      */
     public BrokerAccountDto.AccountPortfolioDto getAccountPortfolio(Long userId, Long accountId) {
-        BrokerAccountEntity account = brokerAccountRepository.findById(accountId)
-                .orElseThrow(() -> ApiException.notFound("계좌를 찾을 수 없습니다.", "ACCOUNT_NOT_FOUND"));
-
-        if (!account.getUserId().equals(userId)) {
-            throw ApiException.badRequest("접근 권한이 없습니다.", "FORBIDDEN_ACCESS");
-        }
+        BrokerAccountEntity account = validateAccountAccess(userId, accountId);
 
         AccountBalanceEntity latestBalance = accountBalanceRepository
                 .findTopByAccountIdOrderByAsOfDateDesc(accountId)
@@ -195,6 +190,10 @@ public class PortfolioAggregationService {
      * 포트폴리오 분석: 자산 배분
      */
     public Map<String, Object> analyzeAssetAllocation(Long userId) {
+        if (userId == null || userId <= 0) {
+            throw ApiException.badRequest("유효하지 않은 사용자 ID입니다.", "INVALID_USER_ID");
+        }
+
         List<BrokerAccountEntity> accounts = brokerAccountRepository.findByUserId(userId);
 
         Map<String, BigDecimal> assetTypeDistribution = new HashMap<>();
@@ -231,6 +230,10 @@ public class PortfolioAggregationService {
      * 포트폴리오 성과 분석
      */
     public Map<String, Object> analyzePerformance(Long userId) {
+        if (userId == null || userId <= 0) {
+            throw ApiException.badRequest("유효하지 않은 사용자 ID입니다.", "INVALID_USER_ID");
+        }
+
         BrokerAccountDto.CombinedPortfolioResponse portfolio = getUserCombinedPortfolio(userId);
 
         return Map.of(
@@ -243,5 +246,26 @@ public class PortfolioAggregationService {
                 "positions", portfolio.getPositions().size(),
                 "lastSyncedAt", portfolio.getLastSyncedAt()
         );
+    }
+
+    /**
+     * 계좌 유효성 검증 및 조회 공통 로직
+     */
+    private BrokerAccountEntity validateAccountAccess(Long userId, Long accountId) {
+        if (userId == null || userId <= 0) {
+            throw ApiException.badRequest("유효하지 않은 사용자 ID입니다.", "INVALID_USER_ID");
+        }
+        if (accountId == null || accountId <= 0) {
+            throw ApiException.badRequest("유효하지 않은 계좌 ID입니다.", "INVALID_ACCOUNT_ID");
+        }
+
+        BrokerAccountEntity account = brokerAccountRepository.findById(accountId)
+                .orElseThrow(() -> ApiException.notFound("계좌를 찾을 수 없습니다.", "ACCOUNT_NOT_FOUND"));
+
+        if (!account.getUserId().equals(userId)) {
+            throw ApiException.badRequest("해당 계좌의 소유자와 요청한 사용자가 일치하지 않습니다.", "USER_MISMATCH");
+        }
+
+        return account;
     }
 }

@@ -18,27 +18,9 @@ public class BrokerAccountDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class LinkRequest {
-        private String brokerName; // "KIS"
-        private String accountNumber; // 선택사항
-        // 간편인증(Direct) 연동 시 필수; OAuth 연동 시 null/empty
+        // 최초 연동 시 필수, 추가 연동 시 null/empty 가능
         private String connectedId;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class AuthCallbackRequest {
-        private String code;
-        private String state;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class AuthResponse {
-        private String authUrl;
+        private List<String> brokerNames; // 연동할 증권사 목록 (예: ["KIS", "NH"])
     }
 
     @Data
@@ -96,10 +78,34 @@ public class BrokerAccountDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class UnlinkAccountResponse {
+    public static class SimpleAccountInfo {
+        private Long accountId;
         private String brokerName;
-        private String resAccountName;
-        private String resAccount;
+        private String accountNumber;
+        private String accountNickname;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class UnlinkAccountResponse {
+        private Long accountId;
+        private String brokerName;
+        private String accountNumber;
+        private String accountNickname;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SetPrimaryAccountResponse {
+        private Long accountId;
+        private String brokerName;
+        private String accountNumber;
+        private String accountNickname;
+        private SimpleAccountInfo previousPrimaryAccount;
     }
 
     @Data
@@ -151,7 +157,7 @@ public class BrokerAccountDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SyncResponse {
-        private String syncId;
+        private Long syncId;
         private String status;
         private String syncType;
         private LocalDateTime startedAt;
@@ -162,7 +168,7 @@ public class BrokerAccountDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SyncStatusResponse {
-        private String syncId;
+        private Long syncId;
         private String status;
         private String syncType;
         private Integer recordCount;
