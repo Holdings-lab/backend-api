@@ -1,6 +1,7 @@
 package com.project.server.controller;
 
 import com.project.server.dto.AdminDto;
+import com.project.server.dto.BrokerAccountDto;
 import com.project.server.service.admin.AdminService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -8,7 +9,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
 import org.springframework.http.HttpStatus;
 
 /**
@@ -24,104 +24,107 @@ import org.springframework.http.HttpStatus;
 @CrossOrigin(origins = "*")
 public class AdminController {
 
-    private final AdminService adminService;
+        private final AdminService adminService;
 
-    // ==================== 계정 관리 ====================
+        // ==================== 계정 관리 ====================
 
-            /**
-             * 계정 추가 (Email 검증 우회)
-             * POST /admin/accounts/add
-             */
-            @PostMapping("/accounts/add")
-    public ResponseEntity<AdminDto.CreateAccountResponse> createAccount(
-            @Valid @RequestBody AdminDto.CreateAccountRequest request
-    ) {
-        log.info("[Admin] 계정 추가 요청: {}", request.getEmail());
-        AdminDto.CreateAccountResponse response = adminService.createAccount(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
-    }
+        /**
+         * 계정 추가 (Email 검증 우회)
+         * POST /admin/auth/register
+         */
+        @PostMapping("/auth/register")
+        public ResponseEntity<AdminDto.CreateUserResponse> createUser(
+                        @Valid @RequestBody AdminDto.CreateUserRequest request) {
+                log.info("[Admin] 계정 추가 요청: {}", request.getEmail());
+                AdminDto.CreateUserResponse response = adminService.createUser(request);
+                return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        }
 
-            /**
-             * 계정 삭제
-             * DELETE /admin/accounts/{userId}
-             */
-            @DeleteMapping("/accounts/{userId}")
-    public ResponseEntity<AdminDto.DeleteAccountResponse> deleteAccount(
-            @PathVariable Long userId
-    ) {
-        log.info("[Admin] 계정 삭제 요청: userId={}", userId);
-        AdminDto.DeleteAccountResponse response = adminService.deleteAccount(userId);
-        return ResponseEntity.ok(response);
-    }
+        /**
+         * 계정 삭제
+         * DELETE /admin/auth/delete/{userId}
+         */
+        @DeleteMapping("/auth/delete/{userId}")
+        public ResponseEntity<AdminDto.DeleteUserResponse> deleteUser(
+                        @PathVariable Long userId) {
+                log.info("[Admin] 계정 삭제 요청: userId={}", userId);
+                AdminDto.DeleteUserResponse response = adminService.deleteUser(userId);
+                return ResponseEntity.ok(response);
+        }
 
-    /**
-     * 사용자 목록 조회
-     * GET /admin/accounts
-     */
-    @GetMapping("/accounts")
-    public ResponseEntity<AdminDto.UserListResponse> getUserList(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "100") int size
-    ) {
-        log.info("[Admin] 사용자 목록 조회");
-        AdminDto.UserListResponse response = adminService.getUserList(page, size);
-        return ResponseEntity.ok(response);
-    }
+        /**
+         * 사용자 목록 조회
+         * GET /admin/auth/users
+         */
+        @GetMapping("/auth/users")
+        public ResponseEntity<AdminDto.UserListResponse> getUserList(
+                        @RequestParam(defaultValue = "0") int page,
+                        @RequestParam(defaultValue = "100") int size) {
+                log.info("[Admin] 사용자 목록 조회");
+                AdminDto.UserListResponse response = adminService.getUserList(page, size);
+                return ResponseEntity.ok(response);
+        }
 
-    /**
-     * 사용자 FCM 토큰 업데이트
-     * PATCH /admin/accounts/{userId}/fcm-token
-     */
-    @PatchMapping("/accounts/{userId}/fcm-token")
-    public ResponseEntity<AdminDto.CreateAccountResponse> updateFcmToken(
-            @PathVariable Long userId,
-            @RequestParam String fcmToken
-    ) {
-        log.info("[Admin] FCM 토큰 업데이트 요청: userId={}", userId);
-        AdminDto.CreateAccountResponse response = adminService.updateUserFcmToken(userId, fcmToken);
-        return ResponseEntity.ok(response);
-    }
+        /**
+         * 사용자 FCM 토큰 업데이트
+         * PATCH /admin/auth/{userId}/fcm-token
+         */
+        @PatchMapping("/auth/{userId}/fcm-token")
+        public ResponseEntity<AdminDto.CreateUserResponse> updateFcmToken(
+                        @PathVariable Long userId,
+                        @Valid @RequestBody AdminDto.UpdateFcmTokenRequest request) {
+                log.info("[Admin] FCM 토큰 업데이트 요청: userId={}", userId);
+                AdminDto.CreateUserResponse response = adminService.updateUserFcmToken(userId, request.getFcmToken());
+                return ResponseEntity.ok(response);
+        }
 
-    /**
-     * 비밀번호 변경 (관리자가 특정 사용자의 비밀번호 변경)
-     * POST /admin/accounts/change-password
-     */
-    @PostMapping("/accounts/change-password")
-    public ResponseEntity<AdminDto.CreateAccountResponse> changePassword(
-            @Valid @RequestBody AdminDto.ChangePasswordRequest request
-    ) {
-        log.info("[Admin] 비밀번호 변경 요청: userId={}", request.getUserId());
-        AdminDto.CreateAccountResponse response = adminService.changePassword(request.getUserId(), request.getNewPassword());
-        return ResponseEntity.ok(response);
-    }
+        /**
+         * 비밀번호 변경 (관리자가 특정 사용자의 비밀번호 변경)
+         * POST /admin/auth/{userId}/change-password
+         */
+        @PostMapping("/auth/{userId}/change-password")
+        public ResponseEntity<AdminDto.CreateUserResponse> changePassword(
+                        @PathVariable Long userId,
+                        @Valid @RequestBody AdminDto.ChangePasswordRequest request) {
+                log.info("[Admin] 비밀번호 변경 요청: userId={}", userId);
+                AdminDto.CreateUserResponse response = adminService.changePassword(userId,
+                                request.getNewPassword());
+                return ResponseEntity.ok(response);
+        }
 
-    // ==================== 알림 관리 ====================
+        // ==================== 알림 관리 ====================
 
-            /**
-             * 특정 메시지로 알림 전송
-             * POST /admin/notifications/send
-             *
-             * userIds가 null 또는 empty면 모든 사용자에게 전송
-             */
-            @PostMapping("/notifications/send")
-    public ResponseEntity<AdminDto.SendNotificationResponse> sendNotification(
-            @Valid @RequestBody AdminDto.SendNotificationRequest request
-    ) {
-        log.info("[Admin] 알림 전송 요청: title={}, userCount={}", 
-                request.getTitle(), 
-                request.getUserIds() != null ? request.getUserIds().size() : "all");
-        AdminDto.SendNotificationResponse response = adminService.sendNotification(request);
-        return ResponseEntity.ok(response);
-    }
+        /**
+         * 특정 메시지로 알림 전송
+         * POST /admin/notifications/send
+         *
+         * userIds가 null 또는 empty면 모든 사용자에게 전송
+         */
+        @PostMapping("/notifications/send")
+        public ResponseEntity<AdminDto.SendNotificationResponse> sendNotification(
+                        @Valid @RequestBody AdminDto.SendNotificationRequest request) {
+                log.info("[Admin] 알림 전송 요청: title={}, userCount={}",
+                                request.getTitle(),
+                                request.getUserIds() != null ? request.getUserIds().size() : "all");
+                AdminDto.SendNotificationResponse response = adminService.sendNotification(request);
+                return ResponseEntity.ok(response);
+        }
 
-    // ==================== 상태 확인 ====================
+        // ==================== 상태 확인 ====================
 
-    /**
-     * Admin API 상태 확인
-     * GET /admin/health
-     */
-    @GetMapping("/health")
-        public ResponseEntity<Map<String, String>> health() {
-                return ResponseEntity.ok(Map.of("status", "Admin API is running"));
-    }
+        // ==================== 테스트 및 모의 데이터 ====================
+
+        /**
+         * 계좌 상세 정보 및 포트폴리오 데이터 설정
+         * POST /admin/accounts/{accountId}
+         */
+        @PostMapping("/accounts/{accountId}")
+        public ResponseEntity<BrokerAccountDto.BrokerAccountDetailResponse> setAccountDetails(
+                        @PathVariable Long accountId,
+                        @Valid @RequestBody AdminDto.SetAccountDetailsRequest request) {
+                log.info("[Admin] 계좌 상세 정보 설정 요청: accountId={}", accountId);
+                BrokerAccountDto.BrokerAccountDetailResponse response = adminService.updateAccountDetails(accountId,
+                                request);
+                return ResponseEntity.ok(response);
+        }
 }

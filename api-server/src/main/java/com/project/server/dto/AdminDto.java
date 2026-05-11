@@ -17,7 +17,7 @@ public class AdminDto {
     @Builder
     @NoArgsConstructor // Jackson을 위한 기본 생성자 추가
     @AllArgsConstructor // Builder를 위한 전체 생성자 추가
-    public static class CreateAccountRequest {
+    public static class CreateUserRequest {
         @NotBlank(message = "이메일은 필수입니다.")
         private String email;
 
@@ -34,16 +34,25 @@ public class AdminDto {
 
     @Data
     @Builder
-    public static class CreateAccountResponse {
+    public static class CreateUserResponse {
         private Long userId;
         private String email;
         private String nickname;
-        private String message;
+        private String fcmToken;
     }
 
     @Data
     @Builder
-    public static class DeleteAccountRequest {
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class UpdateFcmTokenRequest {
+        @NotBlank(message = "FCM 토큰은 필수입니다.")
+        private String fcmToken;
+    }
+
+    @Data
+    @Builder
+    public static class DeleteUserRequest {
         @NotNull(message = "삭제할 사용자 ID는 필수입니다.")
         @Positive(message = "사용자 ID는 1 이상이어야 합니다.")
         private Long userId;
@@ -51,16 +60,14 @@ public class AdminDto {
 
     @Data
     @Builder
-    public static class DeleteAccountResponse {
+    public static class DeleteUserResponse {
         private Long userId;
         private String email;
-        private String message;
     }
 
     @Data
     @Builder
     public static class SendNotificationRequest {
-        @NotNull(message = "대상 사용자 ID는 필수입니다.")
         private List<Long> userIds;
 
         @NotBlank(message = "제목은 필수입니다.")
@@ -77,16 +84,11 @@ public class AdminDto {
     public static class SendNotificationResponse {
         private int successCount;
         private int failureCount;
-        private String message;
     }
 
     @Data
     @Builder
     public static class ChangePasswordRequest {
-        @NotNull(message = "대상 사용자 ID는 필수입니다.")
-        @Positive(message = "사용자 ID는 1 이상이어야 합니다.")
-        private Long userId;
-
         @NotBlank(message = "새 비밀번호는 필수입니다.")
         private String newPassword;
     }
@@ -107,5 +109,49 @@ public class AdminDto {
     public static class UserListResponse {
         private int totalCount;
         private List<UserDetailResponse> users;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SetAccountDetailsRequest {
+        // 직접 조작 가능한 파라미터들 (모두 선택사항, 최소 1개 이상 필요)
+        // totalAssetValue는 제외 - 서버가 positions + cashBalance로부터 자동 계산
+        private java.math.BigDecimal depositAmount;
+        private java.math.BigDecimal cashBalance;
+        private String principal;             // resPrincipal - 자산
+        private String purchaseAmount;        // resPurchaseAmount - 매입금
+        private String valuationAmt;          // resValuationAmt - 평가액
+        private String depositReceived;       // resDepositReceived - 입금액
+        private String depositReceivedD1;     // resDepositReceivedD1 - D1 입금액
+        private String depositReceivedD2;     // resDepositReceivedD2 - D2 입금액
+        private String depositReceivedF;      // resDepositReceivedF - F 입금액
+        private String withdrawalAmt;         // resWithdrawalAmt - 출금액
+        private String loanAmt;               // resLoanAmt - 대출금
+
+        // 임의의 종목 데이터 리스트 (심볼, 수량, 매입가, 현재가)
+        private List<PortfolioPosition> positions;
+
+        @Data
+        @Builder
+        @NoArgsConstructor
+        @AllArgsConstructor
+        public static class PortfolioPosition {
+            private String symbol;
+            private String positionType; // STOCK, ETF 등
+            private java.math.BigDecimal quantity;
+            private java.math.BigDecimal purchasePrice;
+            private java.math.BigDecimal currentPrice;
+        }
+
+        // 최소 1개 이상의 파라미터가 필요한지 검증
+        public boolean hasAnyParameter() {
+            return depositAmount != null || cashBalance != null ||
+                   principal != null || purchaseAmount != null || valuationAmt != null ||
+                   depositReceived != null || depositReceivedD1 != null || depositReceivedD2 != null ||
+                   depositReceivedF != null || withdrawalAmt != null || loanAmt != null ||
+                   (positions != null && !positions.isEmpty());
+        }
     }
 }

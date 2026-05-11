@@ -1,23 +1,37 @@
 package com.project.server.service.admin;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.Notification;
 import com.project.server.domain.NotificationHistoryEntity;
 import com.project.server.domain.UserEntity;
 import com.project.server.domain.UserProfileEntity;
+import com.project.server.domain.BrokerAccountEntity;
+import com.project.server.domain.AccountBalanceEntity;
+import com.project.server.domain.AssetPositionEntity;
 import com.project.server.dto.AdminDto;
+import com.project.server.dto.BrokerAccountDto;
 import com.project.server.exception.ApiException;
 import com.project.server.repository.NotificationHistoryRepository;
 import com.project.server.repository.UserJpaRepository;
 import com.project.server.repository.UserProfileRepository;
+import com.project.server.repository.BrokerAccountRepository;
+import com.project.server.repository.AccountBalanceRepository;
+import com.project.server.repository.AssetPositionRepository;
+import com.project.server.service.broker.BrokerAccountService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.math.BigDecimal;
 
 @Slf4j
 @Service
@@ -27,9 +41,15 @@ public class AdminService {
     private final UserJpaRepository userJpaRepository;
     private final NotificationHistoryRepository notificationHistoryRepository;
     private final UserProfileRepository userProfileRepository;
+    private final BrokerAccountRepository brokerAccountRepository;
+    private final AccountBalanceRepository accountBalanceRepository;
+    private final AssetPositionRepository assetPositionRepository;
+    private final BrokerAccountService brokerAccountService;
+    private final PasswordEncoder passwordEncoder;
+    private final ObjectMapper objectMapper;
 
     @Transactional
-    public AdminDto.CreateAccountResponse createAccount(AdminDto.CreateAccountRequest request) {
+    public AdminDto.CreateUserResponse createUser(AdminDto.CreateUserRequest request) {
         String normalizedEmail = request.getEmail().trim().toLowerCase();
         String normalizedNickname = request.getNickname().trim();
 
@@ -40,12 +60,12 @@ public class AdminService {
         UserEntity newUser = UserEntity.builder()
                 .email(normalizedEmail)
                 .nickname(normalizedNickname)
-                .password(request.getPassword())
+            .password(passwordEncoder.encode(request.getPassword()))
                 .fcmToken(request.getFcmToken())
                 .build();
 
         UserEntity saved = userJpaRepository.save(newUser);
-        
+
         // 프로필 자동 생성
         UserProfileEntity profile = UserProfileEntity.builder()
                 .userId(saved.getId())
@@ -55,19 +75,19 @@ public class AdminService {
                 .weakTopic("없음")
                 .build();
         userProfileRepository.save(profile);
-        
+
         log.info("[Admin] 계정 추가: {}", normalizedEmail);
 
-        return AdminDto.CreateAccountResponse.builder()
+        return AdminDto.CreateUserResponse.builder()
                 .userId(saved.getId())
                 .email(saved.getEmail())
                 .nickname(saved.getNickname())
-                .message("계정이 성공적으로 추가되었습니다.")
+                .fcmToken(saved.getFcmToken())
                 .build();
     }
 
     @Transactional
-    public AdminDto.DeleteAccountResponse deleteAccount(Long userId) {
+    public AdminDto.DeleteUserResponse deleteUser(Long userId) {
         UserEntity user = userJpaRepository.findById(userId)
                 .orElseThrow(() -> ApiException.notFound("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND"));
 
@@ -75,10 +95,9 @@ public class AdminService {
         userJpaRepository.deleteById(userId);
         log.info("[Admin] 계정 삭제: {}", email);
 
-        return AdminDto.DeleteAccountResponse.builder()
+        return AdminDto.DeleteUserResponse.builder()
                 .userId(userId)
                 .email(email)
-                .message("계정이 성공적으로 삭제되었습니다.")
                 .build();
     }
 
@@ -114,7 +133,6 @@ public class AdminService {
         return AdminDto.SendNotificationResponse.builder()
                 .successCount(successCount)
                 .failureCount(failureCount)
-                .message(String.format("알림 전송 완료 - 성공: %d, 실패: %d", successCount, failureCount))
                 .build();
     }
 
@@ -147,8 +165,7 @@ public class AdminService {
             AdminDto.SendNotificationRequest request,
             String status,
             String errorCode,
-            String errorMessage
-    ) {
+            String errorMessage) {
         NotificationHistoryEntity history = NotificationHistoryEntity.builder()
                 .userId(userId)
                 .title(request.getTitle())
@@ -192,7 +209,7 @@ public class AdminService {
     }
 
     @Transactional
-    public AdminDto.CreateAccountResponse updateUserFcmToken(Long userId, String fcmToken) {
+    public AdminDto.CreateUserResponse updateUserFcmToken(Long userId, String fcmToken) {
         UserEntity user = userJpaRepository.findById(userId)
                 .orElseThrow(() -> ApiException.notFound("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND"));
 
@@ -200,28 +217,28 @@ public class AdminService {
         userJpaRepository.save(user);
         log.info("[Admin] FCM 토큰 업데이트: userId={}", userId);
 
-        return AdminDto.CreateAccountResponse.builder()
+        return AdminDto.CreateUserResponse.builder()
                 .userId(user.getId())
                 .email(user.getEmail())
                 .nickname(user.getNickname())
-                .message("FCM 토큰이 업데이트되었습니다.")
+                .fcmToken(user.getFcmToken())
                 .build();
     }
 
     @Transactional
-    public AdminDto.CreateAccountResponse changePassword(Long userId, String newPassword) {
+    public AdminDto.CreateUserResponse changePassword(Long userId, String newPassword) {
         UserEntity user = userJpaRepository.findById(userId)
                 .orElseThrow(() -> ApiException.notFound("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND"));
 
-        user.setPassword(newPassword);
+        user.setPassword(passwordEncoder.encode(newPassword));
         userJpaRepository.save(user);
         log.info("[Admin] 비밀번호 변경: userId={}", userId);
 
-        return AdminDto.CreateAccountResponse.builder()
+        return AdminDto.CreateUserResponse.builder()
                 .userId(user.getId())
                 .email(user.getEmail())
                 .nickname(user.getNickname())
-                .message("비밀번호가 변경되었습니다.")
+                .fcmToken(user.getFcmToken())
                 .build();
     }
 
@@ -240,6 +257,151 @@ public class AdminService {
             if (!second.isBlank())
                 initials += second.substring(0, 1);
             return initials.toUpperCase();
+        }
+    }
+
+    @Transactional
+    public BrokerAccountDto.BrokerAccountDetailResponse updateAccountDetails(Long accountId,
+            AdminDto.SetAccountDetailsRequest request) {
+        // 최소 1개 이상의 파라미터가 있는지 검증
+        if (!request.hasAnyParameter()) {
+            throw ApiException.badRequest("최소 1개 이상의 파라미터를 입력하세요.", "NO_PARAMETERS_PROVIDED");
+        }
+
+        BrokerAccountEntity account = brokerAccountRepository.findById(accountId)
+                .orElseThrow(() -> ApiException.notFound("존재하지 않는 계좌입니다.", "ACCOUNT_NOT_FOUND"));
+
+        // 기존 CODEF 응답 데이터를 가져와서 업데이트 (있으면)
+        Map<String, Object> codefDetails = new java.util.HashMap<>();
+        if (account.getCodefAccountDetails() != null && !account.getCodefAccountDetails().isEmpty()) {
+            try {
+                codefDetails = objectMapper.readValue(account.getCodefAccountDetails(),
+                        new TypeReference<Map<String, Object>>() {
+                        });
+            } catch (Exception e) {
+                log.warn("Failed to parse existing CODEF account details", e);
+            }
+        }
+
+        // 요청에서 받은 필드들만 업데이트
+        if (request.getPrincipal() != null) {
+            codefDetails.put("resPrincipal", request.getPrincipal());
+        }
+        if (request.getPurchaseAmount() != null) {
+            codefDetails.put("resPurchaseAmount", request.getPurchaseAmount());
+        }
+        if (request.getValuationAmt() != null) {
+            codefDetails.put("resValuationAmt", request.getValuationAmt());
+        }
+        if (request.getDepositReceived() != null) {
+            codefDetails.put("resDepositReceived", request.getDepositReceived());
+        }
+        if (request.getDepositReceivedD1() != null) {
+            codefDetails.put("resDepositReceivedD1", request.getDepositReceivedD1());
+        }
+        if (request.getDepositReceivedD2() != null) {
+            codefDetails.put("resDepositReceivedD2", request.getDepositReceivedD2());
+        }
+        if (request.getDepositReceivedF() != null) {
+            codefDetails.put("resDepositReceivedF", request.getDepositReceivedF());
+        }
+        if (request.getWithdrawalAmt() != null) {
+            codefDetails.put("resWithdrawalAmt", request.getWithdrawalAmt());
+        }
+        if (request.getLoanAmt() != null) {
+            codefDetails.put("resLoanAmt", request.getLoanAmt());
+        }
+
+        try {
+            boolean hasPortfolioValues = request.getDepositAmount() != null || request.getCashBalance() != null;
+            boolean hasPositions = request.getPositions() != null && !request.getPositions().isEmpty();
+
+            if (hasPortfolioValues || hasPositions) {
+                accountBalanceRepository.deleteByAccountId(account.getId());
+                assetPositionRepository.deleteByAccountId(account.getId());
+
+                BigDecimal depositAmount = request.getDepositAmount() != null ? request.getDepositAmount()
+                        : BigDecimal.ZERO;
+                BigDecimal cashBalance = request.getCashBalance() != null ? request.getCashBalance() : BigDecimal.ZERO;
+
+                // positions로부터 현재가와 매입액 자동 계산
+                BigDecimal derivedCurrentValue = BigDecimal.ZERO;
+                BigDecimal derivedPurchaseAmount = BigDecimal.ZERO;
+                if (hasPositions) {
+                    for (AdminDto.SetAccountDetailsRequest.PortfolioPosition pos : request.getPositions()) {
+                        BigDecimal qty = pos.getQuantity() != null ? pos.getQuantity() : BigDecimal.ZERO;
+                        BigDecimal currentPrice = pos.getCurrentPrice() != null ? pos.getCurrentPrice()
+                                : BigDecimal.ZERO;
+                        BigDecimal purchasePrice = pos.getPurchasePrice() != null ? pos.getPurchasePrice()
+                                : BigDecimal.ZERO;
+                        BigDecimal currentValue = qty.multiply(currentPrice);
+                        BigDecimal purchaseAmount = qty.multiply(purchasePrice);
+                        BigDecimal gainLoss = currentValue.subtract(purchaseAmount);
+                        BigDecimal gainLossRate = purchaseAmount.compareTo(BigDecimal.ZERO) > 0
+                                ? gainLoss.divide(purchaseAmount, 4, java.math.RoundingMode.HALF_UP)
+                                        .multiply(new BigDecimal(100))
+                                : BigDecimal.ZERO;
+
+                        derivedCurrentValue = derivedCurrentValue.add(currentValue);
+                        derivedPurchaseAmount = derivedPurchaseAmount.add(purchaseAmount);
+
+                        AssetPositionEntity positionEntity = AssetPositionEntity.builder()
+                                .accountId(account.getId())
+                                .userId(account.getUserId())
+                                .symbol(pos.getSymbol())
+                                .positionType(pos.getPositionType() != null ? pos.getPositionType() : "STOCK")
+                                .quantity(qty)
+                                .currentPrice(currentPrice)
+                                .purchasePrice(purchasePrice)
+                                .currentValue(currentValue)
+                                .purchaseAmount(purchaseAmount)
+                                .gainLoss(gainLoss)
+                                .gainLossRate(gainLossRate)
+                                .currencyCode("KRW")
+                                .build();
+                        assetPositionRepository.save(positionEntity);
+                    }
+                }
+
+                // totalAssetValue는 항상 positions의 현재가 + cashBalance로부터 계산
+                BigDecimal portfolioValue = hasPositions ? derivedCurrentValue : BigDecimal.ZERO;
+                BigDecimal totalAssetValue = portfolioValue.add(cashBalance);
+                BigDecimal evaluationAmount = totalAssetValue.subtract(cashBalance);
+                BigDecimal gainLoss = totalAssetValue.subtract(depositAmount);
+                BigDecimal gainLossRate = depositAmount.compareTo(BigDecimal.ZERO) > 0
+                        ? gainLoss.divide(depositAmount, 4, java.math.RoundingMode.HALF_UP)
+                                .multiply(new BigDecimal(100))
+                        : BigDecimal.ZERO;
+
+                AccountBalanceEntity balance = AccountBalanceEntity.builder()
+                        .accountId(account.getId())
+                        .userId(account.getUserId())
+                        .totalAssetValue(totalAssetValue)
+                        .depositAmount(depositAmount)
+                        .cashBalance(cashBalance)
+                        .evaluationAmount(evaluationAmount)
+                        .gainLoss(gainLoss)
+                        .gainLossRate(gainLossRate)
+                        .asOfDate(LocalDate.now())
+                        .lastSyncedAt(LocalDateTime.now())
+                        .build();
+                accountBalanceRepository.save(balance);
+            }
+
+            // Map을 JSON 문자열로 변환해서 저장
+            String codefDetailsJson = objectMapper.writeValueAsString(codefDetails);
+            account.setCodefAccountDetails(codefDetailsJson);
+            account.setUpdatedAt(java.time.LocalDateTime.now());
+            account.setLastSyncedAt(LocalDateTime.now());
+            brokerAccountRepository.save(account);
+
+            // 저장 후 최신 계좌 정보 조회해서 반환 (일관성 있는 응답)
+            return brokerAccountService.getAccount(account.getUserId(), accountId);
+        } catch (ApiException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Failed to update account details for accountId={}", accountId, e);
+            throw ApiException.internalServerError("계좌 정보 업데이트 실패", "ACCOUNT_DETAILS_UPDATE_ERROR");
         }
     }
 }
