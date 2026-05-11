@@ -1,6 +1,5 @@
 package com.project.server.controller;
 
-import com.project.server.service.event.SignalService;
 import com.project.server.service.portfolio.PortfolioService;
 import com.project.server.service.auth.WatchAssetSelectionService;
 import com.project.server.exception.ApiException;
@@ -21,9 +20,9 @@ public class PortfolioController {
     private final UserJpaRepository userJpaRepository;
 
     public PortfolioController(PortfolioService portfolioService,
-                               WatchAssetSelectionService watchAssetSelectionService,
-                               PolicyEventJpaRepository policyEventRepository,
-                               UserJpaRepository userJpaRepository) {
+            WatchAssetSelectionService watchAssetSelectionService,
+            PolicyEventJpaRepository policyEventRepository,
+            UserJpaRepository userJpaRepository) {
         this.portfolioService = portfolioService;
         this.watchAssetSelectionService = watchAssetSelectionService;
         this.policyEventRepository = policyEventRepository;
@@ -46,7 +45,7 @@ public class PortfolioController {
                 .stream()
                 .map(asset -> asset.getAssetName())
                 .collect(Collectors.toList());
-        
+
         if (userAssets.isEmpty()) {
             userAssets = Arrays.asList("QQQ", "AAPL", "TSLA");
         }

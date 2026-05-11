@@ -17,9 +17,14 @@ public class LegacyUserEmailMigrationRunner implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         try {
-            // Legacy schema compatibility: username -> email migration.
+            // Legacy schema compatibility: username -> nickname/email migration.
             jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(100)");
+            jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname VARCHAR(100)");
             jdbcTemplate.execute("UPDATE users SET email = username WHERE email IS NULL AND username IS NOT NULL");
+            jdbcTemplate.execute("UPDATE users SET nickname = username WHERE nickname IS NULL AND username IS NOT NULL");
+
+            jdbcTemplate.execute("ALTER TABLE users ALTER COLUMN nickname DROP NOT NULL");
+            jdbcTemplate.execute("ALTER TABLE users ALTER COLUMN email DROP NOT NULL");
 
             jdbcTemplate.execute("""
                     DO $$
@@ -36,9 +41,12 @@ public class LegacyUserEmailMigrationRunner implements ApplicationRunner {
                     $$
                     """);
 
+            jdbcTemplate.execute("ALTER TABLE users DROP COLUMN IF EXISTS username");
+
+            jdbcTemplate.execute("ALTER TABLE users ALTER COLUMN nickname SET NOT NULL");
             jdbcTemplate.execute("ALTER TABLE users ALTER COLUMN email SET NOT NULL");
             jdbcTemplate.execute("ALTER TABLE users ADD CONSTRAINT uk_users_email UNIQUE (email)");
-            log.info("Legacy users.username -> users.email migration checked/applied");
+            log.info("Legacy users.username -> users.nickname/email migration checked/applied");
         } catch (Exception exception) {
             // If table does not exist yet, Hibernate DDL will create it and this can be ignored.
             log.warn("Legacy email migration skipped or partially applied: {}", exception.getMessage());

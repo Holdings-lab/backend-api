@@ -6,6 +6,8 @@ import com.project.server.domain.BrokerAccountEntity;
 import com.project.server.dto.BrokerAccountDto;
 import com.project.server.exception.ApiException;
 import com.project.server.repository.BrokerAccountRepository;
+import com.project.server.repository.AccountBalanceRepository;
+import com.project.server.repository.AssetPositionRepository;
 import com.project.server.service.integration.CodefApiClientService;
 import com.project.server.service.security.CryptoService;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,8 @@ import java.util.stream.Collectors;
 public class BrokerAccountService {
 
   private final BrokerAccountRepository brokerAccountRepository;
+  private final AccountBalanceRepository accountBalanceRepository;
+  private final AssetPositionRepository assetPositionRepository;
   private final CodefApiClientService codefApiClientService;
   private final CryptoService cryptoService;
   private final ObjectMapper objectMapper;
@@ -292,6 +296,38 @@ public class BrokerAccountService {
       }
     }
 
+      BrokerAccountDto.AccountBalanceDto latestBalance = accountBalanceRepository.findTopByAccountIdOrderByAsOfDateDesc(entity.getId())
+        .map(balance -> BrokerAccountDto.AccountBalanceDto.builder()
+          .id(balance.getId())
+          .totalAssetValue(balance.getTotalAssetValue())
+          .cashBalance(balance.getCashBalance())
+          .depositAmount(balance.getDepositAmount())
+          .evaluationAmount(balance.getEvaluationAmount())
+          .gainLoss(balance.getGainLoss())
+          .gainLossRate(balance.getGainLossRate())
+          .dailyGainLoss(balance.getDailyGainLoss())
+          .dailyGainLossRate(balance.getDailyGainLossRate())
+          .asOfDate(balance.getAsOfDate())
+          .lastSyncedAt(balance.getLastSyncedAt())
+          .build())
+        .orElse(null);
+
+      List<BrokerAccountDto.AssetPositionDto> positions = assetPositionRepository.findByAccountId(entity.getId()).stream()
+        .map(position -> BrokerAccountDto.AssetPositionDto.builder()
+          .symbol(position.getSymbol())
+          .positionType(position.getPositionType())
+          .quantity(position.getQuantity())
+          .purchasePrice(position.getPurchasePrice())
+          .currentPrice(position.getCurrentPrice())
+          .currentValue(position.getCurrentValue())
+          .purchaseAmount(position.getPurchaseAmount())
+          .gainLoss(position.getGainLoss())
+          .gainLossRate(position.getGainLossRate())
+          .currencyCode(position.getCurrencyCode())
+          .purchasedAt(position.getPurchasedAt())
+          .build())
+        .collect(Collectors.toList());
+
     return BrokerAccountDto.BrokerAccountDetailResponse.builder()
         .accountId(entity.getId())
         .brokerName(entity.getBrokerName())
@@ -301,6 +337,8 @@ public class BrokerAccountService {
         .accountType(entity.getAccountType())
         .status(entity.getCodefStatus().name())
         .isPrimary(entity.getIsPrimary())
+        .latestBalance(latestBalance)
+        .positions(positions)
         .lastSyncedAt(entity.getLastSyncedAt())
         .syncCount(entity.getSyncCount())
         .accountDisplay((String) accountDetails.get("resAccountDisplay"))

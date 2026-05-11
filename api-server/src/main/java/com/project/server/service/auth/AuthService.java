@@ -71,8 +71,7 @@ public class AuthService {
 
         return AuthDto.EmailVerificationResponse.builder()
                 .email(normalizedEmail)
-                .verified(false)
-                .message("인증번호를 이메일로 전송했습니다.")
+            .verified(false)
                 .build();
     }
 
@@ -83,8 +82,7 @@ public class AuthService {
 
         return AuthDto.EmailVerificationResponse.builder()
                 .email(normalizedEmail)
-                .verified(true)
-                .message("이메일 인증이 완료되었습니다.")
+            .verified(true)
                 .build();
     }
 

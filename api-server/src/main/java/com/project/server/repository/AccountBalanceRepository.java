@@ -19,4 +19,6 @@ public interface AccountBalanceRepository extends JpaRepository<AccountBalanceEn
     Optional<AccountBalanceEntity> findByAccountIdAndAsOfDate(Long accountId, LocalDate asOfDate);
 
     List<AccountBalanceEntity> findByAccountIdAndAsOfDateGreaterThanOrderByAsOfDateDesc(Long accountId, LocalDate fromDate);
+
+    void deleteByAccountId(Long accountId);
 }

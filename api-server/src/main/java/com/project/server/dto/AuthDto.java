@@ -64,7 +64,6 @@ public class AuthDto {
     public static class EmailVerificationResponse {
         private String email;
         private boolean verified;
-        private String message;
     }
 
     @Data

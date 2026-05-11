@@ -214,14 +214,19 @@ public class PortfolioAggregationService {
         // 비율 계산
         Map<String, Object> allocation = new HashMap<>();
         BigDecimal finalTotalValue = totalValue;
+        
         assetTypeDistribution.forEach((type, value) -> {
+            BigDecimal percentage = BigDecimal.ZERO;
+            
+            // 총합이 0보다 클 때만 퍼센트 계산 (0으로 나누는 에러 방지)
             if (finalTotalValue.compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal percentage = value.divide(finalTotalValue, 4, java.math.RoundingMode.HALF_UP)
+                percentage = value.divide(finalTotalValue, 4, java.math.RoundingMode.HALF_UP)
                         .multiply(new BigDecimal(100));
-                allocation.put(type, Map.of("value", value, "percentage", percentage));
             }
+            
+            // 조건문 밖에서 무조건 맵에 삽입!
+            allocation.put(type, Map.of("value", value, "percentage", percentage));
         });
-
         allocation.put("totalValue", totalValue);
         return allocation;
     }
