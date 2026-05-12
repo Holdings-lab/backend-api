@@ -12,6 +12,13 @@ public class ActionDto {
     public static class ActionResponse {
         private String action;
         private String status;
+        private Long userId;
+        private Long eventId;
+        private String featuredTitle;
+        private String featuredSummary;
+        private String countdownText;
+        private List<String> tags;
+        private Integer policyFeedCardCount;
     }
 
     @Data

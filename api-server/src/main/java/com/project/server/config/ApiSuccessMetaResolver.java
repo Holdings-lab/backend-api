@@ -51,7 +51,7 @@ public class ApiSuccessMetaResolver {
                         new ApiSuccessMetaRule(HttpMethod.POST, "/api/me/watch-assets", "ME-ASSET-UPDATE-200",
                                         "관심자산이 업데이트되었습니다."),
 
-                        new ApiSuccessMetaRule(HttpMethod.POST, "/api/ai/trigger", "AI-TRIGGER-200",
+                        new ApiSuccessMetaRule(HttpMethod.POST, "/api/ai/users/*/trigger", "AI-TRIGGER-200",
                                         "AI 파이프라인 실행에 성공했습니다."),
                         new ApiSuccessMetaRule(HttpMethod.POST, "/api/ai/train-regression", "AI-TRAIN-200",
                                         "학습 실행 요청에 성공했습니다."),

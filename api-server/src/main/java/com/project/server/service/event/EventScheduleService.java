@@ -3,9 +3,11 @@ package com.project.server.service.event;
 import com.project.server.domain.PolicyEventEntity;
 import com.project.server.domain.UserEventCursorEntity;
 import com.project.server.domain.UserWatchAssetEntity;
+import com.project.server.exception.ApiException;
 import com.project.server.repository.PolicyEventJpaRepository;
 import com.project.server.repository.UserEventCursorRepository;
 import com.project.server.repository.UserWatchAssetRepository;
+import com.project.server.repository.UserJpaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,9 +26,11 @@ public class EventScheduleService {
     private final PolicyEventJpaRepository policyEventJpaRepository;
     private final UserEventCursorRepository userEventCursorRepository;
     private final UserWatchAssetRepository userWatchAssetRepository;
+    private final UserJpaRepository userJpaRepository;
 
     @Transactional(readOnly = true)
     public EventSchedule getCurrentEvent(Long userId) {
+        validateUser(userId);
         List<PolicyEventEntity> events = policyEventJpaRepository.findTop20ByOrderByCreatedAtDesc();
         if (events.isEmpty()) {
             return new EventSchedule(
@@ -57,11 +61,21 @@ public class EventScheduleService {
 
     @Transactional
     public EventSchedule refreshEvent(Long userId) {
+        validateUser(userId);
         UserEventCursorEntity cursor = userEventCursorRepository.findByUserId(userId)
                 .orElseGet(() -> UserEventCursorEntity.builder().userId(userId).cursorIndex(0).build());
         cursor.setCursorIndex(cursor.getCursorIndex() + 1);
         userEventCursorRepository.save(cursor);
         return getCurrentEvent(userId);
+    }
+
+    private void validateUser(Long userId) {
+        if (userId == null || userId <= 0) {
+            throw ApiException.badRequest("userId는 양수여야 합니다.", "AI_TRIGGER_INVALID_USER_ID");
+        }
+        if (!userJpaRepository.existsById(userId)) {
+            throw ApiException.notFound("존재하지 않는 사용자입니다.", "AI_TRIGGER_USER_NOT_FOUND");
+        }
     }
 
     private String buildCountdownText(LocalDateTime targetTime) {

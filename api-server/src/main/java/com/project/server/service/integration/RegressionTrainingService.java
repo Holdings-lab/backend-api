@@ -51,8 +51,7 @@ public class RegressionTrainingService {
         try {
             CompletableFuture<HttpResponse<String>> future = httpClient.sendAsync(
                     request,
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
-            );
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 
             HttpResponse<String> response = future.join();
             long elapsedMs = Duration.between(startedAt, Instant.now()).toMillis();
