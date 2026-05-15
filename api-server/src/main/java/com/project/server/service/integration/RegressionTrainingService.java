@@ -39,7 +39,7 @@ public class RegressionTrainingService {
     }
 
     public ActionDto.TrainRegressionResponse runTrainRegression() {
-        String targetUrl = normalizeBaseUrl(mlBaseUrl) + "/ml/predict/run";
+        String targetUrl = normalizeBaseUrl(mlBaseUrl) + "/ml/predictions/run";
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(targetUrl))
                 .timeout(REQUEST_TIMEOUT)
