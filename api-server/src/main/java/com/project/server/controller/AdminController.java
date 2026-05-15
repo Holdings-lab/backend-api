@@ -30,9 +30,9 @@ public class AdminController {
 
         /**
          * 계정 추가 (Email 검증 우회)
-         * POST /admin/auth/register
+         * POST /admin/users
          */
-        @PostMapping("/auth/register")
+        @PostMapping("/users")
         public ResponseEntity<AdminDto.CreateUserResponse> createUser(
                         @Valid @RequestBody AdminDto.CreateUserRequest request) {
                 log.info("[Admin] 계정 추가 요청: {}", request.getEmail());
@@ -42,9 +42,9 @@ public class AdminController {
 
         /**
          * 계정 삭제
-         * DELETE /admin/auth/delete/{userId}
+         * DELETE /admin/users/{userId}
          */
-        @DeleteMapping("/auth/delete/{userId}")
+        @DeleteMapping("/users/{userId}")
         public ResponseEntity<AdminDto.DeleteUserResponse> deleteUser(
                         @PathVariable Long userId) {
                 log.info("[Admin] 계정 삭제 요청: userId={}", userId);
@@ -54,9 +54,9 @@ public class AdminController {
 
         /**
          * 사용자 목록 조회
-         * GET /admin/auth/users
+         * GET /admin/users
          */
-        @GetMapping("/auth/users")
+        @GetMapping("/users")
         public ResponseEntity<AdminDto.UserListResponse> getUserList(
                         @RequestParam(defaultValue = "0") int page,
                         @RequestParam(defaultValue = "100") int size) {
@@ -67,9 +67,9 @@ public class AdminController {
 
         /**
          * 사용자 FCM 토큰 업데이트
-         * PATCH /admin/auth/{userId}/fcm-token
+         * PATCH /admin/users/{userId}/fcm-token
          */
-        @PatchMapping("/auth/{userId}/fcm-token")
+        @PatchMapping("/users/{userId}/fcm-token")
         public ResponseEntity<AdminDto.CreateUserResponse> updateFcmToken(
                         @PathVariable Long userId,
                         @Valid @RequestBody AdminDto.UpdateFcmTokenRequest request) {
@@ -80,9 +80,9 @@ public class AdminController {
 
         /**
          * 비밀번호 변경 (관리자가 특정 사용자의 비밀번호 변경)
-         * POST /admin/auth/{userId}/change-password
+         * PATCH /admin/users/{userId}/password
          */
-        @PostMapping("/auth/{userId}/change-password")
+        @PatchMapping("/users/{userId}/password")
         public ResponseEntity<AdminDto.CreateUserResponse> changePassword(
                         @PathVariable Long userId,
                         @Valid @RequestBody AdminDto.ChangePasswordRequest request) {
@@ -96,11 +96,11 @@ public class AdminController {
 
         /**
          * 특정 메시지로 알림 전송
-         * POST /admin/notifications/send
+         * POST /admin/notifications
          *
          * userIds가 null 또는 empty면 모든 사용자에게 전송
          */
-        @PostMapping("/notifications/send")
+        @PostMapping("/notifications")
         public ResponseEntity<AdminDto.SendNotificationResponse> sendNotification(
                         @Valid @RequestBody AdminDto.SendNotificationRequest request) {
                 log.info("[Admin] 알림 전송 요청: title={}, userCount={}",
@@ -116,9 +116,9 @@ public class AdminController {
 
         /**
          * 계좌 상세 정보 및 포트폴리오 데이터 설정
-         * POST /admin/accounts/{accountId}
+         * PUT /admin/accounts/{accountId}
          */
-        @PostMapping("/accounts/{accountId}")
+        @PutMapping("/accounts/{accountId}")
         public ResponseEntity<BrokerAccountDto.BrokerAccountDetailResponse> setAccountDetails(
                         @PathVariable Long accountId,
                         @Valid @RequestBody AdminDto.SetAccountDetailsRequest request) {

@@ -299,7 +299,7 @@ public class PolicyFeedProxyService {
 
     private String buildPolicyFeedUrl(PolicyFeedDto.PolicyFeedRequest request) {
         StringBuilder urlBuilder = new StringBuilder(normalizeBaseUrl(mlBaseUrl))
-                .append("/ml/content/policy-feed");
+            .append("/ml/feeds/policy");
         StringBuilder queryBuilder = new StringBuilder();
 
         appendQueryParam(queryBuilder, "userId", request.getUserId());

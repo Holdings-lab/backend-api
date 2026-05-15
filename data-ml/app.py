@@ -52,7 +52,7 @@ MERGED_FINBERT_CANDIDATES = [
 MODEL_METADATA_PATH = TRAINING_DIR / "qqq_model_metadata.json"
 TRAINING_SUMMARY_PATH = TRAINING_DIR / "qqq_training_summary.json"
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://localhost:8080/api/internal/webhook/event")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://localhost:8080/api/internal/webhooks/events")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 RUN_PIPELINE_ON_STARTUP = os.getenv("RUN_PIPELINE_ON_STARTUP", "false").lower() == "true"
 
@@ -395,7 +395,7 @@ def health():
     )
 
 
-@app.post(f"{ML_PREFIX}/crawl/run")
+@app.post(f"{ML_PREFIX}/crawlers/run")
 def run_crawl_endpoint():
     if not run_lock.acquire(blocking=False):
         return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_CRAWL_BUSY", status_code=409)
@@ -408,7 +408,7 @@ def run_crawl_endpoint():
         run_lock.release()
 
 
-@app.post(f"{ML_PREFIX}/predict/run")
+@app.post(f"{ML_PREFIX}/predictions/run")
 def run_predict_endpoint():
     if not run_lock.acquire(blocking=False):
         return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_PREDICT_BUSY", status_code=409)
@@ -421,7 +421,7 @@ def run_predict_endpoint():
         run_lock.release()
 
 
-@app.get(f"{ML_PREFIX}/predict/result")
+@app.get(f"{ML_PREFIX}/predictions/latest")
 def get_predict_result_endpoint():
     summary = _safe_json_load(TRAINING_SUMMARY_PATH)
     if not summary:
@@ -438,7 +438,7 @@ def _policy_feed_response(payload: dict):
     return _success_response(_remove_message_fields(result), message="정책 피드 조회에 성공했습니다.")
 
 
-@app.get(f"{ML_PREFIX}/content/policy-feed")
+@app.get(f"{ML_PREFIX}/feeds/policy")
 def policy_feed_get_endpoint(
     userId: int | None = None,
     limit: int = 20,
@@ -456,7 +456,7 @@ def policy_feed_get_endpoint(
     return _policy_feed_response(payload)
 
 
-@app.post(f"{ML_PREFIX}/pipeline")
+@app.post(f"{ML_PREFIX}/pipelines/run")
 async def signal_endpoint(request: Request):
     try:
         payload = await request.json()

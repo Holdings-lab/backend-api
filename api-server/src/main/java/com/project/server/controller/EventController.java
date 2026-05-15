@@ -13,14 +13,14 @@ import java.util.Set;
 
 @CrossOrigin(origins = "*")
 @RestController
-@RequestMapping("/api/events")
+@RequestMapping("/api/users")
 @RequiredArgsConstructor
 public class EventController {
 
     private final EventService eventService;
 
     /** 이벤트 목록 조회 */
-    @GetMapping("/{userId}")
+    @GetMapping("/{userId}/events")
     public ResponseEntity<EventDto.EventsResponse> getEvents(
             @PathVariable("userId") Long userId,
             @RequestParam(name = "dateSegment", defaultValue = "all") String dateSegment,
@@ -31,21 +31,21 @@ public class EventController {
     }
 
     /** 날짜 구간 목록 조회 */
-    @GetMapping("/{userId}/date-segments")
+    @GetMapping("/{userId}/events/date-segments")
     public ResponseEntity<java.util.List<String>> getDateSegments(
             @PathVariable("userId") Long userId) {
         return ResponseEntity.ok(eventService.getDateSegments(userId));
     }
 
     /** 카테고리 목록 조회 */
-    @GetMapping("/{userId}/categories")
+    @GetMapping("/{userId}/events/categories")
     public ResponseEntity<java.util.List<String>> getCategories(
             @PathVariable("userId") Long userId) {
         return ResponseEntity.ok(eventService.getCategories(userId));
     }
 
     /** 이벤트 아이템 목록 조회 */
-    @GetMapping("/{userId}/items")
+    @GetMapping("/{userId}/events/items")
     public ResponseEntity<java.util.List<EventDto.EventItem>> getEventItems(
             @PathVariable("userId") Long userId,
             @RequestParam(name = "dateSegment", defaultValue = "all") String dateSegment,
@@ -56,7 +56,7 @@ public class EventController {
     }
 
     /** 이벤트 알림 설정 변경 */
-    @PostMapping("/{userId}/{eventId}/alerts")
+    @PostMapping("/{userId}/events/{eventId}/alerts")
     public ResponseEntity<EventDto.EventAlertResponse> updateEventAlert(
             @PathVariable("userId") Long userId,
             @PathVariable("eventId") Long eventId,
@@ -65,7 +65,7 @@ public class EventController {
     }
 
     /** 자산 관련 정책 조회 */
-    @GetMapping("/{userId}/assets/{assetName}/related-policies")
+    @GetMapping("/{userId}/events/assets/{assetName}/policies")
     public ResponseEntity<EventDto.RelatedPoliciesResponse> getRelatedPoliciesByAsset(
             @PathVariable("userId") Long userId,
             @PathVariable("assetName") String assetName,
@@ -77,7 +77,7 @@ public class EventController {
     }
 
     /** 정책 관련 자산 조회 */
-    @GetMapping("/{userId}/policies/{eventId}/related-assets")
+    @GetMapping("/{userId}/events/policies/{eventId}/assets")
     public ResponseEntity<EventDto.RelatedAssetsResponse> getRelatedAssetsByPolicy(
             @PathVariable("userId") Long userId,
             @PathVariable("eventId") Long eventId) {

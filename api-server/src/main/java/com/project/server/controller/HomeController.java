@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.*;
 
 @CrossOrigin(origins = "*")
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/users")
 @RequiredArgsConstructor
 public class HomeController {
 
@@ -18,7 +18,7 @@ public class HomeController {
      * 사용자의 홈 화면 통합 조회
      * 사용자의 프로필, 포트폴리오, 감시 자산, 정책 신호 등의 전체 홈 데이터를 반환합니다.
      */
-    @GetMapping("/home/{userId}")
+    @GetMapping("/{userId}/home")
     public ResponseEntity<com.project.server.dto.HomeDto.HomeResponse> getHomeIntegrated(
             @PathVariable("userId") Long userId
     ) {
@@ -29,7 +29,7 @@ public class HomeController {
      * 홈 브리핑 통합 조회
      * 주요 신호, 포트폴리오, 보조 신호, 분석, 체크포인트 등을 포함한 상세 브리핑 데이터를 반환합니다.
      */
-    @GetMapping("/home/{userId}/briefing")
+    @GetMapping("/{userId}/home/briefing")
     public ResponseEntity<HomeBriefingDto.BriefingResponse> getHomeBriefing(
             @PathVariable("userId") Long userId
     ) {
@@ -40,7 +40,7 @@ public class HomeController {
      * 홈 헤더 조회
      * 인사말, 사용자명, 프로필 초성 정보를 반환합니다.
      */
-    @GetMapping("/home/{userId}/header")
+    @GetMapping("/{userId}/home/header")
     public ResponseEntity<HomeBriefingDto.HomeHeader> getHomeHeader(
             @PathVariable("userId") Long userId
     ) {
@@ -51,7 +51,7 @@ public class HomeController {
      * 주요 정책 신호 카드 조회
      * 현재 최우선 정책 이벤트의 신호 강도, 판단, 자산 노출도, 상승/하락 확률 등을 반환합니다.
      */
-    @GetMapping("/home/{userId}/featured-card")
+    @GetMapping("/{userId}/home/cards/featured")
     public ResponseEntity<HomeBriefingDto.FeaturedSignalCard> getFeaturedCard(
             @PathVariable("userId") Long userId
     ) {
@@ -62,7 +62,7 @@ public class HomeController {
      * 포트폴리오 카드 조회
      * 총 자산, 일일 수익률, 현재 위험 등급, 테마별 노출도를 반환합니다.
      */
-    @GetMapping("/home/{userId}/portfolio-card")
+    @GetMapping("/{userId}/home/cards/portfolio")
     public ResponseEntity<HomeBriefingDto.PortfolioCard> getPortfolioCard(
             @PathVariable("userId") Long userId
     ) {
@@ -73,7 +73,7 @@ public class HomeController {
      * 보조 정책 신호 목록 조회
      * 주요 신호 외 추가 정책 이벤트들의 신호 목록을 반환합니다.
      */
-    @GetMapping("/home/{userId}/secondary-signals")
+    @GetMapping("/{userId}/home/signals/secondary")
     public ResponseEntity<java.util.List<HomeBriefingDto.SecondarySignalItem>> getSecondarySignals(
             @PathVariable("userId") Long userId
     ) {
@@ -84,7 +84,7 @@ public class HomeController {
      * 빠른 해석 조회
      * 신호 판단, 자산 영향도, 핵심 근거, 주요 수치, 재확인 시점 등을 반환합니다.
      */
-    @GetMapping("/home/{userId}/quick-interpretation")
+    @GetMapping("/{userId}/home/interpretations/quick")
     public ResponseEntity<HomeBriefingDto.QuickInterpretation> getQuickInterpretation(
             @PathVariable("userId") Long userId
     ) {
@@ -95,7 +95,7 @@ public class HomeController {
      * 상세 분석 탭 조회
      * 요약, 증거, 반박, 무효화 조건 등 신호에 대한 심화 분석을 반환합니다.
      */
-    @GetMapping("/home/{userId}/detail-tabs")
+    @GetMapping("/{userId}/home/tabs/details")
     public ResponseEntity<HomeBriefingDto.DetailTabs> getDetailTabs(
             @PathVariable("userId") Long userId
     ) {
@@ -106,7 +106,7 @@ public class HomeController {
      * 검증 포인트 탭 조회
      * 정책/시장 체크포인트, 재방문 알림 규칙, 모델 실행 상태 등을 반환합니다.
      */
-    @GetMapping("/home/{userId}/checkpoint-tab")
+    @GetMapping("/{userId}/home/tabs/checkpoints")
     public ResponseEntity<HomeBriefingDto.CheckpointTab> getCheckpointTab(
             @PathVariable("userId") Long userId
     ) {
@@ -117,7 +117,7 @@ public class HomeController {
      * 면책 조항 조회
      * 투자 자문이 아님을 명시하는 법적 면책 사항을 반환합니다.
      */
-    @GetMapping("/home/{userId}/disclaimer")
+    @GetMapping("/{userId}/home/disclaimer")
     public ResponseEntity<HomeBriefingDto.DisclaimerResponse> getDisclaimer(
             @PathVariable("userId") Long userId
     ) {

@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/broker")
+@RequestMapping("/api/users")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class BrokerAccountController {

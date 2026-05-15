@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 @Slf4j
 @RestController
-@RequestMapping("/api/internal/webhook")
+@RequestMapping("/api/internal/webhooks")
 @RequiredArgsConstructor
 public class WebhookController {
 
@@ -21,7 +21,7 @@ public class WebhookController {
     @Value("${webhook.secret}")
     private String webhookSecret;
 
-    @PostMapping("/event")
+    @PostMapping("/events")
     public ResponseEntity<ActionDto.ActionResponse> receiveEventWebhook(
             @RequestHeader(value = "X-Webhook-Secret", required = false) String secretHeader,
             @RequestBody WebhookRequest request) {

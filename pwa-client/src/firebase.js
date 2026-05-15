@@ -70,7 +70,7 @@ export const registerFCMToken = async (userId) => {
     };
     console.log('서버 요청 데이터:', requestBody);
 
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/auth/register-fcm-token`, {
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/auth/fcm-token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

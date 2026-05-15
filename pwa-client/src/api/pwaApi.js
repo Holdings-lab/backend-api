@@ -60,20 +60,19 @@ async function request(path, options = {}) {
 }
 
 export function getHome(userId) {
-  return request(`/api/home?userId=${resolveUserId(userId)}`);
+  return request(`/api/users/${resolveUserId(userId)}/home`);
 }
 
 export function getEvents(dateSegment, category, userId) {
   const query = new URLSearchParams({
-    userId: String(resolveUserId(userId)),
     dateSegment: dateSegment,
     category,
   });
-  return request(`/api/events?${query.toString()}`);
+  return request(`/api/users/${resolveUserId(userId)}/events?${query.toString()}`);
 }
 
 export function updateEventAlert(eventId, enabled, userId) {
-  return request(`/api/events/${eventId}/alerts?userId=${resolveUserId(userId)}`, {
+  return request(`/api/users/${resolveUserId(userId)}/events/${eventId}/alerts`, {
     method: 'POST',
     body: JSON.stringify({ enabled }),
   });
@@ -88,58 +87,57 @@ export function getHeatmap(country = 'all') {
 }
 
 export function getMe(userId) {
-  return request(`/api/me?userId=${resolveUserId(userId)}`);
+  return request(`/api/users/${resolveUserId(userId)}`);
 }
 
-export function getNotificationSettings(userId) {
-  return request(`/api/me/settings/notifications?userId=${resolveUserId(userId)}`);
+export function getSettings(userId) {
+  return request(`/api/users/${resolveUserId(userId)}/settings`);
 }
 
-export function updateNotificationSettings(payload, userId) {
-  return request(`/api/me/settings/notifications?userId=${resolveUserId(userId)}`, {
+export function updateSettings(payload, userId) {
+  return request(`/api/users/${resolveUserId(userId)}/settings`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
 }
 
 export function triggerAIEngine(userId) {
-  return request(`/api/ai/trigger?userId=${resolveUserId(userId)}`, {
+  return request(`/api/ai/users/${resolveUserId(userId)}/sync`, {
     method: 'POST',
   });
 }
 
 export function getWatchAssetOptions() {
-  return request('/api/me/watch-assets/options');
+  return request('/api/assets/options');
 }
 
 export function updateWatchAssets(assetNames, userId) {
-  return request(`/api/me/watch-assets?userId=${resolveUserId(userId)}`, {
+  return request(`/api/users/${resolveUserId(userId)}/watchlist`, {
     method: 'POST',
     body: JSON.stringify({ assetNames }),
   });
 }
 
-export function refreshEvents(dateSegment, category, userId) {
-  const query = new URLSearchParams({
-    userId: String(resolveUserId(userId)),
-    dateSegment: dateSegment,
-    category,
-  });
-
-  return request(`/api/events/refresh?${query.toString()}`, {
-    method: 'POST',
-  });
-}
-
 export function getPolicyFeed(payload = {}) {
-  return request('/api/content/policy-feed', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  const userId = payload.userId;
+  if (!userId) {
+    throw new Error("userId is required");
+  }
+
+  const params = new URLSearchParams();
+  if (payload.limit !== undefined) params.append('limit', String(payload.limit));
+  if (payload.category !== undefined) params.append('category', payload.category);
+  if (payload.dateFrom !== undefined) params.append('dateFrom', payload.dateFrom);
+  if (payload.dateTo !== undefined) params.append('dateTo', payload.dateTo);
+
+  const qs = params.toString();
+  const path = qs ? `/api/users/${userId}/feeds/policy?${qs}` : `/api/users/${userId}/feeds/policy`;
+  return request(path);
 }
+
 
 export function trainRegression() {
-  return request('/api/ai/train-regression', {
+  return request('/api/ai/models/regression/training', {
     method: 'POST',
   });
 }

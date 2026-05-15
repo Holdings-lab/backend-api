@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.*;
 
 @CrossOrigin(origins = "*")
 @RestController
-@RequestMapping("/api/content/{userId}/policy-feed")
+@RequestMapping("/api/users/{userId}/feeds/policy")
 @RequiredArgsConstructor
 public class ContentFeedController {
 

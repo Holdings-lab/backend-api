@@ -19,14 +19,14 @@ public class AiPipelineController {
     private final AiPipelineTriggerService aiPipelineTriggerService;
     private final RegressionTrainingService regressionTrainingService;
 
-    @PostMapping("/users/{userId}/trigger")
+    @PostMapping("/users/{userId}/sync")
     public ResponseEntity<ActionDto.ActionResponse> triggerAi(
             @PathVariable @Positive Long userId
     ) {
         return ResponseEntity.ok(aiPipelineTriggerService.triggerAndUpdateFeatured(userId));
     }
 
-    @PostMapping("/train-regression")
+    @PostMapping("/models/regression/training")
     public ResponseEntity<ActionDto.TrainRegressionResponse> trainRegression() {
         return ResponseEntity.ok(regressionTrainingService.runTrainRegression());
     }

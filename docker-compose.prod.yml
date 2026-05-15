@@ -75,7 +75,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       SCHEDULE_MODE: ${SCHEDULE_MODE:-hourly}
-      WEBHOOK_URL: http://api-server:8080/api/internal/webhook/event
+      WEBHOOK_URL: http://api-server:8080/api/internal/webhooks/events
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
     ports:
     - 9000:9000

@@ -19,22 +19,22 @@ public class InsightController {
         return ResponseEntity.ok(insightService.getHeatmap());
     }
 
-    @GetMapping("/view-tabs")
+    @GetMapping("/tabs")
     public ResponseEntity<java.util.List<String>> getViewTabs() {
         return ResponseEntity.ok(insightService.getViewTabs());
     }
 
-    @GetMapping("/columns")
+    @GetMapping("/heatmap/columns")
     public ResponseEntity<java.util.List<String>> getColumns() {
         return ResponseEntity.ok(insightService.getColumns());
     }
 
-    @GetMapping("/rows")
+    @GetMapping("/heatmap/rows")
     public ResponseEntity<java.util.List<InsightDto.HeatmapRow>> getRows() {
         return ResponseEntity.ok(insightService.getRows());
     }
 
-    @GetMapping("/legend")
+    @GetMapping("/heatmap/legend")
     public ResponseEntity<java.util.List<String>> getLegend() {
         return ResponseEntity.ok(insightService.getLegend());
     }

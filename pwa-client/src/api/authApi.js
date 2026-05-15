@@ -54,7 +54,7 @@ async function request(path, options = {}) {
 }
 
 export function register({ email, nickname, password }) {
-  return request('/api/auth/register', {
+  return request('/api/auth/signup', {
     method: 'POST',
     body: JSON.stringify({ email, nickname, password }),
   });
@@ -68,7 +68,7 @@ export function login({ email, password }) {
 }
 
 export function updateNickname(userId, nickname) {
-  return request(`/api/auth/users/${userId}/nickname`, {
+  return request(`/api/users/${userId}/nickname`, {
     method: 'PATCH',
     body: JSON.stringify({ nickname }),
   });

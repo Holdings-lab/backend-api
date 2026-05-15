@@ -5,6 +5,9 @@ import com.project.server.dto.AuthDto;
 import com.project.server.dto.ActionDto;
 import com.project.server.dto.WatchAssetDto;
 import com.project.server.service.auth.WatchAssetSelectionService;
+
+import jakarta.validation.Valid;
+
 import com.project.server.service.auth.UserPreferenceService;
 import com.project.server.service.auth.AuthService;
 import lombok.RequiredArgsConstructor;
@@ -13,7 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 @CrossOrigin(origins = "*")
 @RestController
-@RequestMapping("/api/me")
+@RequestMapping("/api/users")
 @RequiredArgsConstructor
 public class UserPreferenceController {
 
@@ -44,7 +47,7 @@ public class UserPreferenceController {
 
     @GetMapping("/{userId}/study-stats")
         public ResponseEntity<java.util.List<AuthDto.StudyStat>> getMeStudyStats(
-            @PathVariable("userId"  ) Long userId
+            @PathVariable("userId") Long userId
         ) {
         return ResponseEntity.ok(authService.getMeStudyStats(userId));
     }
@@ -80,5 +83,31 @@ public class UserPreferenceController {
     ) {
         watchAssetSelectionService.updateSelectedAssets(userId, request.getAssetNames());
         return ResponseEntity.ok(ActionDto.ActionResponse.builder().action("watch-assets-update").status("completed").build());
+    }
+
+    // 사용자 닉네임 변경 (이전 AuthController에서 이동)
+    @PatchMapping("/{userId}/nickname")
+    public ResponseEntity<AuthDto.AuthResponse> updateNickname(
+            @PathVariable("userId") Long userId,
+            @Valid @RequestBody AuthDto.UpdateNicknameRequest request) {
+        AuthDto.AuthResponse response = authService.updateNickname(userId, request.getNickname());
+        return ResponseEntity.ok(response);
+    }
+
+    // 계정 삭제 (이전 AuthController에서 이동)
+    @DeleteMapping("/{userId}")
+    public ResponseEntity<AuthDto.AuthResponse> deleteAccount(@PathVariable Long userId) {
+        AuthDto.AuthResponse response = authService.deleteAccount(userId);
+        return ResponseEntity.ok(response);
+    }
+
+    // 비밀번호 변경 (이전 AuthController에서 이동)
+    @PatchMapping("/{userId}/password")
+    public ResponseEntity<AuthDto.AuthResponse> changePassword(
+            @PathVariable Long userId,
+            @Valid @RequestBody AuthDto.ChangePasswordRequest request) {
+        AuthDto.AuthResponse response = authService.changePassword(userId, request.getCurrentPassword(),
+                request.getNewPassword());
+        return ResponseEntity.ok(response);
     }
 }

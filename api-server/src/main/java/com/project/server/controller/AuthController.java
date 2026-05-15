@@ -32,7 +32,7 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
-    @PostMapping("/register")
+    @PostMapping("/signup")
     public ResponseEntity<AuthDto.AuthResponse> register(@Valid @RequestBody AuthDto.RegisterRequest request) {
         AuthDto.AuthResponse response = authService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
@@ -44,34 +44,13 @@ public class AuthController {
         return ResponseEntity.ok(loginResult);
     }
 
-    @PostMapping("/register-fcm-token")
+    @PostMapping("/fcm-token")
     public ResponseEntity<AuthDto.AuthResponse> registerFCMToken(@Valid @RequestBody AuthDto.FCMTokenRequest request) {
         AuthDto.AuthResponse response = authService.registerFCMToken(request);
         return ResponseEntity.ok(response);
     }
 
-    @PatchMapping("/users/{userId}/nickname")
-    public ResponseEntity<AuthDto.AuthResponse> updateNickname(
-            @PathVariable Long userId,
-            @Valid @RequestBody AuthDto.UpdateNicknameRequest request) {
-        AuthDto.AuthResponse response = authService.updateNickname(userId, request.getNickname());
-        return ResponseEntity.ok(response);
-    }
-
-    @DeleteMapping("/delete/{userId}")
-    public ResponseEntity<AuthDto.AuthResponse> deleteAccount(@PathVariable Long userId) {
-        AuthDto.AuthResponse response = authService.deleteAccount(userId);
-        return ResponseEntity.ok(response);
-    }
-
-    @PostMapping("/users/{userId}/change-password")
-    public ResponseEntity<AuthDto.AuthResponse> changePassword(
-            @PathVariable Long userId,
-            @Valid @RequestBody AuthDto.ChangePasswordRequest request) {
-        AuthDto.AuthResponse response = authService.changePassword(userId, request.getCurrentPassword(),
-                request.getNewPassword());
-        return ResponseEntity.ok(response);
-    }
+    // user-scoped actions (nickname/change-password/delete) are moved to UserPreferenceController
 
     @GetMapping("/accounts")
     public ResponseEntity<List<AuthDto.AccountInfo>> getAccounts() {
@@ -79,7 +58,7 @@ public class AuthController {
         return ResponseEntity.ok(accounts);
     }
 
-    @PostMapping("/oauth-login")
+    @PostMapping("/login/oauth")
     public ResponseEntity<AuthDto.OAuthLoginResult> oauthLogin(@Valid @RequestBody AuthDto.OAuthLoginRequest request) {
         AuthDto.OAuthLoginResult result = authService.oauthLogin(request);
         HttpStatus status = result.isNewUser() ? HttpStatus.CREATED : HttpStatus.OK;
