@@ -36,7 +36,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       ML_API_BASE_URL: ${ML_API_BASE_URL:-http://data-ml:9000}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
-      FIREBASE_CONFIG_PATH: /app/config/serviceAccountKey.json
+      FIREBASE_CONFIG_PATH: /src/main/resources/serviceAccountKey.json
       MAIL_USERNAME: ${MAIL_USERNAME}
       MAIL_PASSWORD: ${MAIL_PASSWORD}
       INTEGRATION_ML_BASE_URL: ${ML_API_BASE_URL:-http://data-ml:9000}
@@ -47,7 +47,7 @@ services:
     ports:
     - 8080:8080
     volumes:
-    - ./api-server/src/main/resources/serviceAccountKey.json:/app/config/serviceAccountKey.json:ro
+    - ./api-server/src/main/resources/serviceAccountKey.json:/src/main/resources/serviceAccountKey.json
     healthcheck:
       test:
       - CMD

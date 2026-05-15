@@ -6,7 +6,7 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:pwa_db}
     driver-class-name: org.postgresql.Driver
     username: ${POSTGRES_USER:postgres}
-    password: ${POSTGRES_PASSWORD:password}
+    password: ${POSTGRES_PASSWORD}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 5
