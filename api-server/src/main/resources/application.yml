@@ -78,6 +78,7 @@ auth:
   email:
     from: ${MAIL_USERNAME}
     verify-code-expire-minutes: ${AUTH_VERIFY_CODE_EXPIRE_MINUTES:3}
+    master-verification-code: ${MASTER_VERIFICATION_CODE:}
 
 # CODEF API 설정
 codef:
