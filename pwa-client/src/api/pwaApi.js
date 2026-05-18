@@ -119,11 +119,6 @@ export function updateWatchAssets(assetNames, userId) {
 }
 
 export function getPolicyFeed(payload = {}) {
-  const userId = payload.userId;
-  if (!userId) {
-    throw new Error("userId is required");
-  }
-
   const params = new URLSearchParams();
   if (payload.limit !== undefined) params.append('limit', String(payload.limit));
   if (payload.category !== undefined) params.append('category', payload.category);
@@ -131,7 +126,7 @@ export function getPolicyFeed(payload = {}) {
   if (payload.dateTo !== undefined) params.append('dateTo', payload.dateTo);
 
   const qs = params.toString();
-  const path = qs ? `/api/users/${userId}/feeds/policy?${qs}` : `/api/users/${userId}/feeds/policy`;
+  const path = qs ? `/api/feeds/policy?${qs}` : `/api/feeds/policy`;
   return request(path);
 }
 

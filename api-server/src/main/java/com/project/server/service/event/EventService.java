@@ -188,7 +188,7 @@ public class EventService {
 
     private EventFeedSnapshot loadEventFeed(Long userId) {
         try {
-            PolicyFeedDto.PolicyFeedResponse response = policyFeedProxyService.getPolicyFeed(userId, null, null, null, null);
+            PolicyFeedDto.PolicyFeedResponse response = policyFeedProxyService.getPolicyFeed(null, null, null, null);
             List<PolicyFeedDto.Card> cards = response == null || response.getCards() == null
                     ? List.of()
                     : response.getCards();

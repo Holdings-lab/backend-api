@@ -16,7 +16,6 @@ public class PolicyFeedDto {
     public static class PolicyFeedRequest {
         private Integer limit;
         private String category;
-        private Long userId;
         private String dateFrom;
         private String dateTo;
     }

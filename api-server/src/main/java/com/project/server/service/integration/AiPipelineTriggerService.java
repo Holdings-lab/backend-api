@@ -26,7 +26,7 @@ public class AiPipelineTriggerService {
     public ActionDto.ActionResponse triggerAndUpdateFeatured(Long userId) {
         validateUser(userId);
 
-        PolicyFeedDto.PolicyFeedResponse policyFeed = policyFeedProxyService.getPolicyFeed(userId, 10, "all", "", "");
+        PolicyFeedDto.PolicyFeedResponse policyFeed = policyFeedProxyService.getPolicyFeed(10, "all", "", "");
         EventScheduleService.EventSchedule current = eventScheduleService.getCurrentEvent(userId);
         List<String> dynamicTags = buildDynamicTags(current, policyFeed);
         String featuredTitle = resolveFeaturedTitle(current, policyFeed);

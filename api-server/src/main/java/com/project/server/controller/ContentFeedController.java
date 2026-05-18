@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.*;
 
 @CrossOrigin(origins = "*")
 @RestController
-@RequestMapping("/api/users/{userId}/feeds/policy")
+@RequestMapping("/api/feeds/policy")
 @RequiredArgsConstructor
 public class ContentFeedController {
 
@@ -16,51 +16,44 @@ public class ContentFeedController {
 
     @GetMapping
     public ResponseEntity<PolicyFeedDto.PolicyFeedResponse> getPolicyFeed(
-            @PathVariable Long userId,
             @RequestParam(name = "limit", required = false) Integer limit,
             @RequestParam(name = "category", required = false) String category,
             @RequestParam(name = "dateFrom", required = false) String dateFrom,
             @RequestParam(name = "dateTo", required = false) String dateTo) {
-        return ResponseEntity.ok(policyFeedProxyService.getPolicyFeed(userId, limit, category, dateFrom, dateTo));
+        return ResponseEntity.ok(policyFeedProxyService.getPolicyFeed(limit, category, dateFrom, dateTo));
     }
 
     @GetMapping("/meta")
-    public ResponseEntity<java.util.Map<String, String>> getPolicyFeedMeta(
-            @PathVariable Long userId) {
-        return ResponseEntity.ok(policyFeedProxyService.getMeta(userId));
+    public ResponseEntity<java.util.Map<String, String>> getPolicyFeedMeta() {
+        return ResponseEntity.ok(policyFeedProxyService.getMeta());
     }
 
     @GetMapping("/source")
-    public ResponseEntity<PolicyFeedDto.Source> getPolicyFeedSource(
-            @PathVariable Long userId) {
-        return ResponseEntity.ok(policyFeedProxyService.getSource(userId));
+    public ResponseEntity<PolicyFeedDto.Source> getPolicyFeedSource() {
+        return ResponseEntity.ok(policyFeedProxyService.getSource());
     }
 
     @GetMapping("/summary")
-    public ResponseEntity<PolicyFeedDto.Summary> getPolicyFeedSummary(
-            @PathVariable Long userId) {
-        return ResponseEntity.ok(policyFeedProxyService.getSummary(userId));
+    public ResponseEntity<PolicyFeedDto.Summary> getPolicyFeedSummary() {
+        return ResponseEntity.ok(policyFeedProxyService.getSummary());
     }
 
     @GetMapping("/model")
-    public ResponseEntity<PolicyFeedDto.Model> getPolicyFeedModel(
-            @PathVariable Long userId) {
-        return ResponseEntity.ok(policyFeedProxyService.getModel(userId));
+    public ResponseEntity<PolicyFeedDto.Model> getPolicyFeedModel() {
+        return ResponseEntity.ok(policyFeedProxyService.getModel());
     }
 
     @GetMapping("/filters")
-    public ResponseEntity<PolicyFeedDto.Filters> getPolicyFeedFilters(
-            @PathVariable Long userId) {
-        return ResponseEntity.ok(policyFeedProxyService.getFilters(userId));
+    public ResponseEntity<PolicyFeedDto.Filters> getPolicyFeedFilters() {
+        return ResponseEntity.ok(policyFeedProxyService.getFilters());
     }
 
     @GetMapping("/cards")
     public ResponseEntity<java.util.List<PolicyFeedDto.Card>> getPolicyFeedCards(
-            @PathVariable Long userId,
             @RequestParam(name = "limit", required = false) Integer limit,
             @RequestParam(name = "category", required = false) String category,
             @RequestParam(name = "dateFrom", required = false) String dateFrom,
             @RequestParam(name = "dateTo", required = false) String dateTo) {
-        return ResponseEntity.ok(policyFeedProxyService.getCards(userId, limit, category, dateFrom, dateTo));
+        return ResponseEntity.ok(policyFeedProxyService.getCards(limit, category, dateFrom, dateTo));
     }
 }
