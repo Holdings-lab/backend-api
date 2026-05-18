@@ -1,0 +1,571 @@
+from __future__ import annotations
+
+import json
+import os
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+try:
+    import psycopg2
+    from psycopg2 import extras
+except ImportError:  # pragma: no cover - dependency is expected in the runtime venv
+    psycopg2 = None
+    extras = None
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+
+
+def _env(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+
+def _db_config() -> dict[str, Any]:
+    return {
+        "host": _env("DB_HOST", "POSTGRES_HOST", default="localhost"),
+        "port": int(_env("DB_PORT", "POSTGRES_PORT", default="5432")),
+        "dbname": _env("DB_NAME", "POSTGRES_DB", default="holdings"),
+        "user": _env("DB_USER", "POSTGRES_USER", default="postgres"),
+        "password": _env("DB_PASSWORD", "POSTGRES_PASSWORD", default="postgres"),
+    }
+
+
+def _connect(real_dict_cursor: bool = False):
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    config = _db_config()
+    if real_dict_cursor:
+        return psycopg2.connect(**config, cursor_factory=extras.RealDictCursor)
+    return psycopg2.connect(**config)
+
+
+def init_db() -> None:
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(schema_sql)
+        conn.commit()
+
+
+def _to_jsonable(value: Any) -> Any:
+    if value is None:
+        return None
+
+    if isinstance(value, pd.Timestamp):
+        if pd.isna(value):
+            return None
+        return value.isoformat()
+
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+
+    if isinstance(value, np.generic):
+        return value.item()
+
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+
+    if isinstance(value, dict):
+        return {str(key): _to_jsonable(item) for key, item in value.items()}
+
+    if isinstance(value, (list, tuple)):
+        return [_to_jsonable(item) for item in value]
+
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+
+    return value
+
+
+def _row_to_dict(row: Any) -> dict[str, Any]:
+    if isinstance(row, pd.Series):
+        data = row.to_dict()
+    elif isinstance(row, dict):
+        data = dict(row)
+    else:
+        data = dict(row)
+
+    return {key: _to_jsonable(value) for key, value in data.items()}
+
+
+def _safe_int(value: Any, default: int | None = None) -> int | None:
+    try:
+        if value is None or pd.isna(value):
+            return default
+        return int(value)
+    except Exception:
+        return default
+
+
+def _safe_float(value: Any, default: float | None = None) -> float | None:
+    try:
+        if value is None or pd.isna(value):
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _safe_str(value: Any, default: str | None = None) -> str | None:
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text if text else default
+
+
+def _safe_date(value: Any) -> date | None:
+    if value is None or value == "":
+        return None
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
+
+
+def upsert_policy_document(record: dict[str, Any]) -> int:
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    payload = _row_to_dict(record)
+    published_date = _safe_date(payload.get("published_date"))
+    collected_at = payload.get("collected_at")
+
+    query = """
+        INSERT INTO policy_documents (
+            source, category, doc_type, published_date, release_date,
+            title, url, body, matched_keyword_groups, matched_keywords,
+            collected_at, raw_payload, updated_at
+        ) VALUES (
+            %(source)s, %(category)s, %(doc_type)s, %(published_date)s, %(release_date)s,
+            %(title)s, %(url)s, %(body)s, %(matched_keyword_groups)s, %(matched_keywords)s,
+            %(collected_at)s, %(raw_payload)s, NOW()
+        )
+        ON CONFLICT (url) DO UPDATE SET
+            source = EXCLUDED.source,
+            category = EXCLUDED.category,
+            doc_type = EXCLUDED.doc_type,
+            published_date = EXCLUDED.published_date,
+            release_date = EXCLUDED.release_date,
+            title = EXCLUDED.title,
+            body = EXCLUDED.body,
+            matched_keyword_groups = EXCLUDED.matched_keyword_groups,
+            matched_keywords = EXCLUDED.matched_keywords,
+            collected_at = EXCLUDED.collected_at,
+            raw_payload = EXCLUDED.raw_payload,
+            updated_at = NOW()
+        RETURNING id
+    """
+
+    params = {
+        "source": _safe_str(payload.get("source"), "unknown"),
+        "category": _safe_str(payload.get("category"), "unknown"),
+        "doc_type": _safe_str(payload.get("doc_type"), "unknown"),
+        "published_date": published_date,
+        "release_date": _safe_str(payload.get("release_date"), "") or "",
+        "title": _safe_str(payload.get("title"), "") or "",
+        "url": _safe_str(payload.get("url"), "") or "",
+        "body": _safe_str(payload.get("body"), "") or "",
+        "matched_keyword_groups": _safe_str(payload.get("matched_keyword_groups"), "") or "",
+        "matched_keywords": _safe_str(payload.get("matched_keywords"), "") or "",
+        "collected_at": collected_at,
+        "raw_payload": extras.Json(payload, dumps=lambda obj: json.dumps(obj, ensure_ascii=False)),
+    }
+
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+        conn.commit()
+        return int(row[0])
+
+
+def upsert_policy_document_features(document_id: int, record: dict[str, Any]) -> None:
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    payload = _row_to_dict(record)
+    query = """
+        INSERT INTO policy_document_features (
+            document_id, body_summary, body_original_length,
+            title_positive_prob, title_negative_prob, title_neutral_prob, title_sentiment_score,
+            body_positive_prob, body_negative_prob, body_neutral_prob, body_sentiment_score, body_n_chunks,
+            body_summary_embedding, feature_payload, updated_at
+        ) VALUES (
+            %(document_id)s, %(body_summary)s, %(body_original_length)s,
+            %(title_positive_prob)s, %(title_negative_prob)s, %(title_neutral_prob)s, %(title_sentiment_score)s,
+            %(body_positive_prob)s, %(body_negative_prob)s, %(body_neutral_prob)s, %(body_sentiment_score)s, %(body_n_chunks)s,
+            %(body_summary_embedding)s, %(feature_payload)s, NOW()
+        )
+        ON CONFLICT (document_id) DO UPDATE SET
+            body_summary = EXCLUDED.body_summary,
+            body_original_length = EXCLUDED.body_original_length,
+            title_positive_prob = EXCLUDED.title_positive_prob,
+            title_negative_prob = EXCLUDED.title_negative_prob,
+            title_neutral_prob = EXCLUDED.title_neutral_prob,
+            title_sentiment_score = EXCLUDED.title_sentiment_score,
+            body_positive_prob = EXCLUDED.body_positive_prob,
+            body_negative_prob = EXCLUDED.body_negative_prob,
+            body_neutral_prob = EXCLUDED.body_neutral_prob,
+            body_sentiment_score = EXCLUDED.body_sentiment_score,
+            body_n_chunks = EXCLUDED.body_n_chunks,
+            body_summary_embedding = EXCLUDED.body_summary_embedding,
+            feature_payload = EXCLUDED.feature_payload,
+            updated_at = NOW()
+    """
+
+    params = {
+        "document_id": int(document_id),
+        "body_summary": _safe_str(payload.get("body_summary"), "") or "",
+        "body_original_length": _safe_int(payload.get("body_original_length"), 0),
+        "title_positive_prob": _safe_float(payload.get("title_positive_prob"), 0.0),
+        "title_negative_prob": _safe_float(payload.get("title_negative_prob"), 0.0),
+        "title_neutral_prob": _safe_float(payload.get("title_neutral_prob"), 0.0),
+        "title_sentiment_score": _safe_float(payload.get("title_sentiment_score"), 0.0),
+        "body_positive_prob": _safe_float(payload.get("body_positive_prob"), 0.0),
+        "body_negative_prob": _safe_float(payload.get("body_negative_prob"), 0.0),
+        "body_neutral_prob": _safe_float(payload.get("body_neutral_prob"), 0.0),
+        "body_sentiment_score": _safe_float(payload.get("body_sentiment_score"), 0.0),
+        "body_n_chunks": _safe_float(payload.get("body_n_chunks"), 0.0),
+        "body_summary_embedding": extras.Json(_to_jsonable(payload.get("body_summary_embedding")), dumps=lambda obj: json.dumps(obj, ensure_ascii=False)),
+        "feature_payload": extras.Json(payload, dumps=lambda obj: json.dumps(obj, ensure_ascii=False)),
+    }
+
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params)
+        conn.commit()
+
+
+def insert_crawler_run_log(run_type: str, status: str, counts: dict[str, Any] | None = None, payload: dict[str, Any] | None = None) -> None:
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO crawler_run_logs (run_type, status, counts, payload)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    run_type,
+                    status,
+                    extras.Json(_to_jsonable(counts or {}), dumps=lambda obj: json.dumps(obj, ensure_ascii=False)),
+                    extras.Json(_to_jsonable(payload or {}), dumps=lambda obj: json.dumps(obj, ensure_ascii=False)),
+                ),
+            )
+        conn.commit()
+
+
+def insert_prediction_run(summary: dict[str, Any], metadata: dict[str, Any] | None = None) -> None:
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    metrics = summary.get("metrics") or {}
+    params = {
+        "model_version": _safe_str(summary.get("modelVersion"), "") or "",
+        "model_target": _safe_str(summary.get("targetTicker"), "") or "",
+        "best_horizon_days": _safe_int(summary.get("bestHorizonDays"), 0),
+        "best_threshold": _safe_float(summary.get("bestThreshold"), 0.0),
+        "policy_score": _safe_float(metrics.get("policyScore"), 0.0),
+        "direction_accuracy": _safe_float(metrics.get("directionAccuracy"), 0.0),
+        "top_label": _safe_str(metrics.get("topLabel"), "") or "",
+        "top_label_probability": _safe_float(metrics.get("topLabelProbability"), 0.0),
+        "summary_payload": extras.Json(_to_jsonable(summary), dumps=lambda obj: json.dumps(obj, ensure_ascii=False)),
+        "metadata_payload": extras.Json(_to_jsonable(metadata or {}), dumps=lambda obj: json.dumps(obj, ensure_ascii=False)),
+    }
+
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO policy_prediction_runs (
+                    model_version, model_target, best_horizon_days, best_threshold,
+                    policy_score, direction_accuracy, top_label, top_label_probability,
+                    summary_payload, metadata_payload
+                ) VALUES (
+                    %(model_version)s, %(model_target)s, %(best_horizon_days)s, %(best_threshold)s,
+                    %(policy_score)s, %(direction_accuracy)s, %(top_label)s, %(top_label_probability)s,
+                    %(summary_payload)s, %(metadata_payload)s
+                )
+                """,
+                params,
+            )
+        conn.commit()
+
+
+def persist_policy_pipeline_outputs(
+    raw_df: pd.DataFrame,
+    processed_df: pd.DataFrame,
+    raw_csv_path: str,
+    processed_csv_path: str,
+    run_type: str = "policy_monitor",
+) -> dict[str, Any]:
+    """CSV와 DB에 동시에 저장한다."""
+    init_db()
+
+    raw_path = Path(raw_csv_path)
+    processed_path = Path(processed_csv_path)
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    processed_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if raw_df is not None:
+        if raw_path.exists():
+            try:
+                existing_raw = pd.read_csv(raw_path, encoding="utf-8-sig")
+                raw_df = pd.concat([existing_raw, raw_df], ignore_index=True, sort=False)
+            except Exception:
+                pass
+        if not raw_df.empty and "url" in raw_df.columns:
+            raw_df = raw_df.drop_duplicates(subset=["url"], keep="last")
+        raw_df.to_csv(raw_path, index=False, encoding="utf-8-sig")
+
+    if processed_df is not None:
+        if processed_path.exists():
+            try:
+                existing_processed = pd.read_csv(processed_path, encoding="utf-8-sig")
+                processed_df = pd.concat([existing_processed, processed_df], ignore_index=True, sort=False)
+            except Exception:
+                pass
+        if not processed_df.empty and "url" in processed_df.columns:
+            processed_df = processed_df.drop_duplicates(subset=["url"], keep="last")
+        processed_df.to_csv(processed_path, index=False, encoding="utf-8-sig")
+
+    raw_count = int(len(raw_df)) if raw_df is not None else 0
+    processed_count = int(len(processed_df)) if processed_df is not None else 0
+
+    inserted_documents = 0
+    inserted_features = 0
+
+    if raw_df is not None and not raw_df.empty:
+        for _, row in raw_df.iterrows():
+            upsert_policy_document(row.to_dict())
+            inserted_documents += 1
+
+    if processed_df is not None and not processed_df.empty:
+        for _, row in processed_df.iterrows():
+            document_id = upsert_policy_document(row.to_dict())
+            upsert_policy_document_features(document_id, row.to_dict())
+            inserted_features += 1
+
+    insert_crawler_run_log(
+        run_type=run_type,
+        status="success",
+        counts={
+            "raw_count": raw_count,
+            "processed_count": processed_count,
+            "inserted_documents": inserted_documents,
+            "inserted_features": inserted_features,
+        },
+        payload={
+            "raw_csv_path": str(raw_path),
+            "processed_csv_path": str(processed_path),
+        },
+    )
+
+    return {
+        "raw_csv_path": str(raw_path),
+        "processed_csv_path": str(processed_path),
+        "raw_count": raw_count,
+        "processed_count": processed_count,
+        "inserted_documents": inserted_documents,
+        "inserted_features": inserted_features,
+    }
+
+
+def _load_jsonb_column(frame: pd.DataFrame, column: str) -> pd.DataFrame:
+    if column not in frame.columns:
+        return frame
+
+    expanded = pd.json_normalize(frame[column].apply(lambda value: value if isinstance(value, dict) else {}))
+    frame = frame.drop(columns=[column])
+    if not expanded.empty:
+        frame = pd.concat([frame.reset_index(drop=True), expanded.reset_index(drop=True)], axis=1)
+    return frame
+
+
+def fetch_policy_training_frame() -> pd.DataFrame:
+    if psycopg2 is None:
+        return pd.DataFrame()
+
+    query = """
+        SELECT
+            COALESCE(d.published_date::text, to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')) AS date,
+            d.source,
+            d.category,
+            d.doc_type,
+            d.title,
+            d.url,
+            d.body,
+            d.matched_keyword_groups,
+            d.matched_keywords,
+            f.feature_payload
+        FROM policy_documents d
+        JOIN policy_document_features f ON f.document_id = d.id
+        ORDER BY d.published_date DESC NULLS LAST, d.id DESC
+    """
+
+    with _connect(real_dict_cursor=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+    if not rows:
+        return pd.DataFrame()
+
+    frame = pd.DataFrame(rows)
+    frame = _load_jsonb_column(frame, "feature_payload")
+    return frame
+
+
+def fetch_policy_feed_frame(
+    category: str = "all",
+    date_from: str = "",
+    date_to: str = "",
+    limit: int = 20,
+) -> pd.DataFrame:
+    if psycopg2 is None:
+        return pd.DataFrame()
+
+    query = """
+        SELECT
+            COALESCE(d.published_date::text, to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')) AS date,
+            d.source,
+            d.category,
+            d.doc_type,
+            d.title,
+            d.url AS link,
+            d.body,
+            COALESCE(f.body_summary, LEFT(COALESCE(d.body, ''), 280)) AS body_summary,
+            COALESCE(f.title_positive_prob, 0.0) AS title_positive_prob,
+            COALESCE(f.title_negative_prob, 0.0) AS title_negative_prob,
+            COALESCE(f.title_neutral_prob, 1.0) AS title_neutral_prob,
+            COALESCE(f.title_sentiment_score, 0.0) AS title_sentiment_score,
+            COALESCE(f.body_positive_prob, 0.0) AS body_positive_prob,
+            COALESCE(f.body_negative_prob, 0.0) AS body_negative_prob,
+            COALESCE(f.body_neutral_prob, 1.0) AS body_neutral_prob,
+            COALESCE(f.body_sentiment_score, 0.0) AS body_sentiment_score,
+            COALESCE(f.body_n_chunks, 1) AS body_n_chunks,
+            f.body_summary_embedding
+        FROM policy_documents d
+        LEFT JOIN policy_document_features f ON f.document_id = d.id
+        WHERE (%(category)s = 'all' OR LOWER(d.category) = LOWER(%(category)s))
+          AND (%(date_from)s = '' OR d.published_date >= %(date_from)s::date)
+          AND (%(date_to)s = '' OR d.published_date <= %(date_to)s::date)
+        ORDER BY d.published_date DESC NULLS LAST, d.id DESC
+    """
+
+    with _connect(real_dict_cursor=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                query,
+                {
+                    "category": category or "all",
+                    "date_from": date_from or "",
+                    "date_to": date_to or "",
+                },
+            )
+            rows = cursor.fetchall()
+
+    if not rows:
+        fallback_query = """
+            SELECT
+                COALESCE(d.published_date::text, to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')) AS date,
+                d.source,
+                d.category,
+                d.doc_type,
+                d.title,
+                d.url AS link,
+                d.body,
+                LEFT(COALESCE(d.body, ''), 280) AS body_summary,
+                0.0 AS title_positive_prob,
+                0.0 AS title_negative_prob,
+                1.0 AS title_neutral_prob,
+                0.0 AS title_sentiment_score,
+                0.0 AS body_positive_prob,
+                0.0 AS body_negative_prob,
+                1.0 AS body_neutral_prob,
+                0.0 AS body_sentiment_score,
+                1 AS body_n_chunks,
+                NULL AS body_summary_embedding
+            FROM policy_documents d
+            WHERE (%(category)s = 'all' OR LOWER(d.category) = LOWER(%(category)s))
+              AND (%(date_from)s = '' OR d.published_date >= %(date_from)s::date)
+              AND (%(date_to)s = '' OR d.published_date <= %(date_to)s::date)
+            ORDER BY d.published_date DESC NULLS LAST, d.id DESC
+        """
+        with _connect(real_dict_cursor=True) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    fallback_query,
+                    {
+                        "category": category or "all",
+                        "date_from": date_from or "",
+                        "date_to": date_to or "",
+                    },
+                )
+                rows = cursor.fetchall()
+
+        if not rows:
+            return pd.DataFrame()
+
+    frame = pd.DataFrame(rows)
+    if limit > 0:
+        frame = frame.head(limit)
+    return frame
+
+
+def persist_prediction_run(summary: dict[str, Any], metadata: dict[str, Any] | None = None, csv_path: str | None = None) -> dict[str, Any]:
+    """예측 결과를 CSV와 DB에 동시에 저장한다."""
+    init_db()
+    insert_prediction_run(summary, metadata)
+
+    csv_written = None
+    if csv_path:
+        csv_file = Path(csv_path)
+        csv_file.parent.mkdir(parents=True, exist_ok=True)
+        row = {
+            "generatedAt": summary.get("generatedAt"),
+            "modelVersion": summary.get("modelVersion"),
+            "targetTicker": summary.get("targetTicker"),
+            "bestHorizonDays": summary.get("bestHorizonDays"),
+            "bestThreshold": summary.get("bestThreshold"),
+            "policyScore": (summary.get("metrics") or {}).get("policyScore"),
+            "directionAccuracy": (summary.get("metrics") or {}).get("directionAccuracy"),
+            "topLabel": (summary.get("metrics") or {}).get("topLabel"),
+            "topLabelProbability": (summary.get("metrics") or {}).get("topLabelProbability"),
+            "summaryJson": json.dumps(_to_jsonable(summary), ensure_ascii=False),
+            "metadataJson": json.dumps(_to_jsonable(metadata or {}), ensure_ascii=False),
+        }
+        if csv_file.exists():
+            try:
+                existing_rows = pd.read_csv(csv_file, encoding="utf-8-sig")
+                row_frame = pd.concat([existing_rows, pd.DataFrame([row])], ignore_index=True, sort=False)
+            except Exception:
+                row_frame = pd.DataFrame([row])
+        else:
+            row_frame = pd.DataFrame([row])
+        row_frame.to_csv(csv_file, index=False, encoding="utf-8-sig")
+        csv_written = str(csv_file)
+
+    return {
+        "csv_path": csv_written,
+        "model_version": summary.get("modelVersion"),
+        "target_ticker": summary.get("targetTicker"),
+    }

@@ -3,16 +3,27 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT_STR = str(PROJECT_ROOT)
+if PROJECT_ROOT_STR not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT_STR)
+
+from crawler.support_legacy.data_paths import feature_csv_path
+from db.db import fetch_policy_training_frame, persist_prediction_run
+
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 TRAINING_DIR = Path(__file__).resolve().parent
-DAILY_NEWS_FEATURES_PATH = BASE_DIR / "data" / "crawler" / "features" / "daily_news_features.csv"
+POLICY_UPDATE_FEATURES_PATH = feature_csv_path("policy_updates_features.csv")
+LEGACY_DAILY_NEWS_FEATURES_PATH = BASE_DIR / "data" / "crawler" / "features" / "daily_news_features.csv"
 MODEL_METADATA_PATH = TRAINING_DIR / "qqq_model_metadata.json"
 TRAINING_SUMMARY_PATH = TRAINING_DIR / "qqq_training_summary.json"
+TRAINING_RESULTS_CSV = TRAINING_DIR / "qqq_prediction_runs.csv"
 MODEL_PATH = TRAINING_DIR / "qqq_xgboost_model.json"
 CLUSTER_MODEL_PATH = TRAINING_DIR / "qqq_volatility_cluster_model.json"
 
@@ -37,13 +48,19 @@ def _safe_float(value, default=0.0) -> float:
 
 
 def _load_policy_frame() -> pd.DataFrame:
-    if not DAILY_NEWS_FEATURES_PATH.exists():
-        raise FileNotFoundError(f"missing input dataset: {DAILY_NEWS_FEATURES_PATH}")
+    db_frame = fetch_policy_training_frame()
+    if not db_frame.empty:
+        return db_frame
 
-    df = pd.read_csv(DAILY_NEWS_FEATURES_PATH)
-    if df.empty:
-        raise ValueError("daily_news_features.csv is empty")
-    return df
+    for candidate in [POLICY_UPDATE_FEATURES_PATH, LEGACY_DAILY_NEWS_FEATURES_PATH]:
+        if candidate.exists():
+            df = pd.read_csv(candidate)
+            if not df.empty:
+                return df
+
+    raise FileNotFoundError(
+        f"missing input dataset: {POLICY_UPDATE_FEATURES_PATH} or {LEGACY_DAILY_NEWS_FEATURES_PATH}"
+    )
 
 
 def _load_cluster_model() -> dict:
@@ -175,7 +192,7 @@ def _build_summary(df: pd.DataFrame, model_dict: dict) -> tuple[dict, dict, dict
         "best_horizon": best_horizon,
         "best_features": feature_columns,
         "model_file": CLUSTER_MODEL_PATH.name,
-        "data_file": str(DAILY_NEWS_FEATURES_PATH),
+        "data_file": str(LEGACY_DAILY_NEWS_FEATURES_PATH),
     }
 
     summary = {
@@ -241,6 +258,9 @@ def main() -> int:
             json.dumps(model_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+        # CSV와 DB에 동시에 저장한다.
+        persist_prediction_run(summary=summary, metadata=metadata, csv_path=str(TRAINING_RESULTS_CSV))
 
         print("[OK] prediction artifacts generated")
         print(f"[OK] {MODEL_METADATA_PATH}")

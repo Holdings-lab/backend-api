@@ -16,8 +16,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from crawler.service import run_crawl_now
+from crawler.support_legacy.data_paths import feature_csv_path
 from scheduler import build_scheduler
 from training.service import run_prediction_now
+from db.db import fetch_policy_feed_frame
 
 
 load_dotenv(Path(__file__).resolve().with_name(".env"))
@@ -45,9 +47,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 ML_PREFIX = "/ml"
 BASE_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
-MERGED_FINBERT_CANDIDATES = [
-    BASE_DIR / "merged_finbert.csv",
-    BASE_DIR / "data" / "crawler" / "features" / "merged_finbert.csv",
+POLICY_FEED_CANDIDATES = [
+    feature_csv_path("policy_updates_features.csv"),
+    feature_csv_path("daily_news_features.csv"),
 ]
 MODEL_METADATA_PATH = TRAINING_DIR / "qqq_model_metadata.json"
 TRAINING_SUMMARY_PATH = TRAINING_DIR / "qqq_training_summary.json"
@@ -55,6 +57,8 @@ TRAINING_SUMMARY_PATH = TRAINING_DIR / "qqq_training_summary.json"
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://localhost:8080/api/internal/webhooks/events")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 RUN_PIPELINE_ON_STARTUP = os.getenv("RUN_PIPELINE_ON_STARTUP", "false").lower() == "true"
+PIPELINE_BIS_MAX_PAGES = int(os.getenv("BIS_MAX_PAGES", "5"))
+PIPELINE_SLEEP_SEC = float(os.getenv("CRAWL_SLEEP_SEC", "1"))
 
 run_lock = Lock()
 scheduler_instance = None
@@ -119,27 +123,41 @@ def _remove_message_fields(value):
     return value
 
 
-def _resolve_merged_finbert_path() -> Path | None:
-    for candidate in MERGED_FINBERT_CANDIDATES:
-        if candidate.exists():
-            return candidate
+def _resolve_policy_feed_csv_path() -> Path | None:
+    for candidate in POLICY_FEED_CANDIDATES:
+        candidate_path = Path(candidate)
+        if candidate_path.exists():
+            return candidate_path
     return None
 
 
 def _read_policy_feed_frame(payload: dict) -> pd.DataFrame:
-    merged_finbert_path = _resolve_merged_finbert_path()
-    if merged_finbert_path is None:
-        logger.warning("[PolicyFeed] merged_finbert.csv not found. candidates=%s", [str(path) for path in MERGED_FINBERT_CANDIDATES])
-        return pd.DataFrame()
-
-    logger.info("[PolicyFeed] using merged_finbert path: %s", merged_finbert_path)
-    df = pd.read_csv(merged_finbert_path)
-    if df.empty:
-        return df
-
     category = _safe_str(payload.get("category"), "all")
     date_from = _safe_str(payload.get("dateFrom"), "")
     date_to = _safe_str(payload.get("dateTo"), "")
+
+    try:
+        db_frame = fetch_policy_feed_frame(
+            category=category,
+            date_from=date_from,
+            date_to=date_to,
+            limit=int(payload.get("limit") or 20),
+        )
+        if not db_frame.empty:
+            logger.info("[PolicyFeed] using database-backed policy feed: %s rows", len(db_frame))
+            return db_frame
+    except Exception as error:
+        logger.warning("[PolicyFeed] database feed lookup failed: %s", error)
+
+    csv_path = _resolve_policy_feed_csv_path()
+    if csv_path is None:
+        logger.warning("[PolicyFeed] policy feed csv not found. candidates=%s", [str(path) for path in POLICY_FEED_CANDIDATES])
+        return pd.DataFrame()
+
+    logger.info("[PolicyFeed] using policy feed csv path: %s", csv_path)
+    df = pd.read_csv(csv_path)
+    if df.empty:
+        return df
 
     logger.info(f"[PolicyFeed] Initial rows: {len(df)}, category: {category}, dateFrom: {date_from}, dateTo: {date_to}")
     
@@ -174,7 +192,7 @@ def _build_policy_feed(payload: dict) -> dict:
             "feedType": "policy_news_with_model_signal",
             "generatedAt": datetime.utcnow().isoformat() + "Z",
             "source": {
-                "dataset": "merged_finbert",
+                "dataset": "policy_updates_features",
                 "modelTarget": "QQQ",
                 "modelVersion": summary.get("modelVersion", "policy-rule-v1"),
             },
@@ -226,7 +244,7 @@ def _build_policy_feed(payload: dict) -> dict:
                 "category": _safe_str(row.get("category")),
                 "docType": _safe_str(row.get("doc_type")),
                 "title": _safe_str(row.get("title")),
-                "bodySummary": _safe_str(row.get("body")),
+                "bodySummary": _safe_str(row.get("body_summary"), _safe_str(row.get("body"))),
                 "link": _safe_str(row.get("link")),
                 "sentiment": {
                     "titleSentimentScore": _safe_float(row.get("title_sentiment_score", 0.0)),
@@ -248,7 +266,7 @@ def _build_policy_feed(payload: dict) -> dict:
         "feedType": "policy_news_with_model_signal",
         "generatedAt": datetime.utcnow().isoformat() + "Z",
         "source": {
-            "dataset": "merged_finbert",
+            "dataset": "policy_updates_features",
             "modelTarget": metadata.get("target_ticker", "QQQ"),
             "modelVersion": summary.get("modelVersion", "policy-rule-v1"),
         },
@@ -306,7 +324,7 @@ def _send_signal_to_api_server(signal_payload: dict) -> dict:
         return {"success": False, "error": str(error)}
 
 
-def run_pipeline(trigger: str = "manual") -> dict:
+def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, sleep_sec: float | None = None) -> dict:
     if not run_lock.acquire(blocking=False):
         return {
             "status": "busy",
@@ -316,7 +334,10 @@ def run_pipeline(trigger: str = "manual") -> dict:
         }
 
     try:
-        crawl_result = run_crawl_now()
+        crawl_result = run_crawl_now(
+            bis_max_pages=bis_max_pages or PIPELINE_BIS_MAX_PAGES,
+            sleep_sec=sleep_sec or PIPELINE_SLEEP_SEC,
+        )
         predict_result = run_prediction_now()
 
         signal_payload = {
@@ -364,7 +385,11 @@ def on_startup():
     global scheduler_instance
 
     def _scheduled_job():
-        result = run_pipeline(trigger="scheduler")
+        result = run_pipeline(
+            trigger="scheduler",
+            bis_max_pages=PIPELINE_BIS_MAX_PAGES,
+            sleep_sec=PIPELINE_SLEEP_SEC,
+        )
         if result.get("status") != "success":
             logger.warning("scheduled pipeline result: %s", result)
 
@@ -400,7 +425,7 @@ def run_crawl_endpoint():
     if not run_lock.acquire(blocking=False):
         return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_CRAWL_BUSY", status_code=409)
     try:
-        result = run_crawl_now()
+        result = run_crawl_now(bis_max_pages=PIPELINE_BIS_MAX_PAGES, sleep_sec=PIPELINE_SLEEP_SEC)
         if result.get("status") == "success":
             return _success_response(_remove_message_fields(result), message="크롤링 실행에 성공했습니다.")
         return _error_response(message="크롤링 실행에 실패했습니다.", code="ML_CRAWL_FAILED", status_code=500)

@@ -4,13 +4,13 @@ services:
     container_name: pwa-postgres
     restart: always
     env_file:
-      - ./api-server/.env  # 여기에 있는 .env 파일의 환경 변수를 주입합니다.
+      - ./.env.docker
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-holdings}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - 5432:5432
+      - ${POSTGRES_PORT:-5432}:5432
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -25,33 +25,36 @@ services:
       - app-network
 
   api-server:
-    image: ghcr.io/holdings-lab/api-server:latest
+    image: holdings-lab/api-server:local
     container_name: pwa-api-server
     restart: always
+    build:
+      context: ./api-server
+      dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
     env_file:
-      - ./api-server/.env  # .env 파일 주입
+      - ./.env.docker
     environment:
       SERVER_PORT: 8080
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-holdings}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       ML_API_BASE_URL: ${ML_API_BASE_URL:-http://data-ml:9000}
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change-me}
       FIREBASE_CONFIG_PATH: /src/main/resources/serviceAccountKey.json
-      MAIL_USERNAME: ${MAIL_USERNAME}
-      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       INTEGRATION_ML_BASE_URL: ${ML_API_BASE_URL:-http://data-ml:9000}
-      CODEF_MODE: ${CODEF_MODE}
-      CODEF_CLIENT_ID: ${CODEF_CLIENT_ID}
-      CODEF_CLIENT_SECRET: ${CODEF_CLIENT_SECRET}
-      CRYPTO_AES_KEY: ${CRYPTO_AES_KEY}
+      CODEF_MODE: ${CODEF_MODE:-sandbox}
+      CODEF_CLIENT_ID: ${CODEF_CLIENT_ID:-}
+      CODEF_CLIENT_SECRET: ${CODEF_CLIENT_SECRET:-}
+      CRYPTO_AES_KEY: ${CRYPTO_AES_KEY:-}
     ports:
-      - 8080:8080
+      - ${API_SERVER_PORT:-8080}:8080
     volumes:
       - ./api-server/src/main/resources/serviceAccountKey.json:/src/main/resources/serviceAccountKey.json
     healthcheck:
@@ -68,29 +71,40 @@ services:
       - app-network
 
   data-ml:
-    image: ghcr.io/holdings-lab/data-ml:latest
+    image: holdings-lab/data-ml:local
     container_name: pwa-data-ml
     restart: always
     build:
       context: ./data-ml
       dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api-server:
+        condition: service_started
     env_file:
-      - ./api-server/.env  # .env 파일 로드
+      - ./.env.docker
     environment:
       ML_API_PORT: 9000
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-holdings}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      SCHEDULE_MODE: ${SCHEDULE_MODE:-hourly}
-      WEBHOOK_URL: http://api-server:8080/api/internal/webhooks/events
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      SCHEDULE_MODE: ${SCHEDULE_MODE:-interval}
+      INTERVAL_MINUTES: ${INTERVAL_MINUTES:-30}
+      DAILY_HOUR: ${DAILY_HOUR:-9}
+      DAILY_MINUTE: ${DAILY_MINUTE:-0}
+      BIS_MAX_PAGES: ${BIS_MAX_PAGES:-5}
+      CRAWL_SLEEP_SEC: ${CRAWL_SLEEP_SEC:-1}
+      RUN_PIPELINE_ON_STARTUP: ${RUN_PIPELINE_ON_STARTUP:-false}
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://api-server:8080/api/internal/webhooks/events}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change-me}
     ports:
-      - 9000:9000
+      - ${ML_API_PORT:-9000}:9000
     volumes:
-      # 크롤러 파일들이 누락되지 않도록 호스트의 data 폴더를 ML 컨테이너와 연결합니다.
-      - ./data-ml/merged_finbert.csv:/app/merged_finbert.csv
+      - ./data-ml/data:/app/data
+      - ./data-ml/training:/app/training
     healthcheck:
       test:
         - CMD
