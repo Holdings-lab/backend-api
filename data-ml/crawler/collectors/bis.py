@@ -4,6 +4,8 @@ import time
 import random
 import certifi
 import sys
+import shutil
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -90,6 +92,10 @@ def create_driver(headless: bool = True) -> webdriver.Chrome:
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument(f"--user-agent={HEADERS['User-Agent']}")
+
+    chrome_bin = os.environ.get("CHROME_BIN") or shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
+    if chrome_bin:
+        options.binary_location = chrome_bin
 
     return webdriver.Chrome(options=options)
 
