@@ -4,11 +4,11 @@ services:
     container_name: pwa-postgres
     restart: always
     env_file:
-      - ./.env.docker
+      - ./.env
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-holdings}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
     ports:
       - ${POSTGRES_PORT:-5432}:5432
     volumes:
@@ -25,26 +25,23 @@ services:
       - app-network
 
   api-server:
-    image: holdings-lab/api-server:local
+    image: ghcr.io/holdings-lab/api-server:latest
     container_name: pwa-api-server
     restart: always
-    build:
-      context: ./api-server
-      dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
     env_file:
-      - ./.env.docker
+      - ./.env
     environment:
       SERVER_PORT: 8080
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-holdings}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       ML_API_BASE_URL: ${ML_API_BASE_URL:-http://data-ml:9000}
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change-me}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       FIREBASE_CONFIG_PATH: /src/main/resources/serviceAccountKey.json
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
@@ -71,26 +68,23 @@ services:
       - app-network
 
   data-ml:
-    image: holdings-lab/data-ml:local
+    image: ghcr.io/holdings-lab/data-ml:latest
     container_name: pwa-data-ml
     restart: always
-    build:
-      context: ./data-ml
-      dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
       api-server:
         condition: service_started
     env_file:
-      - ./.env.docker
+      - ./.env
     environment:
       ML_API_PORT: 9000
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-holdings}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       SCHEDULE_MODE: ${SCHEDULE_MODE:-interval}
       INTERVAL_MINUTES: ${INTERVAL_MINUTES:-30}
       DAILY_HOUR: ${DAILY_HOUR:-9}
@@ -99,7 +93,7 @@ services:
       CRAWL_SLEEP_SEC: ${CRAWL_SLEEP_SEC:-1}
       RUN_PIPELINE_ON_STARTUP: ${RUN_PIPELINE_ON_STARTUP:-false}
       WEBHOOK_URL: ${WEBHOOK_URL:-http://api-server:8080/api/internal/webhooks/events}
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change-me}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
     ports:
       - ${ML_API_PORT:-9000}:9000
     volumes:
