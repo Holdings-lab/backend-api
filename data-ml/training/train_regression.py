@@ -19,7 +19,7 @@ from db.db import fetch_policy_training_frame, persist_prediction_run
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 TRAINING_DIR = Path(__file__).resolve().parent
-POLICY_UPDATE_FEATURES_PATH = feature_csv_path("policy_updates_features.csv")
+POLICY_UPDATE_FEATURES_PATH = Path(feature_csv_path("policy_updates_features.csv"))
 LEGACY_DAILY_NEWS_FEATURES_PATH = BASE_DIR / "data" / "crawler" / "features" / "daily_news_features.csv"
 MODEL_METADATA_PATH = TRAINING_DIR / "qqq_model_metadata.json"
 TRAINING_SUMMARY_PATH = TRAINING_DIR / "qqq_training_summary.json"
@@ -53,6 +53,7 @@ def _load_policy_frame() -> pd.DataFrame:
         return db_frame
 
     for candidate in [POLICY_UPDATE_FEATURES_PATH, LEGACY_DAILY_NEWS_FEATURES_PATH]:
+        candidate = Path(candidate)
         if candidate.exists():
             df = pd.read_csv(candidate)
             if not df.empty:
