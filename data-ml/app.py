@@ -123,6 +123,20 @@ def _remove_message_fields(value):
     return value
 
 
+def _build_failure_reason(result: dict, fallback_message: str) -> str:
+    message = _safe_str(result.get("message"), "")
+    stderr_tail = _safe_str(result.get("stderr_tail"), "")
+    stdout_tail = _safe_str(result.get("stdout_tail"), "")
+
+    if message:
+        return message
+    if stderr_tail:
+        return stderr_tail
+    if stdout_tail:
+        return stdout_tail
+    return fallback_message
+
+
 def _resolve_policy_feed_csv_path() -> Path | None:
     for candidate in POLICY_FEED_CANDIDATES:
         candidate_path = Path(candidate)
@@ -362,6 +376,13 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
 
         webhook_result = _send_signal_to_api_server(signal_payload)
 
+        if crawl_result.get("status") != "success":
+            logger.warning("[Pipeline] crawl failed: %s", crawl_result)
+        if predict_result.get("status") != "success":
+            logger.warning("[Pipeline] prediction failed: %s", predict_result)
+        if not webhook_result.get("success"):
+            logger.warning("[Pipeline] webhook failed: %s", webhook_result)
+
         predict_ok = predict_result.get("status") == "success"
         webhook_ok = bool(webhook_result.get("success"))
         status = "success" if predict_ok else "failed"
@@ -493,7 +514,17 @@ async def signal_endpoint(request: Request):
         return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_PIPELINE_BUSY", status_code=409)
     if result.get("status") == "success":
         return _success_response(_remove_message_fields(result), message="외부 신호 기반 파이프라인 실행에 성공했습니다.")
-    return _error_response(message="파이프라인 실행에 실패했습니다.", code="ML_PIPELINE_FAILED", status_code=500)
+
+    failure_reason = _build_failure_reason(
+        result.get("predict") or {},
+        "파이프라인 실행에 실패했습니다.",
+    )
+    logger.error("[Pipeline] run failed: %s", result)
+    return _error_response(
+        message=failure_reason,
+        code="ML_PIPELINE_FAILED",
+        status_code=500,
+    )
 
 
 if __name__ == "__main__":
