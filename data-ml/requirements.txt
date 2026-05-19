@@ -13,3 +13,10 @@ python-dotenv==1.0.1
 psycopg2-binary==2.9.9
 transformers
 torch
+requests
+beautifulsoup4
+joblib
+sentence-transformers
+selenium
+certifi
+urllib3
