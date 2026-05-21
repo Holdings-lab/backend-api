@@ -56,4 +56,13 @@ public class ContentFeedController {
             @RequestParam(name = "dateTo", required = false) String dateTo) {
         return ResponseEntity.ok(policyFeedProxyService.getCards(limit, category, dateFrom, dateTo));
     }
+
+    @GetMapping("/stats")
+    public ResponseEntity<PolicyFeedDto.PolicyFeedStatsResponse> getPolicyFeedStats(
+            @RequestParam(name = "limit", required = false) Integer limit,
+            @RequestParam(name = "category", required = false) String category,
+            @RequestParam(name = "dateFrom", required = false) String dateFrom,
+            @RequestParam(name = "dateTo", required = false) String dateTo) {
+        return ResponseEntity.ok(policyFeedProxyService.getPolicyFeedStats(limit, category, dateFrom, dateTo));
+    }
 }

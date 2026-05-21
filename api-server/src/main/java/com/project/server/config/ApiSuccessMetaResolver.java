@@ -57,6 +57,8 @@ public class ApiSuccessMetaResolver {
                                         "학습 실행 요청에 성공했습니다."),
                         new ApiSuccessMetaRule(HttpMethod.GET, "/api/feeds/policy", "CONTENT-FEED-200",
                                         "정책 피드 조회에 성공했습니다."),
+                        new ApiSuccessMetaRule(HttpMethod.GET, "/api/feeds/policy/stats", "CONTENT-FEED-STATS-200",
+                                        "정책 피드 통계 조회에 성공했습니다."),
                         new ApiSuccessMetaRule(HttpMethod.POST, "/api/internal/webhooks/events", "WEBHOOK-EVENT-200",
                                         "Webhook 처리가 완료되었습니다."),
 

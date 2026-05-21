@@ -63,9 +63,29 @@ public class PolicyFeedDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    public static class PolicyFeedStatsResponse {
+        private int totalItemCount;
+        private int totalCategoryCount;
+        private List<String> categories;
+        private List<DateCount> dateCounts;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class CategoryCount {
         private String category;
         private int count;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DateCount {
+        private String date;
+        private int itemCount;
     }
 
     @Data

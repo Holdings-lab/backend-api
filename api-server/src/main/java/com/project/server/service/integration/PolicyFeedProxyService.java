@@ -53,6 +53,17 @@ public class PolicyFeedProxyService {
         return fetchPolicyFeedWithValidation(request);
     }
 
+    public PolicyFeedDto.PolicyFeedStatsResponse getPolicyFeedStats(Integer limit, String category,
+            String dateFrom, String dateTo) {
+        PolicyFeedDto.PolicyFeedRequest request = PolicyFeedDto.PolicyFeedRequest.builder()
+                .limit(limit)
+                .category(category)
+                .dateFrom(dateFrom)
+                .dateTo(dateTo)
+                .build();
+        return fetchPolicyFeedStatsWithValidation(request);
+    }
+
     public java.util.Map<String, String> getMeta() {
         PolicyFeedDto.PolicyFeedResponse response = fetchPolicyFeedWithValidation(PolicyFeedDto.PolicyFeedRequest.builder().build());
         return java.util.Map.of(
@@ -107,6 +118,39 @@ public class PolicyFeedProxyService {
         return resp.getCards();
     }
 
+    private PolicyFeedDto.PolicyFeedStatsResponse fetchPolicyFeedStatsWithValidation(
+            PolicyFeedDto.PolicyFeedRequest requestBody) {
+        PolicyFeedDto.PolicyFeedRequest safeRequest = requestBody == null
+                ? PolicyFeedDto.PolicyFeedRequest.builder().build()
+                : requestBody;
+
+        int limit = safeRequest.getLimit() == null ? 20 : safeRequest.getLimit();
+        if (limit <= 0 || limit > 200) {
+            throw ApiException.badRequest("limit은 1~200 범위여야 합니다.", "POLICY_FEED_INVALID_LIMIT");
+        }
+
+        PolicyFeedDto.PolicyFeedStatsResponse mlResp;
+        try {
+            mlResp = fetchPolicyFeedStatsFromMl(safeRequest, "live-request");
+        } catch (ApiException ae) {
+            throw ae;
+        } catch (Exception ex) {
+            throw ApiException.internalServerError("정책 피드 통계 데이터 조회 실패", "POLICY_FEED_STATS_FETCH_ERROR");
+        }
+
+        if (mlResp == null) {
+            throw ApiException.internalServerError("정책 피드 통계 데이터 조회 실패", "POLICY_FEED_STATS_NO_DATA");
+        }
+
+        if (mlResp.getCategories() == null) {
+            mlResp.setCategories(new java.util.ArrayList<>());
+        }
+        if (mlResp.getDateCounts() == null) {
+            mlResp.setDateCounts(new java.util.ArrayList<>());
+        }
+        return mlResp;
+    }
+
     // Internal validation and fetch logic
     private PolicyFeedDto.PolicyFeedResponse fetchPolicyFeedWithValidation(
             PolicyFeedDto.PolicyFeedRequest requestBody) {
@@ -131,9 +175,13 @@ public class PolicyFeedProxyService {
             throw ApiException.internalServerError("정책 피드 데이터 조회 실패", "POLICY_FEED_FETCH_ERROR");
         }
 
-        // Validate fetched data
-        if (mlResp == null || mlResp.getCards() == null || mlResp.getCards().isEmpty()) {
-            throw ApiException.internalServerError("정책 피드 데이터가 비어있습니다.", "POLICY_FEED_NO_DATA");
+        // Empty feeds are allowed; return the ML payload as-is so the API stays successful.
+        if (mlResp == null) {
+            throw ApiException.internalServerError("정책 피드 데이터 조회 실패", "POLICY_FEED_NO_DATA");
+        }
+
+        if (mlResp.getCards() == null) {
+            mlResp.setCards(new java.util.ArrayList<>());
         }
 
         // Build filters dynamically if null
@@ -260,9 +308,85 @@ public class PolicyFeedProxyService {
         }
     }
 
+            private PolicyFeedDto.PolicyFeedStatsResponse fetchPolicyFeedStatsFromMl(PolicyFeedDto.PolicyFeedRequest request,
+                String reason) {
+            try {
+                String targetUrl = buildPolicyFeedStatsUrl(request);
+                logger.info("Policy feed stats ML request started. reason={}, targetUrl={}, userId={}, limit={}, category={}, dateFrom={}, dateTo={}",
+                    reason,
+                    targetUrl,
+                    request == null ? null : request.getLimit(),
+                    request == null ? null : request.getCategory(),
+                    request == null ? null : request.getDateFrom(),
+                    request == null ? null : request.getDateTo());
+
+                HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(targetUrl))
+                    .timeout(Duration.ofSeconds(12))
+                    .header("Accept", "application/json")
+                    .GET()
+                    .build();
+
+                HttpResponse<String> response = httpClient.send(httpRequest,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                if (response.statusCode() >= 400) {
+                logger.warn("Policy feed stats ML request returned error status. reason={}, targetUrl={}, statusCode={}, body={}",
+                    reason,
+                    targetUrl,
+                    response.statusCode(),
+                    response.body());
+                return null;
+                }
+
+                JsonNode root = objectMapper.readTree(response.body());
+                JsonNode resultNode = root.has("result") ? root.get("result") : root;
+                if (resultNode == null || resultNode.isNull()) {
+                logger.warn("Policy feed stats ML response has no result node. reason={}, targetUrl={}, responseBody={}",
+                    reason,
+                    targetUrl,
+                    response.body());
+                return null;
+                }
+                PolicyFeedDto.PolicyFeedStatsResponse mappedResponse = objectMapper.treeToValue(resultNode,
+                    PolicyFeedDto.PolicyFeedStatsResponse.class);
+                if (mappedResponse == null) {
+                logger.warn("Policy feed stats ML response mapping returned null. reason={}, targetUrl={}, responseBody={}",
+                    reason,
+                    targetUrl,
+                    response.body());
+                return null;
+                }
+                return mappedResponse;
+            } catch (ApiException ae) {
+                throw ae;
+            } catch (Exception exception) {
+                logger.error("Policy feed stats ML request failed with exception. reason={}, message={}",
+                    reason,
+                    exception.getMessage(),
+                    exception);
+                return null;
+            }
+            }
+
     private String buildPolicyFeedUrl(PolicyFeedDto.PolicyFeedRequest request) {
         StringBuilder urlBuilder = new StringBuilder(normalizeBaseUrl(mlBaseUrl))
             .append("/ml/feeds/policy");
+        StringBuilder queryBuilder = new StringBuilder();
+
+        appendQueryParam(queryBuilder, "limit", request.getLimit());
+        appendQueryParam(queryBuilder, "category", request.getCategory());
+        appendQueryParam(queryBuilder, "dateFrom", request.getDateFrom());
+        appendQueryParam(queryBuilder, "dateTo", request.getDateTo());
+
+        if (queryBuilder.length() > 0) {
+            urlBuilder.append("?").append(queryBuilder);
+        }
+        return urlBuilder.toString();
+    }
+
+    private String buildPolicyFeedStatsUrl(PolicyFeedDto.PolicyFeedRequest request) {
+        StringBuilder urlBuilder = new StringBuilder(normalizeBaseUrl(mlBaseUrl))
+                .append("/ml/feeds/policy/stats");
         StringBuilder queryBuilder = new StringBuilder();
 
         appendQueryParam(queryBuilder, "limit", request.getLimit());
