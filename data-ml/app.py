@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, Response
 
 from crawler.service import run_crawl_now
 from crawler.support_legacy.data_paths import feature_csv_path
+from crawler.postprocessing import sentiment_score as sentiment_score_module
 from scheduler import build_scheduler
 from training.service import run_prediction_now
 from db.db import fetch_policy_feed_frame
@@ -48,6 +49,7 @@ ML_PREFIX = "/ml"
 BASE_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
 POLICY_FEED_CANDIDATES = [
+    feature_csv_path("policy_updates_features_latest.csv"),
     feature_csv_path("policy_updates_features.csv"),
     feature_csv_path("daily_news_features.csv"),
 ]
@@ -62,6 +64,58 @@ PIPELINE_SLEEP_SEC = float(os.getenv("CRAWL_SLEEP_SEC", "1"))
 
 run_lock = Lock()
 scheduler_instance = None
+
+
+def _safe_extract_probs_from_output(output_one_text) -> dict:
+    if output_one_text is None:
+        return {
+            "positive_prob": None,
+            "negative_prob": None,
+            "neutral_prob": None,
+            "sentiment_score": None,
+        }
+
+    if isinstance(output_one_text, dict):
+        if "label" in output_one_text and "score" in output_one_text:
+            output_one_text = [output_one_text]
+        else:
+            normalized = []
+            for value in output_one_text.values():
+                if isinstance(value, dict) and "label" in value and "score" in value:
+                    normalized.append(value)
+                elif isinstance(value, (list, tuple)):
+                    normalized.extend(
+                        item for item in value
+                        if isinstance(item, dict) and "label" in item and "score" in item
+                    )
+            output_one_text = normalized
+
+    if not isinstance(output_one_text, (list, tuple)):
+        return {
+            "positive_prob": None,
+            "negative_prob": None,
+            "neutral_prob": None,
+            "sentiment_score": None,
+        }
+
+    score_map = {}
+    for item in output_one_text:
+        if isinstance(item, dict) and "label" in item and "score" in item:
+            score_map[str(item["label"]).lower()] = item["score"]
+
+    pos = score_map.get("positive", 0.0)
+    neg = score_map.get("negative", 0.0)
+    neu = score_map.get("neutral", 0.0)
+
+    return {
+        "positive_prob": pos,
+        "negative_prob": neg,
+        "neutral_prob": neu,
+        "sentiment_score": pos - neg,
+    }
+
+
+sentiment_score_module.extract_probs_from_output = _safe_extract_probs_from_output
 
 
 def _safe_str(value, default=""):
@@ -145,17 +199,44 @@ def _resolve_policy_feed_csv_path() -> Path | None:
     return None
 
 
-def _read_policy_feed_frame(payload: dict) -> pd.DataFrame:
+def _read_policy_feed_frame(payload: dict, apply_limit: bool = True) -> pd.DataFrame:
     category = _safe_str(payload.get("category"), "all")
     date_from = _safe_str(payload.get("dateFrom"), "")
     date_to = _safe_str(payload.get("dateTo"), "")
+    limit = int(payload.get("limit") or 20)
+
+    latest_snapshot_path = _resolve_policy_feed_csv_path()
+    if latest_snapshot_path is not None and latest_snapshot_path.name.endswith("_latest.csv"):
+        try:
+            logger.info("[PolicyFeed] using latest snapshot policy feed path: %s", latest_snapshot_path)
+            latest_df = pd.read_csv(latest_snapshot_path)
+            if not latest_df.empty:
+                df = latest_df
+                if category.lower() != "all" and "category" in df.columns:
+                    df = df[df["category"].astype(str).str.lower() == category.lower()]
+                if "date" not in df.columns:
+                    if "published_date" in df.columns:
+                        df["date"] = df["published_date"]
+                    elif "collected_at" in df.columns:
+                        df["date"] = df["collected_at"]
+                    else:
+                        df["date"] = ""
+                if "date" in df.columns and (date_from or date_to):
+                    date_series = pd.to_datetime(df["date"], errors="coerce")
+                    if date_from:
+                        df = df[date_series >= pd.to_datetime(date_from, errors="coerce")]
+                    if date_to:
+                        df = df[date_series <= pd.to_datetime(date_to, errors="coerce")]
+                return df.sort_values(by=["date", "title"], ascending=[False, True], na_position="last")
+        except Exception as error:
+            logger.warning("[PolicyFeed] latest snapshot feed lookup failed: %s", error)
 
     try:
         db_frame = fetch_policy_feed_frame(
             category=category,
             date_from=date_from,
             date_to=date_to,
-            limit=int(payload.get("limit") or 20),
+            limit=limit if apply_limit else None,
         )
         if not db_frame.empty:
             logger.info("[PolicyFeed] using database-backed policy feed: %s rows", len(db_frame))
@@ -179,6 +260,14 @@ def _read_policy_feed_frame(payload: dict) -> pd.DataFrame:
         df = df[df["category"].astype(str).str.lower() == category.lower()]
         logger.info(f"[PolicyFeed] After category filter: {len(df)} rows")
 
+    if "date" not in df.columns:
+        if "published_date" in df.columns:
+            df["date"] = df["published_date"]
+        elif "collected_at" in df.columns:
+            df["date"] = df["collected_at"]
+        else:
+            df["date"] = ""
+
     if "date" in df.columns and (date_from or date_to):
         date_series = pd.to_datetime(df["date"], errors="coerce")
         if date_from:
@@ -191,6 +280,66 @@ def _read_policy_feed_frame(payload: dict) -> pd.DataFrame:
     sorted_df = df.sort_values(by=["date", "title"], ascending=[False, True], na_position="last")
     logger.info(f"[PolicyFeed] Final rows: {len(sorted_df)}")
     return sorted_df
+
+
+def _build_policy_feed_stats(payload: dict) -> dict:
+    df = _read_policy_feed_frame(payload, apply_limit=False)
+    logger.info(f"[PolicyFeedStats] payload: {payload}")
+
+    if df.empty:
+        return {
+            "totalItemCount": 0,
+            "totalCategoryCount": 0,
+            "categories": [],
+            "dateCounts": [],
+        }
+
+    categories = []
+    if "category" in df.columns:
+        categories = [
+            _safe_str(value)
+            for value in df["category"].tolist()
+            if _safe_str(value)
+        ]
+    unique_categories = list(dict.fromkeys(categories))
+
+    if "date" not in df.columns:
+        if "published_date" in df.columns:
+            df["date"] = df["published_date"]
+        elif "collected_at" in df.columns:
+            df["date"] = df["collected_at"]
+        else:
+            df["date"] = ""
+
+    date_frame = df.copy()
+    date_frame["date"] = date_frame["date"].astype(str).str.strip()
+    date_frame = date_frame[date_frame["date"] != ""]
+    if not date_frame.empty:
+        date_frame = (
+            date_frame.groupby("date", as_index=False)
+            .size()
+            .rename(columns={"size": "itemCount"})
+            .sort_values(by="date", ascending=False)
+        )
+    else:
+        date_frame = pd.DataFrame(columns=["date", "itemCount"])
+
+    limit = int(payload.get("limit") or 0)
+    if limit > 0:
+        date_frame = date_frame.head(limit)
+
+    return {
+        "totalItemCount": int(len(df)),
+        "totalCategoryCount": int(len(unique_categories)),
+        "categories": unique_categories,
+        "dateCounts": [
+            {
+                "date": _safe_str(row.get("date")),
+                "itemCount": int(row.get("itemCount") or 0),
+            }
+            for _, row in date_frame.iterrows()
+        ],
+    }
 
 
 def _build_policy_feed(payload: dict) -> dict:
@@ -484,6 +633,15 @@ def _policy_feed_response(payload: dict):
     return _success_response(_remove_message_fields(result), message="정책 피드 조회에 성공했습니다.")
 
 
+def _policy_feed_stats_response(payload: dict):
+    result = _build_policy_feed_stats(payload or {})
+
+    logger.info(f"[PolicyFeedStats] Endpoint received payload: {payload}")
+    logger.info(f"[PolicyFeedStats] totalItemCount: {result.get('totalItemCount', 0)}")
+
+    return _success_response(_remove_message_fields(result), message="정책 피드 통계 조회에 성공했습니다.")
+
+
 @app.get(f"{ML_PREFIX}/feeds/policy")
 def policy_feed_get_endpoint(
     userId: int | None = None,
@@ -500,6 +658,22 @@ def policy_feed_get_endpoint(
         "dateTo": dateTo,
     }
     return _policy_feed_response(payload)
+
+
+@app.get(f"{ML_PREFIX}/feeds/policy/stats")
+def policy_feed_stats_get_endpoint(
+    limit: int = 20,
+    category: str = "all",
+    dateFrom: str = "",
+    dateTo: str = "",
+):
+    payload = {
+        "limit": limit,
+        "category": category,
+        "dateFrom": dateFrom,
+        "dateTo": dateTo,
+    }
+    return _policy_feed_stats_response(payload)
 
 
 @app.post(f"{ML_PREFIX}/pipelines/run")

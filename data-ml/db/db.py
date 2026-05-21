@@ -57,6 +57,38 @@ def init_db() -> None:
     with _connect() as conn:
         with conn.cursor() as cursor:
             cursor.execute(schema_sql)
+            cursor.execute(
+                """
+                ALTER TABLE IF EXISTS crawler_run_logs
+                    ADD COLUMN IF NOT EXISTS run_type TEXT,
+                    ADD COLUMN IF NOT EXISTS status TEXT,
+                    ADD COLUMN IF NOT EXISTS counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+                ALTER TABLE IF EXISTS policy_prediction_runs
+                    ADD COLUMN IF NOT EXISTS model_version TEXT,
+                    ADD COLUMN IF NOT EXISTS model_target TEXT,
+                    ADD COLUMN IF NOT EXISTS best_horizon_days INTEGER,
+                    ADD COLUMN IF NOT EXISTS best_threshold DOUBLE PRECISION,
+                    ADD COLUMN IF NOT EXISTS policy_score DOUBLE PRECISION,
+                    ADD COLUMN IF NOT EXISTS direction_accuracy DOUBLE PRECISION,
+                    ADD COLUMN IF NOT EXISTS top_label TEXT,
+                    ADD COLUMN IF NOT EXISTS top_label_probability DOUBLE PRECISION,
+                    ADD COLUMN IF NOT EXISTS summary_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    ADD COLUMN IF NOT EXISTS metadata_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+                """
+            )
+            cursor.execute(
+                """
+                DELETE FROM policy_document_features a
+                USING policy_document_features b
+                WHERE a.document_id = b.document_id
+                  AND a.id > b.id;
+                CREATE UNIQUE INDEX IF NOT EXISTS policy_document_features_document_id_idx
+                    ON policy_document_features(document_id);
+                """
+            )
         conn.commit()
 
 
@@ -322,10 +354,13 @@ def persist_policy_pipeline_outputs(
 
     raw_path = Path(raw_csv_path)
     processed_path = Path(processed_csv_path)
+    latest_raw_path = raw_path.with_name(f"{raw_path.stem}_latest{raw_path.suffix}")
+    latest_processed_path = processed_path.with_name(f"{processed_path.stem}_latest{processed_path.suffix}")
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     processed_path.parent.mkdir(parents=True, exist_ok=True)
 
     if raw_df is not None:
+        raw_df.to_csv(latest_raw_path, index=False, encoding="utf-8-sig")
         if raw_path.exists():
             try:
                 existing_raw = pd.read_csv(raw_path, encoding="utf-8-sig")
@@ -337,6 +372,7 @@ def persist_policy_pipeline_outputs(
         raw_df.to_csv(raw_path, index=False, encoding="utf-8-sig")
 
     if processed_df is not None:
+        processed_df.to_csv(latest_processed_path, index=False, encoding="utf-8-sig")
         if processed_path.exists():
             try:
                 existing_processed = pd.read_csv(processed_path, encoding="utf-8-sig")
@@ -376,12 +412,16 @@ def persist_policy_pipeline_outputs(
         payload={
             "raw_csv_path": str(raw_path),
             "processed_csv_path": str(processed_path),
+            "latest_raw_csv_path": str(latest_raw_path),
+            "latest_processed_csv_path": str(latest_processed_path),
         },
     )
 
     return {
         "raw_csv_path": str(raw_path),
         "processed_csv_path": str(processed_path),
+        "latest_raw_csv_path": str(latest_raw_path),
+        "latest_processed_csv_path": str(latest_processed_path),
         "raw_count": raw_count,
         "processed_count": processed_count,
         "inserted_documents": inserted_documents,
@@ -396,6 +436,7 @@ def _load_jsonb_column(frame: pd.DataFrame, column: str) -> pd.DataFrame:
     expanded = pd.json_normalize(frame[column].apply(lambda value: value if isinstance(value, dict) else {}))
     frame = frame.drop(columns=[column])
     if not expanded.empty:
+        expanded = expanded.loc[:, ~expanded.columns.isin(frame.columns)]
         frame = pd.concat([frame.reset_index(drop=True), expanded.reset_index(drop=True)], axis=1)
     return frame
 
@@ -438,12 +479,13 @@ def fetch_policy_feed_frame(
     category: str = "all",
     date_from: str = "",
     date_to: str = "",
-    limit: int = 20,
+    limit: int | None = 20,
 ) -> pd.DataFrame:
     if psycopg2 is None:
         return pd.DataFrame()
 
-    query = """
+    query_parts = [
+        """
         SELECT
             COALESCE(d.published_date::text, to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')) AS date,
             d.source,
@@ -466,21 +508,23 @@ def fetch_policy_feed_frame(
         FROM policy_documents d
         LEFT JOIN policy_document_features f ON f.document_id = d.id
         WHERE (%(category)s = 'all' OR LOWER(d.category) = LOWER(%(category)s))
-          AND (%(date_from)s = '' OR d.published_date >= %(date_from)s::date)
-          AND (%(date_to)s = '' OR d.published_date <= %(date_to)s::date)
-        ORDER BY d.published_date DESC NULLS LAST, d.id DESC
-    """
+        """
+    ]
+    params = {"category": category or "all"}
+
+    if date_from:
+        query_parts.append("AND d.published_date >= %(date_from)s::date")
+        params["date_from"] = date_from
+    if date_to:
+        query_parts.append("AND d.published_date <= %(date_to)s::date")
+        params["date_to"] = date_to
+
+    query_parts.append("ORDER BY d.published_date DESC NULLS LAST, d.id DESC")
+    query = "\n".join(query_parts)
 
     with _connect(real_dict_cursor=True) as conn:
         with conn.cursor() as cursor:
-            cursor.execute(
-                query,
-                {
-                    "category": category or "all",
-                    "date_from": date_from or "",
-                    "date_to": date_to or "",
-                },
-            )
+            cursor.execute(query, params)
             rows = cursor.fetchall()
 
     if not rows:
@@ -506,27 +550,31 @@ def fetch_policy_feed_frame(
                 NULL AS body_summary_embedding
             FROM policy_documents d
             WHERE (%(category)s = 'all' OR LOWER(d.category) = LOWER(%(category)s))
-              AND (%(date_from)s = '' OR d.published_date >= %(date_from)s::date)
-              AND (%(date_to)s = '' OR d.published_date <= %(date_to)s::date)
             ORDER BY d.published_date DESC NULLS LAST, d.id DESC
         """
+        fallback_params = {"category": category or "all"}
+        if date_from:
+            fallback_query = fallback_query.replace(
+                "            WHERE (%(category)s = 'all' OR LOWER(d.category) = LOWER(%(category)s))\n",
+                "            WHERE (%(category)s = 'all' OR LOWER(d.category) = LOWER(%(category)s))\n              AND d.published_date >= %(date_from)s::date\n",
+            )
+            fallback_params["date_from"] = date_from
+        if date_to:
+            fallback_query = fallback_query.replace(
+                "            ORDER BY d.published_date DESC NULLS LAST, d.id DESC\n",
+                "              AND d.published_date <= %(date_to)s::date\n            ORDER BY d.published_date DESC NULLS LAST, d.id DESC\n",
+            )
+            fallback_params["date_to"] = date_to
         with _connect(real_dict_cursor=True) as conn:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    fallback_query,
-                    {
-                        "category": category or "all",
-                        "date_from": date_from or "",
-                        "date_to": date_to or "",
-                    },
-                )
+                cursor.execute(fallback_query, fallback_params)
                 rows = cursor.fetchall()
 
         if not rows:
             return pd.DataFrame()
 
     frame = pd.DataFrame(rows)
-    if limit > 0:
+    if limit is not None and limit > 0:
         frame = frame.head(limit)
     return frame
 
