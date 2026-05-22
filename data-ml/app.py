@@ -277,7 +277,16 @@ def _read_policy_feed_frame(payload: dict, apply_limit: bool = True) -> pd.DataF
             df = df[date_series <= pd.to_datetime(date_to, errors="coerce")]
             logger.info(f"[PolicyFeed] After dateTo filter: {len(df)} rows")
 
-    sorted_df = df.sort_values(by=["date", "title"], ascending=[False, True], na_position="last")
+    sort_columns = ["date"]
+    sort_orders = [False]
+    if "title" in df.columns:
+        sort_columns.append("title")
+        sort_orders.append(True)
+    elif "body_summary" in df.columns:
+        sort_columns.append("body_summary")
+        sort_orders.append(True)
+
+    sorted_df = df.sort_values(by=sort_columns, ascending=sort_orders, na_position="last")
     logger.info(f"[PolicyFeed] Final rows: {len(sorted_df)}")
     return sorted_df
 
