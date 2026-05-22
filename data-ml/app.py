@@ -483,11 +483,23 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
             bis_max_pages=bis_max_pages or PIPELINE_BIS_MAX_PAGES,
             sleep_sec=sleep_sec or PIPELINE_SLEEP_SEC,
         )
-        predict_result = run_prediction_now()
+
+        raw_count = int(crawl_result.get("raw_count") or 0)
+        processed_count = int(crawl_result.get("processed_count") or 0)
+        skip_prediction = (raw_count <= 0) and (processed_count <= 0)
+
+        if skip_prediction:
+            predict_result = {
+                "status": "skipped",
+                "message": "no policy rows collected; prediction skipped",
+                "executed_at": datetime.utcnow().isoformat() + "Z",
+            }
+        else:
+            predict_result = run_prediction_now()
 
         signal_payload = {
             "trigger": trigger,
-            "status": "ok" if predict_result.get("status") == "success" else "failed",
+            "status": "ok" if predict_result.get("status") in {"success", "skipped"} else "failed",
             "signal": "hold",
             "generatedAt": datetime.utcnow().isoformat() + "Z",
             "details": {
@@ -496,25 +508,32 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
             },
         }
 
-        summary = _safe_json_load(TRAINING_SUMMARY_PATH)
-        metrics = summary.get("metrics") or {}
-        policy_score = _safe_float(metrics.get("policyScore"), 0.0)
-        threshold = float(summary.get("bestThreshold", 0.004) or 0.004)
-        if policy_score > threshold:
-            signal_payload["signal"] = "buy"
-        elif policy_score < -threshold:
-            signal_payload["signal"] = "sell"
+        if skip_prediction:
+            webhook_result = {
+                "success": True,
+                "status": "skipped",
+                "message": "prediction skipped due to empty crawl result; webhook skipped",
+            }
+        else:
+            summary = _safe_json_load(TRAINING_SUMMARY_PATH)
+            metrics = summary.get("metrics") or {}
+            policy_score = _safe_float(metrics.get("policyScore"), 0.0)
+            threshold = float(summary.get("bestThreshold", 0.004) or 0.004)
+            if policy_score > threshold:
+                signal_payload["signal"] = "buy"
+            elif policy_score < -threshold:
+                signal_payload["signal"] = "sell"
 
-        webhook_result = _send_signal_to_api_server(signal_payload)
+            webhook_result = _send_signal_to_api_server(signal_payload)
 
         if crawl_result.get("status") != "success":
             logger.warning("[Pipeline] crawl failed: %s", crawl_result)
-        if predict_result.get("status") != "success":
+        if predict_result.get("status") not in {"success", "skipped"}:
             logger.warning("[Pipeline] prediction failed: %s", predict_result)
         if not webhook_result.get("success"):
             logger.warning("[Pipeline] webhook failed: %s", webhook_result)
 
-        predict_ok = predict_result.get("status") == "success"
+        predict_ok = predict_result.get("status") in {"success", "skipped"}
         webhook_ok = bool(webhook_result.get("success"))
         status = "success" if predict_ok else "failed"
         return {
