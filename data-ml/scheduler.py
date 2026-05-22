@@ -7,11 +7,12 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 
 def build_scheduler(job_func) -> BackgroundScheduler:
-    scheduler = BackgroundScheduler(timezone="Asia/Seoul")
+    scheduler = BackgroundScheduler(timezone="America/New_York")
 
-    mode = os.getenv("SCHEDULE_MODE", "interval").lower()  # interval | hourly | daily | off
+    # 기본: 미국 동부 시간대에서 매일 자정(00:00)에 실행
+    mode = os.getenv("SCHEDULE_MODE", "daily").lower()  # interval | hourly | daily | off
     interval_minutes = int(os.getenv("INTERVAL_MINUTES", "30"))
-    daily_hour = int(os.getenv("DAILY_HOUR", "9"))
+    daily_hour = int(os.getenv("DAILY_HOUR", "0"))
     daily_minute = int(os.getenv("DAILY_MINUTE", "0"))
 
     if mode == "off":

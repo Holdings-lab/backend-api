@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from threading import Lock
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -469,7 +470,7 @@ def _send_signal_to_api_server(signal_payload: dict) -> dict:
         return {"success": False, "error": str(error)}
 
 
-def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, sleep_sec: float | None = None) -> dict:
+def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, sleep_sec: float | None = None, target_date: str | None = None) -> dict:
     if not run_lock.acquire(blocking=False):
         return {
             "status": "busy",
@@ -479,9 +480,22 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
         }
 
     try:
+        # parse optional target_date (ISO YYYY-MM-DD) to pass to crawler
+        parsed_target_date = None
+        if target_date:
+            try:
+                # try date.fromisoformat first
+                parsed_target_date = date.fromisoformat(str(target_date))
+            except Exception:
+                try:
+                    parsed_target_date = datetime.fromisoformat(str(target_date)).date()
+                except Exception:
+                    parsed_target_date = None
+
         crawl_result = run_crawl_now(
             bis_max_pages=bis_max_pages or PIPELINE_BIS_MAX_PAGES,
             sleep_sec=sleep_sec or PIPELINE_SLEEP_SEC,
+            target_date=parsed_target_date,
         )
 
         raw_count = int(crawl_result.get("raw_count") or 0)
@@ -556,10 +570,20 @@ def on_startup():
     global scheduler_instance
 
     def _scheduled_job():
+        # schedule runs at US/Eastern midnight; pipeline should process the previous day
+        try:
+            us_tz = ZoneInfo("America/New_York")
+            now_us = datetime.now(us_tz)
+            target_dt = (now_us.date() - timedelta(days=1))
+            target_date_str = target_dt.isoformat()
+        except Exception:
+            target_date_str = None
+
         result = run_pipeline(
             trigger="scheduler",
             bis_max_pages=PIPELINE_BIS_MAX_PAGES,
             sleep_sec=PIPELINE_SLEEP_SEC,
+            target_date=target_date_str,
         )
         if result.get("status") != "success":
             logger.warning("scheduled pipeline result: %s", result)
@@ -678,13 +702,19 @@ def policy_feed_stats_get_endpoint(
 
 
 @app.post(f"{ML_PREFIX}/pipelines/run")
-async def signal_endpoint(request: Request):
+async def signal_endpoint(request: Request, date: str | None = None):
     try:
         payload = await request.json()
     except Exception:
         payload = {}
 
-    result = run_pipeline(trigger=_safe_str(payload.get("source"), "manual"))
+    # prioritize query param `date` over body fields
+    target_date_value = date or payload.get("targetDate") or payload.get("target_date") or payload.get("date")
+
+    result = run_pipeline(
+        trigger=_safe_str(payload.get("source"), "manual"),
+        target_date=_safe_str(target_date_value),
+    )
     if result.get("status") == "busy":
         return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_PIPELINE_BUSY", status_code=409)
     if result.get("status") == "success":

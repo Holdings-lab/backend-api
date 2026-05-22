@@ -28,6 +28,7 @@ def run_crawl_now(
     sleep_sec: float = DEFAULT_SLEEP_SEC,
     keyword_config_path: str | Path | None = None,
     doc_types: list[str] | None = None,
+    target_date: date | None = None,
 ) -> dict:
     init_db()
     raw_csv = collected_csv_path("policy_updates_monitor.csv")
@@ -38,6 +39,7 @@ def run_crawl_now(
         sleep_sec=sleep_sec,
         keyword_config_path=keyword_config_path,
         doc_types=doc_types,
+        target_date=target_date,
     )
 
     if raw_df.empty:
