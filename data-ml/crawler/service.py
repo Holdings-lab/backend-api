@@ -5,6 +5,8 @@ import os
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
@@ -28,6 +30,8 @@ def run_crawl_now(
     doc_types: list[str] | None = None,
 ) -> dict:
     init_db()
+    raw_csv = collected_csv_path("policy_updates_monitor.csv")
+    processed_csv = feature_csv_path("policy_updates_features.csv")
 
     raw_df = collect_policy_updates(
         bis_max_pages=bis_max_pages,
@@ -37,13 +41,19 @@ def run_crawl_now(
     )
 
     if raw_df.empty:
+        persist_result = persist_policy_pipeline_outputs(
+            raw_df=raw_df,
+            processed_df=pd.DataFrame(),
+            raw_csv_path=raw_csv,
+            processed_csv_path=processed_csv,
+            run_type="crawler_service",
+        )
         return {
             "status": "success",
             "raw_count": 0,
             "processed_count": 0,
             "message": "수집된 정책 뉴스가 없습니다.",
-            "raw_csv_path": collected_csv_path("policy_updates_monitor.csv"),
-            "processed_csv_path": feature_csv_path("policy_updates_features.csv"),
+            **persist_result,
         }
 
     processed_df = run_postprocessing_pipeline(raw_df)
@@ -52,8 +62,8 @@ def run_crawl_now(
     persist_result = persist_policy_pipeline_outputs(
         raw_df=raw_df,
         processed_df=processed_df,
-        raw_csv_path=collected_csv_path("policy_updates_monitor.csv"),
-        processed_csv_path=feature_csv_path("policy_updates_features.csv"),
+        raw_csv_path=raw_csv,
+        processed_csv_path=processed_csv,
         run_type="crawler_service",
     )
 

@@ -49,7 +49,6 @@ ML_PREFIX = "/ml"
 BASE_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
 POLICY_FEED_CANDIDATES = [
-    feature_csv_path("policy_updates_features_latest.csv"),
     feature_csv_path("policy_updates_features.csv"),
     feature_csv_path("daily_news_features.csv"),
 ]
@@ -204,32 +203,6 @@ def _read_policy_feed_frame(payload: dict, apply_limit: bool = True) -> pd.DataF
     date_from = _safe_str(payload.get("dateFrom"), "")
     date_to = _safe_str(payload.get("dateTo"), "")
     limit = int(payload.get("limit") or 20)
-
-    latest_snapshot_path = _resolve_policy_feed_csv_path()
-    if latest_snapshot_path is not None and latest_snapshot_path.name.endswith("_latest.csv"):
-        try:
-            logger.info("[PolicyFeed] using latest snapshot policy feed path: %s", latest_snapshot_path)
-            latest_df = pd.read_csv(latest_snapshot_path)
-            if not latest_df.empty:
-                df = latest_df
-                if category.lower() != "all" and "category" in df.columns:
-                    df = df[df["category"].astype(str).str.lower() == category.lower()]
-                if "date" not in df.columns:
-                    if "published_date" in df.columns:
-                        df["date"] = df["published_date"]
-                    elif "collected_at" in df.columns:
-                        df["date"] = df["collected_at"]
-                    else:
-                        df["date"] = ""
-                if "date" in df.columns and (date_from or date_to):
-                    date_series = pd.to_datetime(df["date"], errors="coerce")
-                    if date_from:
-                        df = df[date_series >= pd.to_datetime(date_from, errors="coerce")]
-                    if date_to:
-                        df = df[date_series <= pd.to_datetime(date_to, errors="coerce")]
-                return df.sort_values(by=["date", "title"], ascending=[False, True], na_position="last")
-        except Exception as error:
-            logger.warning("[PolicyFeed] latest snapshot feed lookup failed: %s", error)
 
     try:
         db_frame = fetch_policy_feed_frame(

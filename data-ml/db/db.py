@@ -349,36 +349,20 @@ def persist_policy_pipeline_outputs(
     processed_csv_path: str,
     run_type: str = "policy_monitor",
 ) -> dict[str, Any]:
-    """CSV와 DB에 동시에 저장한다."""
+    """CSV(최신 실행분)와 DB(누적)에 동시에 저장한다."""
     init_db()
 
     raw_path = Path(raw_csv_path)
     processed_path = Path(processed_csv_path)
-    latest_raw_path = raw_path.with_name(f"{raw_path.stem}_latest{raw_path.suffix}")
-    latest_processed_path = processed_path.with_name(f"{processed_path.stem}_latest{processed_path.suffix}")
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     processed_path.parent.mkdir(parents=True, exist_ok=True)
 
     if raw_df is not None:
-        raw_df.to_csv(latest_raw_path, index=False, encoding="utf-8-sig")
-        if raw_path.exists():
-            try:
-                existing_raw = pd.read_csv(raw_path, encoding="utf-8-sig")
-                raw_df = pd.concat([existing_raw, raw_df], ignore_index=True, sort=False)
-            except Exception:
-                pass
         if not raw_df.empty and "url" in raw_df.columns:
             raw_df = raw_df.drop_duplicates(subset=["url"], keep="last")
         raw_df.to_csv(raw_path, index=False, encoding="utf-8-sig")
 
     if processed_df is not None:
-        processed_df.to_csv(latest_processed_path, index=False, encoding="utf-8-sig")
-        if processed_path.exists():
-            try:
-                existing_processed = pd.read_csv(processed_path, encoding="utf-8-sig")
-                processed_df = pd.concat([existing_processed, processed_df], ignore_index=True, sort=False)
-            except Exception:
-                pass
         if not processed_df.empty and "url" in processed_df.columns:
             processed_df = processed_df.drop_duplicates(subset=["url"], keep="last")
         processed_df.to_csv(processed_path, index=False, encoding="utf-8-sig")
@@ -412,16 +396,12 @@ def persist_policy_pipeline_outputs(
         payload={
             "raw_csv_path": str(raw_path),
             "processed_csv_path": str(processed_path),
-            "latest_raw_csv_path": str(latest_raw_path),
-            "latest_processed_csv_path": str(latest_processed_path),
         },
     )
 
     return {
         "raw_csv_path": str(raw_path),
         "processed_csv_path": str(processed_path),
-        "latest_raw_csv_path": str(latest_raw_path),
-        "latest_processed_csv_path": str(latest_processed_path),
         "raw_count": raw_count,
         "processed_count": processed_count,
         "inserted_documents": inserted_documents,

@@ -31,7 +31,6 @@ from crawler.collectors.ucsb import (
 )
 from crawler.postprocessing.unified_pipeline import apply_unified_pipeline
 from crawler.support_legacy.data_paths import collected_csv_path, feature_csv_path
-from db.db import persist_policy_pipeline_outputs
 
 BASE_URL = "https://www.federalreserve.gov"
 FOMC_CALENDAR_URL = f"{BASE_URL}/monetarypolicy/fomccalendars.htm"
@@ -400,15 +399,6 @@ def run_monitor(
         if new_row_count > 0:
             print(f"[MONITOR] Applying unified pipeline to {new_row_count} new rows")
             processed_new = run_postprocessing_pipeline(df=new_df)
-
-            # CSV와 DB에 동시에 저장한다.
-            persist_policy_pipeline_outputs(
-                raw_df=new_df,
-                processed_df=processed_new,
-                raw_csv_path=collected_csv_path("policy_updates_monitor.csv"),
-                processed_csv_path=feature_csv_path("policy_updates_features.csv"),
-                run_type="policy_monitor",
-            )
 
             processed_path = Path(output_csv)
             if processed_path.exists():
