@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import hashlib
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -199,6 +201,131 @@ def _resolve_policy_feed_csv_path() -> Path | None:
     return None
 
 
+def _split_value_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        items = list(value)
+    else:
+        text = str(value).strip()
+        if not text:
+            return []
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    items = parsed
+                else:
+                    items = [text]
+            except Exception:
+                items = re.split(r"[;,|/]\s*|\n+", text)
+        else:
+            items = re.split(r"[;,|/]\s*|\n+", text)
+
+    normalized = []
+    seen = set()
+    for item in items:
+        text = _safe_str(item)
+        if not text:
+            continue
+        lower = text.lower()
+        if lower in seen:
+            continue
+        seen.add(lower)
+        normalized.append(text)
+    return normalized
+
+
+def _build_news_id(row: pd.Series) -> str:
+    seed = "|".join([
+        _safe_str(row.get("source"), _safe_str(row.get("category"))),
+        _safe_str(row.get("date")),
+        _safe_str(row.get("doc_type")),
+        _safe_str(row.get("title")),
+        _safe_str(row.get("link")),
+    ])
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
+    return f"policy-{digest}"
+
+
+def _build_asset_impact_score(impact: float) -> int:
+    if impact >= 0.75:
+        return 4
+    if impact >= 0.55:
+        return 3
+    if impact >= 0.35:
+        return 2
+    return 1
+
+
+def _build_model_asset_signal(horizon_days: int, predicted_log_return: float, confidence: float, cluster_label: str, global_signal: str) -> dict:
+    impact = round(min(1.0, max(0.25, abs(predicted_log_return) * 20.0 + confidence * 0.2)), 2)
+    model_payload = {
+        "confidence": round(max(0.0, min(0.99, confidence)), 2),
+        "horizonDays": int(horizon_days),
+        "predictedReturnPct": round(predicted_log_return * 100.0, 2),
+        "clusterLabel": cluster_label,
+    }
+    return {
+        "ticker": "QQQ",
+        "direction": global_signal,
+        "impact": impact,
+        "impactScore": _build_asset_impact_score(impact),
+        "provenance": "model",
+        "model": model_payload,
+    }
+
+
+def _build_keyword_asset_signals(keywords: list[str], source_text: str) -> list[dict]:
+    keyword_text = " ".join(keywords + [source_text]).lower()
+    rules = [
+        {
+            "match": ["rate", "rates", "inflation", "hawkish", "tightening", "yield"],
+            "signals": [
+                {"ticker": "SOXX", "direction": "negative", "impact": 0.65, "impactScore": 3},
+                {"ticker": "USD", "direction": "positive", "impact": 0.55, "impactScore": 3},
+            ],
+        },
+        {
+            "match": ["cut", "dovish", "easing", "liquidity", "stimulus", "accommodation"],
+            "signals": [
+                {"ticker": "SOXX", "direction": "positive", "impact": 0.65, "impactScore": 3},
+                {"ticker": "USD", "direction": "negative", "impact": 0.55, "impactScore": 3},
+            ],
+        },
+        {
+            "match": ["semiconductor", "chip", "semis", "ai", "technology"],
+            "signals": [
+                {"ticker": "SOXX", "direction": "positive", "impact": 0.7, "impactScore": 3},
+            ],
+        },
+    ]
+
+    asset_signals: list[dict] = []
+    seen_tickers = {"QQQ"}
+
+    for rule in rules:
+        if not any(term in keyword_text for term in rule["match"]):
+            continue
+        for signal in rule["signals"]:
+            ticker = signal["ticker"]
+            if ticker in seen_tickers:
+                continue
+            seen_tickers.add(ticker)
+            asset_signals.append(
+                {
+                    "ticker": ticker,
+                    "direction": signal["direction"],
+                    "impact": signal["impact"],
+                    "impactScore": signal["impactScore"],
+                    "provenance": "keyword_rule",
+                    "model": None,
+                }
+            )
+
+    return asset_signals
+
+
 def _read_policy_feed_frame(payload: dict, apply_limit: bool = True) -> pd.DataFrame:
     category = _safe_str(payload.get("category"), "all")
     date_from = _safe_str(payload.get("dateFrom"), "")
@@ -383,15 +510,40 @@ def _build_policy_feed(payload: dict) -> dict:
         global_signal = "hold"
 
     for idx, row in df.head(limit).iterrows():
+        row_source = _safe_str(row.get("source"), _safe_str(row.get("category")))
+        row_category = _safe_str(row.get("category"), row_source)
+        row_keywords = _split_value_list(row.get("matched_keyword_groups"))
+        row_keyword_terms = _split_value_list(row.get("matched_keywords"))
+        row_body = _safe_str(row.get("body"))
+        keyword_signals = _build_keyword_asset_signals(
+            keywords=row_keywords + row_keyword_terms,
+            source_text=" ".join([row_category, row_source, _safe_str(row.get("title")), row_body]),
+        )
+        asset_signals = [
+            _build_model_asset_signal(
+                horizon_days=best_horizon,
+                predicted_log_return=predicted_log_return,
+                confidence=confidence,
+                cluster_label=cluster_top_label,
+                global_signal=global_signal,
+            ),
+            *keyword_signals,
+        ]
+
         cards.append(
             {
                 "id": f"card-{idx}",
+                "newsId": _build_news_id(row),
                 "date": _safe_str(row.get("date")),
-                "category": _safe_str(row.get("category")),
+                "source": row_source,
+                "category": row_category,
                 "docType": _safe_str(row.get("doc_type")),
                 "title": _safe_str(row.get("title")),
                 "bodySummary": _safe_str(row.get("body_summary"), _safe_str(row.get("body"))),
                 "link": _safe_str(row.get("link")),
+                "matchedKeywordGroups": row_keywords,
+                "matchedKeywords": row_keyword_terms,
+                "assetSignals": asset_signals,
                 "sentiment": {
                     "titleSentimentScore": _safe_float(row.get("title_sentiment_score", 0.0)),
                     "bodySentimentScore": _safe_float(row.get("body_sentiment_score", 0.0)),

@@ -174,7 +174,9 @@ public class PolicyFeedDto {
     @AllArgsConstructor
     public static class Card {
         private String id;
+        private String newsId;
         private String date;
+        private String source;
         private String category;
         private String docType;
         private String title;
@@ -183,6 +185,9 @@ public class PolicyFeedDto {
         private String link;
         private Integer bodyOriginalLength;
         private Integer bodyNChunks;
+        private List<String> matchedKeywordGroups;
+        private List<String> matchedKeywords;
+        private List<AssetSignal> assetSignals;
         private List<String> tags;
         private Temporal temporal;
         private Sentiment sentiment;
@@ -249,5 +254,29 @@ public class PolicyFeedDto {
     public static class Features {
         private List<String> matchedFeatures;
         private List<String> featureDrivers;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AssetSignal {
+        private String ticker;
+        private String direction;
+        private Double impact;
+        private Integer impactScore;
+        private String provenance;
+        private AssetSignalModel model;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AssetSignalModel {
+        private Double confidence;
+        private Integer horizonDays;
+        private Double predictedReturnPct;
+        private String clusterLabel;
     }
 }

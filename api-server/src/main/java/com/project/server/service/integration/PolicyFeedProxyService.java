@@ -202,8 +202,12 @@ public class PolicyFeedProxyService {
 
         for (PolicyFeedDto.Card card : cards) {
             // Extract categories
-            if (card.getCategory() != null && !card.getCategory().isBlank()) {
-                categories.add(card.getCategory());
+            String category = card.getCategory();
+            if ((category == null || category.isBlank()) && card.getSource() != null && !card.getSource().isBlank()) {
+                category = card.getSource();
+            }
+            if (category != null && !category.isBlank()) {
+                categories.add(category);
             }
 
             // Extract docTypes
