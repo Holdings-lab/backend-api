@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import ast
 import hashlib
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -23,7 +24,7 @@ from crawler.support_legacy.data_paths import feature_csv_path
 from crawler.postprocessing import sentiment_score as sentiment_score_module
 from scheduler import build_scheduler
 from training.service import run_prediction_now
-from db.db import fetch_policy_feed_frame
+from db.db import fetch_policy_feed_frame, fetch_user_watch_asset_names
 
 
 load_dotenv(Path(__file__).resolve().with_name(".env"))
@@ -326,68 +327,183 @@ def _build_keyword_asset_signals(keywords: list[str], source_text: str) -> list[
     return asset_signals
 
 
+def _parse_json_like(value):
+    if value is None:
+        return None
+    if isinstance(value, (dict, list, tuple)):
+        return value
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    for parser in (json.loads, ast.literal_eval):
+        try:
+            parsed = parser(text)
+            if parsed is not None:
+                return parsed
+        except Exception:
+            continue
+    return None
+
+
+def _extract_asset_signal_tickers(row: pd.Series) -> set[str]:
+    tickers: set[str] = set()
+
+    def _collect_from_value(value):
+        parsed = _parse_json_like(value)
+        if parsed is None:
+            return
+        signals = parsed.get("assetSignals") if isinstance(parsed, dict) else parsed
+        if isinstance(signals, dict):
+            signals = [signals]
+        if not isinstance(signals, (list, tuple)):
+            return
+        for signal in signals:
+            if not isinstance(signal, dict):
+                continue
+            ticker = _safe_str(signal.get("ticker"), "").upper()
+            if ticker:
+                tickers.add(ticker)
+
+    if isinstance(row, pd.Series):
+        if "assetSignals" in row:
+            _collect_from_value(row.get("assetSignals"))
+        if "feature_payload" in row:
+            _collect_from_value(row.get("feature_payload"))
+    else:
+        _collect_from_value(row.get("assetSignals"))
+        _collect_from_value(row.get("feature_payload"))
+
+    return tickers
+
+
+def _resolve_user_asset_names(user_id: int | None) -> list[str]:
+    if user_id is None:
+        return []
+    try:
+        asset_names = fetch_user_watch_asset_names(int(user_id))
+    except Exception as error:
+        logger.warning("[PolicyFeed] failed to resolve watch assets for userId=%s: %s", user_id, error)
+        return []
+
+    normalized = []
+    seen = set()
+    for name in asset_names:
+        text = _safe_str(name, "").upper()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _filter_policy_feed_by_user_assets(df: pd.DataFrame, user_id: int | None) -> pd.DataFrame:
+    if df.empty or user_id is None:
+        return df
+
+    user_assets = _resolve_user_asset_names(user_id)
+    if not user_assets:
+        logger.warning("[PolicyFeed] userId=%s has no resolved watch assets; returning unfiltered feed", user_id)
+        return df
+
+    user_asset_set = {asset.upper() for asset in user_assets}
+
+    def _matches(row: pd.Series) -> bool:
+        tickers = _extract_asset_signal_tickers(row)
+        return bool(tickers.intersection(user_asset_set))
+
+    filtered = df[df.apply(_matches, axis=1)].copy()
+    logger.info(
+        "[PolicyFeed] filtered by userId=%s assets=%s => %s rows",
+        user_id,
+        user_assets,
+        len(filtered),
+    )
+    return filtered
+
+
 def _read_policy_feed_frame(payload: dict, apply_limit: bool = True) -> pd.DataFrame:
     category = _safe_str(payload.get("category"), "all")
     date_from = _safe_str(payload.get("dateFrom"), "")
     date_to = _safe_str(payload.get("dateTo"), "")
+    user_id = payload.get("userId")
     limit = int(payload.get("limit") or 20)
+    db_limit = None if user_id is not None else (limit if apply_limit else None)
 
     try:
         db_frame = fetch_policy_feed_frame(
             category=category,
             date_from=date_from,
             date_to=date_to,
-            limit=limit if apply_limit else None,
+            limit=db_limit,
         )
         if not db_frame.empty:
             logger.info("[PolicyFeed] using database-backed policy feed: %s rows", len(db_frame))
-            return db_frame
+            frame = db_frame
+        else:
+            frame = pd.DataFrame()
     except Exception as error:
         logger.warning("[PolicyFeed] database feed lookup failed: %s", error)
 
-    csv_path = _resolve_policy_feed_csv_path()
-    if csv_path is None:
-        logger.warning("[PolicyFeed] policy feed csv not found. candidates=%s", [str(path) for path in POLICY_FEED_CANDIDATES])
-        return pd.DataFrame()
+        frame = pd.DataFrame()
 
-    logger.info("[PolicyFeed] using policy feed csv path: %s", csv_path)
-    df = pd.read_csv(csv_path)
-    if df.empty:
-        return df
+    if frame.empty:
+        csv_path = _resolve_policy_feed_csv_path()
+        if csv_path is None:
+            logger.warning("[PolicyFeed] policy feed csv not found. candidates=%s", [str(path) for path in POLICY_FEED_CANDIDATES])
+            return pd.DataFrame()
 
-    logger.info(f"[PolicyFeed] Initial rows: {len(df)}, category: {category}, dateFrom: {date_from}, dateTo: {date_to}")
+        logger.info("[PolicyFeed] using policy feed csv path: %s", csv_path)
+        frame = pd.read_csv(csv_path)
+        if frame.empty:
+            return frame
+
+    logger.info(f"[PolicyFeed] Initial rows: {len(frame)}, category: {category}, dateFrom: {date_from}, dateTo: {date_to}")
     
-    if category.lower() != "all" and "category" in df.columns:
-        df = df[df["category"].astype(str).str.lower() == category.lower()]
-        logger.info(f"[PolicyFeed] After category filter: {len(df)} rows")
+    if category.lower() != "all" and "category" in frame.columns:
+        frame = frame[frame["category"].astype(str).str.lower() == category.lower()]
+        logger.info(f"[PolicyFeed] After category filter: {len(frame)} rows")
 
-    if "date" not in df.columns:
-        if "published_date" in df.columns:
-            df["date"] = df["published_date"]
-        elif "collected_at" in df.columns:
-            df["date"] = df["collected_at"]
+    if "date" not in frame.columns:
+        if "published_date" in frame.columns:
+            frame["date"] = frame["published_date"]
+        elif "collected_at" in frame.columns:
+            frame["date"] = frame["collected_at"]
         else:
-            df["date"] = ""
+            frame["date"] = ""
 
-    if "date" in df.columns and (date_from or date_to):
-        date_series = pd.to_datetime(df["date"], errors="coerce")
+    if "date" in frame.columns and (date_from or date_to):
+        date_series = pd.to_datetime(frame["date"], errors="coerce")
         if date_from:
-            df = df[date_series >= pd.to_datetime(date_from, errors="coerce")]
-            logger.info(f"[PolicyFeed] After dateFrom filter: {len(df)} rows")
+            frame = frame[date_series >= pd.to_datetime(date_from, errors="coerce")]
+            logger.info(f"[PolicyFeed] After dateFrom filter: {len(frame)} rows")
         if date_to:
-            df = df[date_series <= pd.to_datetime(date_to, errors="coerce")]
-            logger.info(f"[PolicyFeed] After dateTo filter: {len(df)} rows")
+            frame = frame[date_series <= pd.to_datetime(date_to, errors="coerce")]
+            logger.info(f"[PolicyFeed] After dateTo filter: {len(frame)} rows")
+
+    if user_id is not None and not frame.empty:
+        frame = _filter_policy_feed_by_user_assets(frame, user_id)
+        if frame.empty:
+            logger.info("[PolicyFeed] userId=%s produced no matching policy rows", user_id)
 
     sort_columns = ["date"]
     sort_orders = [False]
-    if "title" in df.columns:
+    if "title" in frame.columns:
         sort_columns.append("title")
         sort_orders.append(True)
-    elif "body_summary" in df.columns:
+    elif "body_summary" in frame.columns:
         sort_columns.append("body_summary")
         sort_orders.append(True)
 
-    sorted_df = df.sort_values(by=sort_columns, ascending=sort_orders, na_position="last")
+    sorted_df = frame.sort_values(by=sort_columns, ascending=sort_orders, na_position="last")
+    if apply_limit and limit > 0:
+        sorted_df = sorted_df.head(limit)
     logger.info(f"[PolicyFeed] Final rows: {len(sorted_df)}")
     return sorted_df
 
@@ -839,12 +955,14 @@ def policy_feed_get_endpoint(
 
 @app.get(f"{ML_PREFIX}/feeds/policy/stats")
 def policy_feed_stats_get_endpoint(
+    userId: int | None = None,
     limit: int = 20,
     category: str = "all",
     dateFrom: str = "",
     dateTo: str = "",
 ):
     payload = {
+        "userId": userId,
         "limit": limit,
         "category": category,
         "dateFrom": dateFrom,

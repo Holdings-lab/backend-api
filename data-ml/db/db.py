@@ -170,6 +170,42 @@ def _safe_date(value: Any) -> date | None:
     return parsed.date()
 
 
+def fetch_user_watch_asset_names(user_id: int) -> list[str]:
+    if psycopg2 is None:
+        return []
+
+    try:
+        with _connect(real_dict_cursor=True) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT asset_name
+                    FROM user_watch_assets
+                    WHERE user_id = %s
+                    ORDER BY display_order ASC, id ASC
+                    """,
+                    (int(user_id),),
+                )
+                rows = cursor.fetchall()
+                names = [str(row["asset_name"]).strip() for row in rows if row.get("asset_name")]
+                if names:
+                    return names
+
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT asset_name
+                    FROM watch_asset_catalog
+                    ORDER BY display_order ASC, id ASC
+                    LIMIT 3
+                    """
+                )
+                rows = cursor.fetchall()
+                return [str(row["asset_name"]).strip() for row in rows if row.get("asset_name")]
+    except Exception:
+        return []
+
+
 def upsert_policy_document(record: dict[str, Any]) -> int:
     if psycopg2 is None:
         raise RuntimeError("psycopg2 is not installed")
@@ -484,7 +520,8 @@ def fetch_policy_feed_frame(
             COALESCE(f.body_neutral_prob, 1.0) AS body_neutral_prob,
             COALESCE(f.body_sentiment_score, 0.0) AS body_sentiment_score,
             COALESCE(f.body_n_chunks, 1) AS body_n_chunks,
-            f.body_summary_embedding
+            f.body_summary_embedding,
+            f.feature_payload
         FROM policy_documents d
         LEFT JOIN policy_document_features f ON f.document_id = d.id
         WHERE (%(category)s = 'all' OR LOWER(d.category) = LOWER(%(category)s))
@@ -527,7 +564,8 @@ def fetch_policy_feed_frame(
                 1.0 AS body_neutral_prob,
                 0.0 AS body_sentiment_score,
                 1 AS body_n_chunks,
-                NULL AS body_summary_embedding
+                NULL AS body_summary_embedding,
+                NULL AS feature_payload
             FROM policy_documents d
             WHERE (%(category)s = 'all' OR LOWER(d.category) = LOWER(%(category)s))
             ORDER BY d.published_date DESC NULLS LAST, d.id DESC

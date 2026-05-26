@@ -14,6 +14,7 @@ public class PolicyFeedDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class PolicyFeedRequest {
+        private Long userId;
         private Integer limit;
         private String category;
         private String dateFrom;

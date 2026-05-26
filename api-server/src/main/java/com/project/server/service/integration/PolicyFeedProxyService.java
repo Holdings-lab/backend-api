@@ -44,7 +44,13 @@ public class PolicyFeedProxyService {
 
     public PolicyFeedDto.PolicyFeedResponse getPolicyFeed(Integer limit, String category,
             String dateFrom, String dateTo) {
+        return getPolicyFeed(null, limit, category, dateFrom, dateTo);
+    }
+
+    public PolicyFeedDto.PolicyFeedResponse getPolicyFeed(Long userId, Integer limit, String category,
+            String dateFrom, String dateTo) {
         PolicyFeedDto.PolicyFeedRequest request = PolicyFeedDto.PolicyFeedRequest.builder()
+                .userId(userId)
                 .limit(limit)
                 .category(category)
                 .dateFrom(dateFrom)
@@ -55,7 +61,13 @@ public class PolicyFeedProxyService {
 
     public PolicyFeedDto.PolicyFeedStatsResponse getPolicyFeedStats(Integer limit, String category,
             String dateFrom, String dateTo) {
+        return getPolicyFeedStats(null, limit, category, dateFrom, dateTo);
+    }
+
+    public PolicyFeedDto.PolicyFeedStatsResponse getPolicyFeedStats(Long userId, Integer limit, String category,
+            String dateFrom, String dateTo) {
         PolicyFeedDto.PolicyFeedRequest request = PolicyFeedDto.PolicyFeedRequest.builder()
+                .userId(userId)
                 .limit(limit)
                 .category(category)
                 .dateFrom(dateFrom)
@@ -64,58 +76,56 @@ public class PolicyFeedProxyService {
         return fetchPolicyFeedStatsWithValidation(request);
     }
 
-    public java.util.Map<String, String> getMeta() {
-        PolicyFeedDto.PolicyFeedResponse response = fetchPolicyFeedWithValidation(PolicyFeedDto.PolicyFeedRequest.builder().build());
+    public java.util.Map<String, String> getMeta(Long userId) {
+        PolicyFeedDto.PolicyFeedResponse response = fetchPolicyFeedWithValidation(PolicyFeedDto.PolicyFeedRequest.builder().userId(userId).build());
         return java.util.Map.of(
                 "feedType", response.getFeedType() == null ? "" : response.getFeedType(),
                 "generatedAt", response.getGeneratedAt() == null ? "" : response.getGeneratedAt());
     }
 
-    public PolicyFeedDto.Source getSource() {
-        PolicyFeedDto.PolicyFeedResponse resp = fetchPolicyFeedWithValidation(PolicyFeedDto.PolicyFeedRequest.builder().build());
+    public PolicyFeedDto.Source getSource(Long userId) {
+        PolicyFeedDto.PolicyFeedResponse resp = fetchPolicyFeedWithValidation(PolicyFeedDto.PolicyFeedRequest.builder().userId(userId).build());
         if (resp.getSource() == null) {
             throw ApiException.notFound("피드 소스 정보 없음", "POLICY_FEED_SOURCE_NOT_FOUND");
         }
         return resp.getSource();
     }
 
-    public PolicyFeedDto.Summary getSummary() {
-        PolicyFeedDto.PolicyFeedResponse resp = fetchPolicyFeedWithValidation(PolicyFeedDto.PolicyFeedRequest.builder().build());
+    public PolicyFeedDto.Summary getSummary(Long userId) {
+        PolicyFeedDto.PolicyFeedResponse resp = fetchPolicyFeedWithValidation(PolicyFeedDto.PolicyFeedRequest.builder().userId(userId).build());
         if (resp.getSummary() == null) {
             throw ApiException.notFound("피드 요약 정보 없음", "POLICY_FEED_SUMMARY_NOT_FOUND");
         }
         return resp.getSummary();
     }
 
-    public PolicyFeedDto.Model getModel() {
-        PolicyFeedDto.PolicyFeedResponse resp = fetchPolicyFeedWithValidation(PolicyFeedDto.PolicyFeedRequest.builder().build());
+    public PolicyFeedDto.Model getModel(Long userId) {
+        PolicyFeedDto.PolicyFeedResponse resp = fetchPolicyFeedWithValidation(PolicyFeedDto.PolicyFeedRequest.builder().userId(userId).build());
         if (resp.getModel() == null) {
             throw ApiException.notFound("모델 정보 없음", "POLICY_FEED_MODEL_NOT_FOUND");
         }
         return resp.getModel();
     }
 
-    public PolicyFeedDto.Filters getFilters() {
-        PolicyFeedDto.PolicyFeedResponse resp = fetchPolicyFeedWithValidation(PolicyFeedDto.PolicyFeedRequest.builder().build());
+    public PolicyFeedDto.Filters getFilters(Long userId) {
+        PolicyFeedDto.PolicyFeedResponse resp = fetchPolicyFeedWithValidation(PolicyFeedDto.PolicyFeedRequest.builder().userId(userId).build());
         if (resp.getFilters() == null) {
             throw ApiException.notFound("필터 정보 없음", "POLICY_FEED_FILTERS_NOT_FOUND");
         }
         return resp.getFilters();
     }
 
-    public java.util.List<PolicyFeedDto.Card> getCards(Integer limit, String category,
+    public java.util.List<PolicyFeedDto.Card> getCards(Long userId, Integer limit, String category,
             String dateFrom, String dateTo) {
         PolicyFeedDto.PolicyFeedRequest request = PolicyFeedDto.PolicyFeedRequest.builder()
+                .userId(userId)
                 .limit(limit)
                 .category(category)
                 .dateFrom(dateFrom)
                 .dateTo(dateTo)
                 .build();
         PolicyFeedDto.PolicyFeedResponse resp = fetchPolicyFeedWithValidation(request);
-        if (resp.getCards() == null || resp.getCards().isEmpty()) {
-            throw ApiException.notFound("카드 목록 없음", "POLICY_FEED_CARDS_NOT_FOUND");
-        }
-        return resp.getCards();
+        return resp.getCards() == null ? new java.util.ArrayList<>() : resp.getCards();
     }
 
     private PolicyFeedDto.PolicyFeedStatsResponse fetchPolicyFeedStatsWithValidation(
@@ -256,9 +266,10 @@ public class PolicyFeedProxyService {
             String reason) {
         try {
             String targetUrl = buildPolicyFeedUrl(request);
-            logger.info("Policy feed ML request started. reason={}, targetUrl={}, userId={}, limit={}, category={}, dateFrom={}, dateTo={}",
+                logger.info("Policy feed ML request started. reason={}, targetUrl={}, userId={}, limit={}, category={}, dateFrom={}, dateTo={}",
                     reason,
                     targetUrl,
+                    request == null ? null : request.getUserId(),
                     request == null ? null : request.getLimit(),
                     request == null ? null : request.getCategory(),
                     request == null ? null : request.getDateFrom(),
@@ -319,6 +330,7 @@ public class PolicyFeedProxyService {
                 logger.info("Policy feed stats ML request started. reason={}, targetUrl={}, userId={}, limit={}, category={}, dateFrom={}, dateTo={}",
                     reason,
                     targetUrl,
+                    request == null ? null : request.getUserId(),
                     request == null ? null : request.getLimit(),
                     request == null ? null : request.getCategory(),
                     request == null ? null : request.getDateFrom(),
@@ -377,6 +389,7 @@ public class PolicyFeedProxyService {
             .append("/ml/feeds/policy");
         StringBuilder queryBuilder = new StringBuilder();
 
+        appendQueryParam(queryBuilder, "userId", request.getUserId());
         appendQueryParam(queryBuilder, "limit", request.getLimit());
         appendQueryParam(queryBuilder, "category", request.getCategory());
         appendQueryParam(queryBuilder, "dateFrom", request.getDateFrom());
@@ -393,6 +406,7 @@ public class PolicyFeedProxyService {
                 .append("/ml/feeds/policy/stats");
         StringBuilder queryBuilder = new StringBuilder();
 
+        appendQueryParam(queryBuilder, "userId", request.getUserId());
         appendQueryParam(queryBuilder, "limit", request.getLimit());
         appendQueryParam(queryBuilder, "category", request.getCategory());
         appendQueryParam(queryBuilder, "dateFrom", request.getDateFrom());
