@@ -79,14 +79,19 @@ jobs:
             git fetch origin main
             git checkout main
             git reset --hard origin/main
+
+            if [ ! -f .env.docker ]; then
+              echo "[ERROR] .env.docker not found on server. Create it before deploy."
+              exit 1
+            fi
             
             echo "=== Pulling Docker images sequentially ==="
-            docker compose -f docker-compose.prod.yml pull postgres
-            docker compose -f docker-compose.prod.yml pull api-server
-            docker compose -f docker-compose.prod.yml pull data-ml
+            docker compose -f docker-compose.prod.yml --env-file .env.docker pull postgres
+            docker compose -f docker-compose.prod.yml --env-file .env.docker pull api-server
+            docker compose -f docker-compose.prod.yml --env-file .env.docker pull data-ml
             
             echo "=== Starting Docker containers ==="
-            docker compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.prod.yml --env-file .env.docker up -d
             
             echo "=== Cleaning up unused images ==="
             docker image prune -af || true
