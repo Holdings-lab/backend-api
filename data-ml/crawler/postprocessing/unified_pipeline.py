@@ -18,7 +18,7 @@ if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
 from crawler.support_legacy.data_paths import collected_csv_path, feature_csv_path
-from crawler.postprocessing.text_summarizer import llm_summarize
+from crawler.postprocessing.text_summarizer import llm_summarize_with_meta, llm_summarize
 from crawler.postprocessing.sentiment_score import analyze_titles, analyze_bodies
 from crawler.postprocessing.sentence_transformer import encode_summaries
 from crawler.postprocessing.preprocessing import one_hot_encode_category
@@ -85,19 +85,30 @@ def apply_text_summarization(df: pd.DataFrame, body_col: str = BODY_COL, max_cha
     
     if indices:
         print(f"[UNIFIED] Text Summarization: {len(indices)} rows need summarization (>= {max_chars} chars)")
-        
+
+        meta_list = [None] * len(df)
         for i, idx in enumerate(indices, start=1):
             text = df.at[idx, body_col]
             try:
-                summary = llm_summarize(text, limit_chars=max_chars)
+                summary, meta = llm_summarize_with_meta(text, limit_chars=max_chars)
                 df.at[idx, BODY_SUMMARY_COL] = summary
+                meta_list[idx] = meta
+                df.at[idx, "body_summary_source"] = meta.get("status") if isinstance(meta, dict) else None
+                if isinstance(meta, dict) and meta.get("error"):
+                    df.at[idx, "llm_error"] = meta.get("error")
             except Exception as e:
                 print(f"[UNIFIED] WARN: summarize failed row={idx}: {e} -> truncating")
                 df.at[idx, BODY_SUMMARY_COL] = text[:max_chars].rstrip()
-            
+                meta_list[idx] = {"status": "fallback", "error": str(e)}
+                df.at[idx, "body_summary_source"] = "fallback"
+                df.at[idx, "llm_error"] = str(e)
+
             if i < len(indices):
                 time.sleep(sleep_sec)
-        
+
+        # attach meta as a column for downstream persistence
+        df["llm_summary_meta"] = meta_list
+
         print(f"[UNIFIED] Summarization complete: {len(indices)} rows summarized")
     else:
         print(f"[UNIFIED] Text Summarization: no rows need summarization")

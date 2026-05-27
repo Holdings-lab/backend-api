@@ -33,7 +33,7 @@ def run_prediction_now() -> dict:
         errors="replace",
     )
 
-    message = "prediction completed" if completed.returncode == 0 else "prediction failed"
+    message = "예측이 완료되었습니다" if completed.returncode == 0 else "예측이 실패했습니다"
     return {
         "status": "success" if completed.returncode == 0 else "failed",
         "return_code": completed.returncode,

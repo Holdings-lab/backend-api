@@ -13,6 +13,11 @@ class LlmMessage:
 class LlmApiService(Protocol):
     provider_name: str
     model_name: str
-
     def generate_json(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.2) -> dict[str, Any]:
+        ...
+
+    def health_check(self) -> dict[str, Any]:
+        """Perform a lightweight health check of the LLM provider.
+        Returns a dict containing at least {'ok': bool, 'provider': str, 'model': str}.
+        """
         ...

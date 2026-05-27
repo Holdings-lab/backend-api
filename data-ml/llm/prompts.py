@@ -9,6 +9,7 @@ Do not wrap the answer in markdown fences.
 Do not include markdown bullets, code fences, commentary, or trailing text.
 Avoid certainty, guarantees, fear language, and investment advice.
 Use an analytical tone such as '분석됩니다', '주목됩니다', '해석됩니다'.
+Write every natural-language field in Korean unless the schema explicitly requires another language.
 Never use phrases like '오를 것입니다', '락셀', '무조건', '확실히', or fear-inducing wording.
 """.strip()
 
@@ -27,6 +28,8 @@ Return the following JSON schema exactly:
   ],
   "tone": "string"
 }
+All natural-language values in the JSON must be written in Korean.
+If the provided `title` or `body`/`bodySummary` are not in Korean, first translate them into Korean before generating the JSON. Ensure the translated text is used when forming `summary`, `keywords`, and `assetImpacts`.
 """
     ).strip()
 
@@ -44,6 +47,8 @@ Return the following JSON schema exactly:
   "pushBody": "string",
   "briefingTone": "string"
 }
+All natural-language values in the JSON must be written in Korean.
+If any article `title` or `body`/`bodySummary` in the snapshot are not in Korean, translate them into Korean first and then write the briefing text in Korean.
 """
     ).strip()
 

@@ -26,6 +26,7 @@ from scheduler import build_scheduler
 from training.service import run_prediction_now
 from db.db import fetch_policy_feed_frame, fetch_user_watch_asset_names
 from llm.service import ArticleInsightGenerationService, HomeBriefingGenerationService
+from llm.providers import build_llm_client
 
 
 load_dotenv(Path(__file__).resolve().with_name(".env"))
@@ -154,9 +155,10 @@ def _success_response(result=None, message="요청에 성공했습니다.", code
         "isSuccess": True,
         "code": code,
         "message": message,
-        "result": {} if result is None else result,
+        "result": result,
     }
     return Response(
+        status_code=200,
         content=json.dumps(data, ensure_ascii=False, indent=2),
         media_type="application/json",
     )
@@ -676,6 +678,23 @@ def _build_policy_feed(payload: dict) -> dict:
                     "confidence": round(max(0.5, min(0.99, confidence)), 2),
                     "clusterLabel": cluster_top_label,
                 },
+                # LLM metadata
+                "bodySummarySource": (
+                    row.get("body_summary_source")
+                    or (row.get("feature_payload") or {}).get("llm_summary_meta", {}).get("status")
+                    or "unknown"
+                ),
+                "llmError": (
+                    row.get("llm_error") or (row.get("feature_payload") or {}).get("llm_summary_meta", {}).get("error")
+                ),
+                "llmSuccess": (
+                    True if (
+                        (row.get("body_summary_source") or (row.get("feature_payload") or {}).get("llm_summary_meta", {}).get("status") or "").lower() == "ok"
+                    ) else False
+                ),
+                "llmFailureReason": (
+                    (row.get("llm_error") or (row.get("feature_payload") or {}).get("llm_summary_meta", {}).get("error"))
+                ),
             }
         )
 
@@ -884,6 +903,18 @@ def health():
         },
         message="ML 헬스 체크에 성공했습니다.",
     )
+
+
+@app.get(f"{ML_PREFIX}/llm/health")
+def llm_health():
+    try:
+        client = build_llm_client()
+        result = client.health_check()
+        if result.get("ok"):
+            return _success_response(result, message="LLM 헬스체크에 성공했습니다.")
+        return _error_response(message=f"LLM 헬스체크 실패: {result.get('error')}", code="LLM_HEALTH_FAILED", status_code=503)
+    except Exception as e:
+        return _error_response(message=f"LLM 헬스체크 실패: {e}", code="LLM_HEALTH_FAILED", status_code=503)
 
 
 @app.post(f"{ML_PREFIX}/crawlers/run")

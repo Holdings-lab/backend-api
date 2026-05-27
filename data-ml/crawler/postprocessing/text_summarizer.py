@@ -9,6 +9,7 @@ from urllib import request as urllib_request
 
 
 DEFAULT_SUMMARY_CHAR_LIMIT = 10_000
+DEFAULT_SUMMARY_OUTPUT_CHAR_LIMIT = int(os.getenv("LLM_SUMMARY_OUTPUT_CHAR_LIMIT", "1200"))
 DEFAULT_TIMEOUT_SEC = float(os.getenv("LLM_TIMEOUT_SEC", "25"))
 DEFAULT_RETRY_COUNT = int(os.getenv("LLM_RETRY_COUNT", "2"))
 
@@ -25,10 +26,38 @@ def llm_summarize(text: str, limit_chars: int = DEFAULT_SUMMARY_CHAR_LIMIT) -> s
     if len(source_text) <= limit_chars:
         return source_text
 
+    output_limit = max(200, min(int(limit_chars), int(DEFAULT_SUMMARY_OUTPUT_CHAR_LIMIT)))
+
     payload = {
         "instruction": (
             "You are a careful summarization assistant.\n"
-            "Summarize the document in English using only explicitly stated facts.\n"
+            "Summarize the document in Korean using only explicitly stated facts.\n"
+            "Write the final summary in Korean, even if the source text is in another language.\n"
+            "Avoid certainty, fear language, and investment advice.\n"
+            "Output only summary text."
+        ),
+        "input": source_text,
+        "maxChars": int(limit_chars),
+    }
+    # Deprecated for callers that only want summary string: delegate to new helper
+    summary, meta = llm_summarize_with_meta(text, limit_chars=limit_chars)
+    return summary
+
+
+def llm_summarize_with_meta(text: str, limit_chars: int = DEFAULT_SUMMARY_CHAR_LIMIT) -> tuple[str, dict]:
+    """Return (summary, meta) where meta contains status ('ok'|'fallback') and optional 'error'."""
+    source_text = (text or "").strip()
+    if not source_text:
+        return "", {"status": "empty"}
+
+    if len(source_text) <= limit_chars:
+        return source_text, {"status": "short"}
+
+    payload = {
+        "instruction": (
+            "You are a careful summarization assistant.\n"
+            "Summarize the document in Korean using only explicitly stated facts.\n"
+            "Write the final summary in Korean, even if the source text is in another language.\n"
             "Avoid certainty, fear language, and investment advice.\n"
             "Output only summary text."
         ),
@@ -36,11 +65,23 @@ def llm_summarize(text: str, limit_chars: int = DEFAULT_SUMMARY_CHAR_LIMIT) -> s
         "maxChars": int(limit_chars),
     }
 
-    result = _call_selected_llm(payload)
-    summary = _extract_summary_text(result)
-    if not summary:
-        return source_text[:limit_chars].rstrip()
-    return summary[:limit_chars].rstrip()
+    output_limit = max(200, min(int(limit_chars), int(DEFAULT_SUMMARY_OUTPUT_CHAR_LIMIT)))
+
+    try:
+        result = _call_selected_llm(payload)
+        summary = _extract_summary_text(result)
+        if summary:
+            return summary[:output_limit].rstrip(), {"status": "ok"}
+        # fall through to fallback
+    except Exception as e:
+        err = str(e)
+        # continue to fallback but include error in meta
+        fallback = _fallback_summary_text(source_text, output_limit=output_limit)
+        return fallback, {"status": "fallback", "error": err}
+
+    # No exception but empty result
+    fallback = _fallback_summary_text(source_text, output_limit=output_limit)
+    return fallback, {"status": "fallback", "error": "empty_response"}
 
 
 def generate_article_insight(article: dict[str, Any]) -> dict[str, Any]:
@@ -62,6 +103,7 @@ def generate_article_insight(article: dict[str, Any]) -> dict[str, Any]:
         "instruction": (
             "Return a single valid JSON object only.\n"
             "No markdown code fence.\n"
+            "Write summary, reason, and tone fields in Korean.\n"
             "Avoid certainty, fear language, and investment advice.\n"
             "Use analytical tone such as '분석됩니다', '주목됩니다'.\n"
             "Schema: {summary:string, keywords:string[], assetImpacts:[{asset:string,direction:string,confidence:number,reason:string}], tone:string}"
@@ -200,3 +242,32 @@ def _extract_summary_text(result: dict[str, Any] | str) -> str:
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return ""
+
+
+def _fallback_summary_text(source_text: str, output_limit: int) -> str:
+    """LLM 실패 시 원문 전체 대신 짧은 추출 요약을 반환한다."""
+    compact = " ".join((source_text or "").split())
+    if not compact:
+        return ""
+
+    sentences = compact.replace("\n", " ").split(". ")
+    picked: list[str] = []
+    current_len = 0
+    for sentence in sentences:
+        candidate = sentence.strip()
+        if not candidate:
+            continue
+        if not candidate.endswith("."):
+            candidate += "."
+        next_len = current_len + len(candidate) + (1 if picked else 0)
+        if next_len > output_limit:
+            break
+        picked.append(candidate)
+        current_len = next_len
+        if len(picked) >= 4:
+            break
+
+    if picked:
+        return " ".join(picked).strip()
+
+    return compact[:output_limit].rstrip()

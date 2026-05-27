@@ -10,6 +10,7 @@ public final class LlmPromptFactory {
             Do not include markdown bullets, code fences, commentary, or trailing text.
             Avoid certainty, guarantees, fear language, and investment advice.
             Use an analytical tone such as '분석됩니다', '주목됩니다', '해석됩니다'.
+          Write every natural-language field in Korean unless the schema explicitly requires another language.
             Never use phrases like '오를 것입니다', '락셀', '무조건', '확실히', or fear-inducing wording.
             """.trim();
 
@@ -27,6 +28,7 @@ public final class LlmPromptFactory {
                   "pushBody": "string",
                   "briefingTone": "string"
                 }
+                All natural-language values in the JSON must be written in Korean.
                 """;
     }
 

@@ -108,6 +108,20 @@ class RoutedLlmClient(BaseHttpLlmClient):
         if not text:
             raise RuntimeError("anthropic API returned empty content")
         return _extract_json_text(text)
+    
+    def health_check(self) -> dict[str, Any]:
+        """Lightweight health check that attempts a minimal JSON generation.
+        Returns {'ok': True, 'provider': ..., 'model': ...} on success or {'ok': False, 'error': ...}.
+        """
+        try:
+            # Use very small temperature and a short user prompt
+            system = "Health check: respond with a JSON object {'ok': true}."
+            user = '{"ping": "ping"}'
+            # Use underlying generator which will raise on failures
+            _ = self.generate_json(system, user, temperature=0.0)
+            return {"ok": True, "provider": self.provider_name, "model": self.model_name}
+        except Exception as e:
+            return {"ok": False, "provider": self.provider_name, "model": self.model_name, "error": str(e)}
 
 
 def build_llm_client() -> BaseHttpLlmClient:
