@@ -80,23 +80,6 @@ services:
     networks:
       - app-network
 
-  ollama-server:
-    image: ollama/ollama:latest
-    container_name: pwa-ollama
-    restart: always
-    environment:
-      - OLLAMA_KEEP_ALIVE=0       # [치트키] 요약 연산이 끝나면 램에서 모델을 즉시 방출
-      - OLLAMA_NUM_PARALLEL=1     # 한 번에 한 건씩만 처리하여 메모리 폭발 방지
-    volumes:
-      - ollama-models:/root/.ollama
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'     # CPU 코어 2개 중 최대 1개만 사용 (나머지 1개는 웹서버용)
-          memory: 1G      # 요약 순간에 최대 1GB까지 메모리 사용 허용
-    networks:
-      - app-network
-
   data-ml:
     image: ghcr.io/holdings-lab/data-ml:latest
     container_name: pwa-data-ml
@@ -105,8 +88,6 @@ services:
       postgres:
         condition: service_healthy
       api-server:
-        condition: service_started
-      ollama-server:
         condition: service_started
     environment:
       ML_API_PORT: 9000
@@ -132,7 +113,6 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3.5-haiku-20241022}
       PYTHON_DOTENV_DISABLED: "1"
-      OLLAMA_BASE_URL: http://ollama-server:11434 # 로컬 내부망의 올라마 서버 지정
     ports:
       - ${ML_API_PORT:-9000}:9000
     volumes:
@@ -162,6 +142,4 @@ networks:
 
 volumes:
   postgres-data:
-    driver: local
-  ollama-models:          # 다운로드받은 LLM 모델 파일이 영구 보관되는 볼륨
     driver: local
