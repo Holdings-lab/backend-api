@@ -25,6 +25,7 @@ from crawler.postprocessing import sentiment_score as sentiment_score_module
 from scheduler import build_scheduler
 from training.service import run_prediction_now
 from db.db import fetch_policy_feed_frame, fetch_user_watch_asset_names
+from llm.service import ArticleInsightGenerationService, HomeBriefingGenerationService
 
 
 load_dotenv(Path(__file__).resolve().with_name(".env"))
@@ -67,6 +68,8 @@ PIPELINE_SLEEP_SEC = float(os.getenv("CRAWL_SLEEP_SEC", "1"))
 
 run_lock = Lock()
 scheduler_instance = None
+article_insight_service = ArticleInsightGenerationService()
+home_briefing_service = HomeBriefingGenerationService()
 
 
 def _safe_extract_probs_from_output(output_one_text) -> dict:
@@ -915,6 +918,40 @@ def get_predict_result_endpoint():
     if not summary:
         return _error_response("예측 결과가 존재하지 않습니다.", code="ML_PREDICT_RESULT_NOT_FOUND", status_code=404)
     return _success_response(summary, message="예측 연산 결과를 성공적으로 불러왔습니다.")
+
+
+@app.get(f"{ML_PREFIX}/llm/article-insights")
+def get_article_insights_endpoint(
+    insightDate: str | None = None,
+):
+    result = article_insight_service.generate_for_date(insightDate)
+    if result.get("status") == "empty":
+        return _success_response(_remove_message_fields(result), message="기사 데이터가 없어 LLM 생성을 건너뜁니다.")
+    return _success_response(_remove_message_fields(result), message="기사 인사이트 조회에 성공했습니다.")
+
+
+@app.post(f"{ML_PREFIX}/llm/article-insights/rebuild")
+async def rebuild_article_insights_endpoint(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    insight_date = payload.get("insightDate") or payload.get("date")
+    result = article_insight_service.generate_for_date(insight_date)
+    if result.get("status") == "empty":
+        return _success_response(_remove_message_fields(result), message="기사 데이터가 없어 재생성을 건너뜁니다.")
+    return _success_response(_remove_message_fields(result), message="기사 인사이트 재생성에 성공했습니다.")
+
+
+@app.get(f"{ML_PREFIX}/llm/home-briefings")
+def get_home_briefings_endpoint(
+    userId: int,
+    briefingDate: str | None = None,
+):
+    result = home_briefing_service.generate_for_user(userId, briefingDate)
+    if result.get("status") == "empty":
+        return _success_response(_remove_message_fields(result), message="브리핑 데이터가 없어 LLM 생성을 건너뜁니다.")
+    return _success_response(_remove_message_fields(result), message="홈 브리핑 조회에 성공했습니다.")
 
 
 def _policy_feed_response(payload: dict):

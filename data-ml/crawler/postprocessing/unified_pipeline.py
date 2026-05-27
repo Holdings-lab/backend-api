@@ -18,7 +18,7 @@ if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
 from crawler.support_legacy.data_paths import collected_csv_path, feature_csv_path
-from crawler.postprocessing.text_summarizer import summarize_to_under_limit as ollama_summarize
+from crawler.postprocessing.text_summarizer import llm_summarize
 from crawler.postprocessing.sentiment_score import analyze_titles, analyze_bodies
 from crawler.postprocessing.sentence_transformer import encode_summaries
 from crawler.postprocessing.preprocessing import one_hot_encode_category
@@ -89,7 +89,7 @@ def apply_text_summarization(df: pd.DataFrame, body_col: str = BODY_COL, max_cha
         for i, idx in enumerate(indices, start=1):
             text = df.at[idx, body_col]
             try:
-                summary = ollama_summarize(text, limit_chars=max_chars)
+                summary = llm_summarize(text, limit_chars=max_chars)
                 df.at[idx, BODY_SUMMARY_COL] = summary
             except Exception as e:
                 print(f"[UNIFIED] WARN: summarize failed row={idx}: {e} -> truncating")

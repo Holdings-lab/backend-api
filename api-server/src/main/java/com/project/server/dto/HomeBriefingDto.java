@@ -17,6 +17,11 @@ public class HomeBriefingDto {
         private QuickInterpretation quickInterpretation;
         private DetailTabs detailTabs;
         private CheckpointTab checkpointTab;
+        private String briefingHeadline;
+        private List<String> briefingParagraphs;
+        private String pushTitle;
+        private String pushBody;
+        private String briefingTone;
         private String disclaimer;
     }
 

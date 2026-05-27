@@ -1,5 +1,7 @@
 package com.project.server.service.home;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.project.server.domain.HomeBriefingEntity;
 import com.project.server.domain.PolicyEventEntity;
 import com.project.server.domain.UserEntity;
 import com.project.server.domain.UserWatchAssetEntity;
@@ -7,6 +9,7 @@ import com.project.server.dto.HomeDto;
 import com.project.server.dto.HomeBriefingDto;
 import com.project.server.exception.ApiException;
 import com.project.server.repository.PolicyEventJpaRepository;
+import com.project.server.repository.HomeBriefingRepository;
 import com.project.server.repository.UserJpaRepository;
 import com.project.server.repository.UserWatchAssetRepository;
 import com.project.server.service.portfolio.PortfolioService;
@@ -15,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -24,7 +28,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
+import java.time.ZoneId;
 
 @Service
 @RequiredArgsConstructor
@@ -34,11 +40,14 @@ public class HomeService {
 
         private final UserJpaRepository userJpaRepository;
         private final PolicyEventJpaRepository policyEventJpaRepository;
+        private final HomeBriefingRepository homeBriefingRepository;
         private final UserWatchAssetRepository userWatchAssetRepository;
         private final WatchAssetSelectionService watchAssetSelectionService;
         private final PortfolioService portfolioService;
         private final FeaturedEventStateService featuredEventStateService;
         private final com.project.server.service.integration.MlPredictionProxyService mlPredictionProxyService;
+        private final HomeBriefingLlmService homeBriefingLlmService;
+        private final ObjectMapper objectMapper;
 
         public HomeDto.HomeResponse getHome(Long userId) {
                 HomeContext context = buildHomeContext(userId);
@@ -133,6 +142,11 @@ public class HomeService {
                                 .quickInterpretation(bundle.quickInterpretation())
                                 .detailTabs(bundle.detailTabs())
                                 .checkpointTab(bundle.checkpointTab())
+                                .briefingHeadline(bundle.briefingHeadline())
+                                .briefingParagraphs(bundle.briefingParagraphs())
+                                .pushTitle(bundle.pushTitle())
+                                .pushBody(bundle.pushBody())
+                                .briefingTone(bundle.briefingTone())
                                 .disclaimer(bundle.disclaimer())
                                 .build();
         }
@@ -172,6 +186,11 @@ public class HomeService {
         }
 
         private BriefingBundle buildBriefingBundle(Long userId) {
+                Optional<BriefingBundle> cachedBundle = loadCachedBriefingBundle(userId);
+                if (cachedBundle.isPresent()) {
+                        return cachedBundle.get();
+                }
+
                 HomeContext context = buildHomeContext(userId);
 
                 String userName = context.displayName();
@@ -216,7 +235,24 @@ public class HomeService {
                 HomeBriefingDto.DetailTabs detailTabs = buildDetailTabs(featured);
                 HomeBriefingDto.CheckpointTab checkpointTab = buildCheckpointTab(featured);
 
-                return new BriefingBundle(
+                Map<String, Object> briefingSnapshot = buildBriefingSnapshot(
+                                userName,
+                                context.featuredEvent(),
+                                portfolioSummary,
+                                context.watchAssetImpacts().size(),
+                                featured,
+                                ranked,
+                                aggregateRisk,
+                                riskLabel,
+                                totalAssetText,
+                                returnRateText,
+                                quickInterpretation,
+                                detailTabs,
+                                checkpointTab);
+
+                HomeBriefingLlmService.Narrative narrative = homeBriefingLlmService.generateNarrative(briefingSnapshot);
+
+                BriefingBundle bundle = new BriefingBundle(
                                 HomeBriefingDto.HomeHeader.builder()
                                                 .greeting(copy.headline())
                                                 .userName(userName)
@@ -265,7 +301,17 @@ public class HomeService {
                                 quickInterpretation,
                                 detailTabs,
                                 checkpointTab,
+                                narrative.headline(),
+                                narrative.paragraphs(),
+                                narrative.pushTitle(),
+                                narrative.pushBody(),
+                                narrative.providerName(),
+                                narrative.modelName(),
+                                narrative.tone(),
                                 "본 정보는 투자 자문이 아니며, 학습 및 정보 제공 목적의 참고 자료입니다.");
+
+                persistBriefingBundle(userId, bundle);
+                return bundle;
         }
 
         private List<PolicyEventEntity> deduplicateByNormalizedTitle(List<PolicyEventEntity> events) {
@@ -648,10 +694,6 @@ public class HomeService {
                 String totalAssetText = formatCurrencyValue(portfolioSummary.get("totalAssets"));
                 String returnRateText = formatRateValue(portfolioSummary.get("dailyReturnRate"));
                 String eventText = featuredEvent == null ? "최신 이벤트" : resolveFeaturedTitle(featuredEvent);
-                String keywordText = featuredEvent != null && featuredEvent.getKeyword() != null
-                                && !featuredEvent.getKeyword().isBlank()
-                                        ? featuredEvent.getKeyword()
-                                        : eventText;
                 int progress = (int) Math.round((featuredEvent == null || featuredEvent.getImpactScore() == null ? 50.0
                                 : featuredEvent.getImpactScore()) * 0.5 + linkedAssetCount * 10.0);
 
@@ -827,7 +869,137 @@ public class HomeService {
                         HomeBriefingDto.QuickInterpretation quickInterpretation,
                         HomeBriefingDto.DetailTabs detailTabs,
                         HomeBriefingDto.CheckpointTab checkpointTab,
+                        String briefingHeadline,
+                        List<String> briefingParagraphs,
+                        String pushTitle,
+                        String pushBody,
+                        String llmProvider,
+                        String llmModel,
+                        String briefingTone,
                         String disclaimer) {
+        }
+
+        private Optional<BriefingBundle> loadCachedBriefingBundle(Long userId) {
+                try {
+                        LocalDate briefingDate = LocalDate.now(ZoneId.of("Asia/Seoul"));
+                        Optional<HomeBriefingEntity> cached = homeBriefingRepository
+                                        .findTopByUserIdAndBriefingDateOrderByUpdatedAtDesc(userId, briefingDate);
+                        if (cached.isEmpty()) {
+                                return Optional.empty();
+                        }
+
+                        return Optional.ofNullable(toBriefingBundle(cached.get()));
+                } catch (Exception exception) {
+                        return Optional.empty();
+                }
+        }
+
+        private void persistBriefingBundle(Long userId, BriefingBundle bundle) {
+                try {
+                        HomeBriefingDto.BriefingResponse response = toBriefingResponse(bundle);
+                        LocalDate briefingDate = LocalDate.now(ZoneId.of("Asia/Seoul"));
+                        Map<String, Object> pushData = new LinkedHashMap<>();
+                        pushData.put("title", bundle.pushTitle());
+                        pushData.put("body", bundle.pushBody());
+                        pushData.put("tone", bundle.briefingTone());
+
+                        HomeBriefingEntity entity = HomeBriefingEntity.builder()
+                                        .userId(userId)
+                                        .briefingDate(briefingDate)
+                                        .briefingHeadline(bundle.briefingHeadline())
+                                        .briefingParagraphsJson(objectMapper.writeValueAsString(bundle.briefingParagraphs()))
+                                        .pushDataJson(objectMapper.writeValueAsString(pushData))
+                                        .llmProvider(bundle.llmProvider())
+                                        .llmModel(bundle.llmModel())
+                                        .promptVersion("home-briefing-v1")
+                                        .briefingPayloadJson(objectMapper.writeValueAsString(response))
+                                        .build();
+                        homeBriefingRepository.save(entity);
+                } catch (Exception exception) {
+                        // cache persistence is best-effort; response must still succeed
+                }
+        }
+
+        private BriefingBundle toBriefingBundle(HomeBriefingEntity entity) {
+                try {
+                        HomeBriefingDto.BriefingResponse response = objectMapper.readValue(
+                                        entity.getBriefingPayloadJson(),
+                                        HomeBriefingDto.BriefingResponse.class);
+                        return new BriefingBundle(
+                                        response.getHomeHeader(),
+                                        response.getFeaturedCard(),
+                                        response.getPortfolioCard(),
+                                        response.getSecondarySignals() == null ? List.of() : response.getSecondarySignals(),
+                                        response.getQuickInterpretation(),
+                                        response.getDetailTabs(),
+                                        response.getCheckpointTab(),
+                                        response.getBriefingHeadline(),
+                                        response.getBriefingParagraphs() == null ? List.of() : response.getBriefingParagraphs(),
+                                        response.getPushTitle(),
+                                        response.getPushBody(),
+                                        entity.getLlmProvider(),
+                                        entity.getLlmModel(),
+                                        response.getBriefingTone(),
+                                        response.getDisclaimer());
+                } catch (Exception exception) {
+                        return null;
+                }
+        }
+
+        private HomeBriefingDto.BriefingResponse toBriefingResponse(BriefingBundle bundle) {
+                return HomeBriefingDto.BriefingResponse.builder()
+                                .homeHeader(bundle.homeHeader())
+                                .featuredCard(bundle.featuredCard())
+                                .portfolioCard(bundle.portfolioCard())
+                                .secondarySignals(bundle.secondarySignals())
+                                .quickInterpretation(bundle.quickInterpretation())
+                                .detailTabs(bundle.detailTabs())
+                                .checkpointTab(bundle.checkpointTab())
+                                .briefingHeadline(bundle.briefingHeadline())
+                                .briefingParagraphs(bundle.briefingParagraphs())
+                                .pushTitle(bundle.pushTitle())
+                                .pushBody(bundle.pushBody())
+                                .briefingTone(bundle.briefingTone())
+                                .disclaimer(bundle.disclaimer())
+                                .build();
+        }
+
+        private Map<String, Object> buildBriefingSnapshot(
+                        String userName,
+                        PolicyEventEntity featuredEvent,
+                        Map<String, Object> portfolioSummary,
+                        int watchAssetCount,
+                        ScoredEvent featured,
+                        List<ScoredEvent> ranked,
+                        int aggregateRisk,
+                        String riskLabel,
+                        String totalAssetText,
+                        String returnRateText,
+                        HomeBriefingDto.QuickInterpretation quickInterpretation,
+                        HomeBriefingDto.DetailTabs detailTabs,
+                        HomeBriefingDto.CheckpointTab checkpointTab) {
+                Map<String, Object> snapshot = new LinkedHashMap<>();
+                snapshot.put("userName", userName);
+                snapshot.put("featuredTitle", featured.displayTitle());
+                snapshot.put("featuredSummary", featured.oneLineReason());
+                snapshot.put("featureDirection", featured.direction());
+                snapshot.put("confidence", featured.confidence());
+                snapshot.put("volatility", featured.volatility());
+                snapshot.put("upsideProbability", featured.upsideProbability());
+                snapshot.put("downsideProbability", featured.downsideProbability());
+                snapshot.put("riskLabel", riskLabel);
+                snapshot.put("riskSummary", buildRiskSummary(riskLabel, aggregateRisk, featured.confidence()));
+                snapshot.put("watchAssetCount", watchAssetCount);
+                snapshot.put("portfolioTotalAsset", totalAssetText);
+                snapshot.put("portfolioReturnRate", returnRateText);
+                snapshot.put("secondarySignalCount", ranked == null ? 0 : Math.max(0, ranked.size() - 1));
+                snapshot.put("featuredEventTitle", featuredEvent == null ? null : featuredEvent.getTitle());
+                snapshot.put("featuredEventKeyword", featuredEvent == null ? null : featuredEvent.getKeyword());
+                snapshot.put("quickInterpretation", quickInterpretation);
+                snapshot.put("detailTabs", detailTabs);
+                snapshot.put("checkpointTab", checkpointTab);
+                snapshot.put("generatedAt", LocalDateTime.now().format(DATE_TIME_FORMATTER));
+                return snapshot;
         }
 
         private record ScoredEvent(

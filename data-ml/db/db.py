@@ -136,6 +136,10 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     return {key: _to_jsonable(value) for key, value in data.items()}
 
 
+def _json_param(value: Any) -> Any:
+    return extras.Json(_to_jsonable(value), dumps=lambda obj: json.dumps(obj, ensure_ascii=False))
+
+
 def _safe_int(value: Any, default: int | None = None) -> int | None:
     try:
         if value is None or pd.isna(value):
@@ -503,6 +507,7 @@ def fetch_policy_feed_frame(
     query_parts = [
         """
         SELECT
+            d.id AS document_id,
             COALESCE(d.published_date::text, to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')) AS date,
             d.source,
             d.category,
@@ -547,6 +552,7 @@ def fetch_policy_feed_frame(
     if not rows:
         fallback_query = """
             SELECT
+                d.id AS document_id,
                 COALESCE(d.published_date::text, to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')) AS date,
                 d.source,
                 d.category,
@@ -635,3 +641,185 @@ def persist_prediction_run(summary: dict[str, Any], metadata: dict[str, Any] | N
         "model_version": summary.get("modelVersion"),
         "target_ticker": summary.get("targetTicker"),
     }
+
+
+def fetch_article_insights(document_ids: list[int] | None = None, insight_date: date | str | None = None) -> pd.DataFrame:
+    if psycopg2 is None:
+        return pd.DataFrame()
+
+    query = [
+        """
+        SELECT
+            ai.document_id,
+            ai.insight_date,
+            ai.summary,
+            ai.keywords,
+            ai.asset_impacts,
+            ai.llm_provider,
+            ai.llm_model,
+            ai.prompt_version,
+            ai.insight_payload,
+            d.source,
+            d.category,
+            d.doc_type,
+            d.title,
+            d.url,
+            d.body,
+            COALESCE(d.published_date::text, to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')) AS published_date
+        FROM article_insights ai
+        JOIN policy_documents d ON d.id = ai.document_id
+        WHERE 1 = 1
+        """
+    ]
+    params: dict[str, Any] = {}
+
+    if document_ids:
+        query.append("AND ai.document_id = ANY(%(document_ids)s)")
+        params["document_ids"] = list(map(int, document_ids))
+
+    if insight_date:
+        query.append("AND ai.insight_date = %(insight_date)s::date")
+        params["insight_date"] = str(insight_date)
+
+    query.append("ORDER BY ai.insight_date DESC, ai.id DESC")
+
+    with _connect(real_dict_cursor=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("\n".join(query), params)
+            rows = cursor.fetchall()
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows)
+
+
+def upsert_article_insight(record: dict[str, Any]) -> int:
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    payload = _row_to_dict(record)
+    query = """
+        INSERT INTO article_insights (
+            document_id, insight_date, summary, keywords, asset_impacts,
+            llm_provider, llm_model, prompt_version, insight_payload, updated_at
+        ) VALUES (
+            %(document_id)s, %(insight_date)s, %(summary)s, %(keywords)s, %(asset_impacts)s,
+            %(llm_provider)s, %(llm_model)s, %(prompt_version)s, %(insight_payload)s, NOW()
+        )
+        ON CONFLICT (document_id) DO UPDATE SET
+            insight_date = EXCLUDED.insight_date,
+            summary = EXCLUDED.summary,
+            keywords = EXCLUDED.keywords,
+            asset_impacts = EXCLUDED.asset_impacts,
+            llm_provider = EXCLUDED.llm_provider,
+            llm_model = EXCLUDED.llm_model,
+            prompt_version = EXCLUDED.prompt_version,
+            insight_payload = EXCLUDED.insight_payload,
+            updated_at = NOW()
+        RETURNING id
+    """
+
+    params = {
+        "document_id": int(payload.get("document_id")),
+        "insight_date": _safe_date(payload.get("insight_date")) or datetime.utcnow().date(),
+        "summary": _safe_str(payload.get("summary"), "") or "",
+        "keywords": _json_param(payload.get("keywords") or []),
+        "asset_impacts": _json_param(payload.get("asset_impacts") or []),
+        "llm_provider": _safe_str(payload.get("llm_provider"), "gemini") or "gemini",
+        "llm_model": _safe_str(payload.get("llm_model"), "") or "",
+        "prompt_version": _safe_str(payload.get("prompt_version"), "v1") or "v1",
+        "insight_payload": _json_param(payload.get("insight_payload") or payload),
+    }
+
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+        conn.commit()
+        return int(row[0])
+
+
+def fetch_home_briefings(user_id: int, briefing_date: date | str | None = None) -> pd.DataFrame:
+    if psycopg2 is None:
+        return pd.DataFrame()
+
+    query = [
+        """
+        SELECT
+            id,
+            user_id,
+            briefing_date,
+            briefing_headline,
+            briefing_paragraphs,
+            push_data,
+            llm_provider,
+            llm_model,
+            prompt_version,
+            briefing_payload
+        FROM home_briefings
+        WHERE user_id = %(user_id)s
+        """
+    ]
+    params: dict[str, Any] = {"user_id": int(user_id)}
+
+    if briefing_date:
+        query.append("AND briefing_date = %(briefing_date)s::date")
+        params["briefing_date"] = str(briefing_date)
+
+    query.append("ORDER BY briefing_date DESC, id DESC")
+
+    with _connect(real_dict_cursor=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("\n".join(query), params)
+            rows = cursor.fetchall()
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows)
+
+
+def upsert_home_briefing(record: dict[str, Any]) -> int:
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    payload = _row_to_dict(record)
+    query = """
+        INSERT INTO home_briefings (
+            user_id, briefing_date, briefing_headline, briefing_paragraphs,
+            push_data, llm_provider, llm_model, prompt_version, briefing_payload, updated_at
+        ) VALUES (
+            %(user_id)s, %(briefing_date)s, %(briefing_headline)s, %(briefing_paragraphs)s,
+            %(push_data)s, %(llm_provider)s, %(llm_model)s, %(prompt_version)s, %(briefing_payload)s, NOW()
+        )
+        ON CONFLICT (user_id, briefing_date) DO UPDATE SET
+            briefing_headline = EXCLUDED.briefing_headline,
+            briefing_paragraphs = EXCLUDED.briefing_paragraphs,
+            push_data = EXCLUDED.push_data,
+            llm_provider = EXCLUDED.llm_provider,
+            llm_model = EXCLUDED.llm_model,
+            prompt_version = EXCLUDED.prompt_version,
+            briefing_payload = EXCLUDED.briefing_payload,
+            updated_at = NOW()
+        RETURNING id
+    """
+
+    params = {
+        "user_id": int(payload.get("user_id")),
+        "briefing_date": _safe_date(payload.get("briefing_date")) or datetime.utcnow().date(),
+        "briefing_headline": _safe_str(payload.get("briefing_headline"), "") or "",
+        "briefing_paragraphs": _json_param(payload.get("briefing_paragraphs") or []),
+        "push_data": _json_param(payload.get("push_data") or {}),
+        "llm_provider": _safe_str(payload.get("llm_provider"), "gemini") or "gemini",
+        "llm_model": _safe_str(payload.get("llm_model"), "") or "",
+        "prompt_version": _safe_str(payload.get("prompt_version"), "v1") or "v1",
+        "briefing_payload": _json_param(payload.get("briefing_payload") or payload),
+    }
+
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+        conn.commit()
+        return int(row[0])

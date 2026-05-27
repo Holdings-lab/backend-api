@@ -60,6 +60,43 @@ CREATE TABLE IF NOT EXISTS policy_prediction_runs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS article_insights (
+    id BIGSERIAL PRIMARY KEY,
+    document_id BIGINT NOT NULL UNIQUE REFERENCES policy_documents(id) ON DELETE CASCADE,
+    insight_date DATE NOT NULL,
+    summary TEXT NOT NULL,
+    keywords JSONB NOT NULL DEFAULT '[]'::jsonb,
+    asset_impacts JSONB NOT NULL DEFAULT '[]'::jsonb,
+    llm_provider TEXT NOT NULL,
+    llm_model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    insight_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS article_insights_insight_date_idx
+    ON article_insights(insight_date DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS home_briefings (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    briefing_date DATE NOT NULL,
+    briefing_headline TEXT NOT NULL,
+    briefing_paragraphs JSONB NOT NULL DEFAULT '[]'::jsonb,
+    push_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    llm_provider TEXT NOT NULL,
+    llm_model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    briefing_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, briefing_date)
+);
+
+CREATE INDEX IF NOT EXISTS home_briefings_user_date_idx
+    ON home_briefings(user_id, briefing_date DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS pca_artifacts (
     id BIGSERIAL PRIMARY KEY,
     artifact_name TEXT NOT NULL UNIQUE,
