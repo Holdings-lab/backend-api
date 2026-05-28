@@ -70,7 +70,8 @@ PIPELINE_SLEEP_SEC = float(os.getenv("CRAWL_SLEEP_SEC", "1"))
 
 run_lock = Lock()
 scheduler_instance = None
-pipeline_job_state: dict[str, dict[str, object]] = {}
+pipeline_job_state: dict[str, object] = {}
+pipeline_job_state_lock = Lock()
 article_insight_service = ArticleInsightGenerationService()
 home_briefing_service = HomeBriefingGenerationService()
 
@@ -201,17 +202,33 @@ def _build_failure_reason(result: dict, fallback_message: str) -> str:
     return fallback_message
 
 
+def _get_pipeline_job_snapshot() -> dict:
+    with pipeline_job_state_lock:
+        return dict(pipeline_job_state)
+
+
+def _has_active_pipeline_job() -> bool:
+    with pipeline_job_state_lock:
+        return _safe_str(pipeline_job_state.get("status"), "").lower() in {"queued", "running"}
+
+
 def _start_pipeline_job(trigger: str, bis_max_pages: int | None = None, sleep_sec: float | None = None,
-                        target_date: str | None = None) -> str:
-    job_id = uuid.uuid4().hex[:12]
-    pipeline_job_state[job_id] = {
-        "status": "queued",
-        "trigger": trigger,
-        "started_at": datetime.utcnow().isoformat() + "Z",
-    }
+                        target_date: str | None = None) -> dict:
+    with pipeline_job_state_lock:
+        current_status = _safe_str(pipeline_job_state.get("status"), "").lower()
+        if current_status in {"queued", "running"}:
+            return dict(pipeline_job_state)
+
+        pipeline_job_state.clear()
+        pipeline_job_state.update({
+            "status": "queued",
+            "trigger": trigger,
+            "started_at": datetime.utcnow().isoformat() + "Z",
+        })
 
     def _worker() -> None:
-        pipeline_job_state[job_id]["status"] = "running"
+        with pipeline_job_state_lock:
+            pipeline_job_state["status"] = "running"
         try:
             result = run_pipeline(
                 trigger=trigger,
@@ -219,21 +236,23 @@ def _start_pipeline_job(trigger: str, bis_max_pages: int | None = None, sleep_se
                 sleep_sec=sleep_sec,
                 target_date=target_date,
             )
-            pipeline_job_state[job_id].update({
-                "status": result.get("status", "unknown"),
-                "finished_at": datetime.utcnow().isoformat() + "Z",
-                "result": _remove_message_fields(result),
-            })
+            with pipeline_job_state_lock:
+                pipeline_job_state.update({
+                    "status": result.get("status", "unknown"),
+                    "finished_at": datetime.utcnow().isoformat() + "Z",
+                    "result": _remove_message_fields(result),
+                })
         except Exception as exc:
-            pipeline_job_state[job_id].update({
-                "status": "failed",
-                "finished_at": datetime.utcnow().isoformat() + "Z",
-                "error": str(exc),
-            })
-            logger.exception("background pipeline job failed: job_id=%s", job_id)
+            with pipeline_job_state_lock:
+                pipeline_job_state.update({
+                    "status": "failed",
+                    "finished_at": datetime.utcnow().isoformat() + "Z",
+                    "error": str(exc),
+                })
+            logger.exception("background pipeline job failed")
 
     Thread(target=_worker, daemon=True).start()
-    return job_id
+    return _get_pipeline_job_snapshot()
 
 
 def _resolve_policy_feed_csv_path() -> Path | None:
@@ -1087,7 +1106,19 @@ async def signal_endpoint(request: Request, date: str | None = None):
     target_date_value = date or payload.get("targetDate") or payload.get("target_date") or payload.get("date")
 
     trigger = _safe_str(payload.get("source"), "manual")
-    job_id = _start_pipeline_job(
+    current_state = _get_pipeline_job_snapshot()
+    if _safe_str(current_state.get("status"), "").lower() in {"queued", "running"}:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "isSuccess": True,
+                "code": "ML_PIPELINE_ALREADY_RUNNING",
+                "message": "이미 실행 중인 파이프라인이 있습니다.",
+                "result": _remove_message_fields(current_state),
+            },
+        )
+
+    current_state = _start_pipeline_job(
         trigger=trigger,
         bis_max_pages=PIPELINE_BIS_MAX_PAGES,
         sleep_sec=PIPELINE_SLEEP_SEC,
@@ -1100,12 +1131,18 @@ async def signal_endpoint(request: Request, date: str | None = None):
             "code": "ML_PIPELINE_QUEUED",
             "message": "파이프라인 작업을 비동기로 등록했습니다.",
             "result": {
-                "jobId": job_id,
-                "status": "queued",
-                "trigger": trigger,
+                **_remove_message_fields(current_state),
             },
         },
     )
+
+
+@app.get(f"{ML_PREFIX}/pipelines/job")
+def get_pipeline_job_status():
+    state = _get_pipeline_job_snapshot()
+    if not state:
+        return _error_response(message="실행 중인 파이프라인 작업이 없습니다.", code="ML_PIPELINE_NOT_FOUND", status_code=404)
+    return _success_response(_remove_message_fields(state), message="파이프라인 작업 상태 조회에 성공했습니다.")
 
 
 if __name__ == "__main__":
