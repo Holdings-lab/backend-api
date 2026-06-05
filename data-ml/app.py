@@ -25,7 +25,7 @@ from crawler.support_legacy.data_paths import feature_csv_path
 from crawler.postprocessing import sentiment_score as sentiment_score_module
 from scheduler import build_scheduler
 from training.service import run_prediction_now
-from db.db import fetch_policy_feed_frame, fetch_user_watch_asset_names
+from db.db import fetch_policy_feed_frame, fetch_user_watch_asset_names, init_db
 from llm.service import ArticleInsightGenerationService, HomeBriefingGenerationService
 from llm.providers import build_llm_client
 
@@ -520,8 +520,16 @@ def _read_policy_feed_frame(payload: dict, apply_limit: bool = True) -> pd.DataF
             logger.warning("[PolicyFeed] policy feed csv not found. candidates=%s", [str(path) for path in POLICY_FEED_CANDIDATES])
             return pd.DataFrame()
 
+        if Path(csv_path).stat().st_size == 0:
+            logger.warning("[PolicyFeed] policy feed csv is empty: %s", csv_path)
+            return pd.DataFrame()
+
         logger.info("[PolicyFeed] using policy feed csv path: %s", csv_path)
-        frame = pd.read_csv(csv_path)
+        try:
+            frame = pd.read_csv(csv_path)
+        except pd.errors.EmptyDataError:
+            logger.warning("[PolicyFeed] policy feed csv has no parseable rows: %s", csv_path)
+            return pd.DataFrame()
         if frame.empty:
             return frame
 
@@ -914,6 +922,11 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
 @app.on_event("startup")
 def on_startup():
     global scheduler_instance
+
+    try:
+        init_db()
+    except Exception as error:
+        logger.warning("[Startup] data-ml schema initialization failed: %s", error)
 
     def _scheduled_job():
         # schedule runs at US/Eastern midnight; pipeline should process the previous day

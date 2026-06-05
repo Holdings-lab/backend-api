@@ -45,7 +45,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       llm.provider: ${LLM_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3.5-haiku-20241022}
       ML_API_BASE_URL: ${ML_API_BASE_URL:-http://data-ml:9000}

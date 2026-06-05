@@ -152,7 +152,7 @@ def _call_selected_llm(payload: dict[str, Any]) -> dict[str, Any] | str:
 
 def _call_gemini_api(payload: dict[str, Any]) -> dict[str, Any] | str:
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
+    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is required")
 
@@ -165,7 +165,31 @@ def _call_gemini_api(payload: dict[str, Any]) -> dict[str, Any] | str:
         },
     }
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    response = _post_json(url, {"Content-Type": "application/json"}, body)
+    try:
+        response = _post_json(url, {"Content-Type": "application/json"}, body)
+    except Exception as error:
+        error_text = str(error)
+        fallback_models = ["gemini-2.0-flash", "gemini-1.5-flash-002", "gemini-1.5-pro"]
+        if model not in fallback_models:
+            fallback_models.insert(0, model)
+
+        if "404" in error_text or "NOT_FOUND" in error_text or "not found" in error_text.lower():
+            last_error = error
+            for fallback_model in fallback_models:
+                if fallback_model == model:
+                    continue
+                fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/{fallback_model}:generateContent?key={api_key}"
+                try:
+                    response = _post_json(fallback_url, {"Content-Type": "application/json"}, body)
+                    model = fallback_model
+                    break
+                except Exception as fallback_error:
+                    last_error = fallback_error
+                    continue
+            else:
+                raise RuntimeError(f"LLM provider call failed: {last_error}") from last_error
+        else:
+            raise RuntimeError(f"LLM provider call failed: {error}") from error
 
     candidates = response.get("candidates") or []
     if not candidates:

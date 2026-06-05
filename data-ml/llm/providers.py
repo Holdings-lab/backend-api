@@ -64,10 +64,11 @@ class RoutedLlmClient(BaseHttpLlmClient):
         return self._call_gemini_api(system_prompt, user_prompt, temperature=temperature)
 
     def _call_gemini_api(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.2) -> dict[str, Any]:
-        url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{self.model_name}:generateContent?key={self.api_key}"
-        )
+        model_candidates = [self.model_name]
+        for fallback_model in ("gemini-2.0-flash", "gemini-1.5-flash-002", "gemini-1.5-pro"):
+            if fallback_model not in model_candidates:
+                model_candidates.append(fallback_model)
+
         body = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
@@ -76,15 +77,35 @@ class RoutedLlmClient(BaseHttpLlmClient):
                 "responseMimeType": "application/json",
             },
         }
-        payload = self._post_json(url, {"Content-Type": "application/json"}, body)
-        candidates = payload.get("candidates") or []
-        if not candidates:
-            raise RuntimeError("gemini API returned no candidates")
-        parts = (candidates[0].get("content") or {}).get("parts") or []
-        text = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
-        if not text:
-            raise RuntimeError("gemini API returned empty content")
-        return _extract_json_text(text)
+
+        last_error: Exception | None = None
+        for model_name in model_candidates:
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model_name}:generateContent?key={self.api_key}"
+            )
+            try:
+                payload = self._post_json(url, {"Content-Type": "application/json"}, body)
+                candidates = payload.get("candidates") or []
+                if not candidates:
+                    raise RuntimeError("gemini API returned no candidates")
+                parts = (candidates[0].get("content") or {}).get("parts") or []
+                text = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
+                if not text:
+                    raise RuntimeError("gemini API returned empty content")
+                if model_name != self.model_name:
+                    self.model_name = model_name
+                return _extract_json_text(text)
+            except Exception as error:
+                last_error = error
+                error_text = str(error)
+                if "404" not in error_text and "NOT_FOUND" not in error_text and "not found" not in error_text.lower():
+                    break
+
+        if last_error is not None:
+            raise last_error
+
+        raise RuntimeError("gemini API call failed")
 
     def _call_claude_api(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.2) -> dict[str, Any]:
         body = {

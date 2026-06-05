@@ -33,7 +33,7 @@ def _db_config() -> dict[str, Any]:
     return {
         "host": _env("DB_HOST", "POSTGRES_HOST", default="localhost"),
         "port": int(_env("DB_PORT", "POSTGRES_PORT", default="5432")),
-        "dbname": _env("DB_NAME", "POSTGRES_DB", default="holdings"),
+        "dbname": _env("DB_NAME", "POSTGRES_DB", "PGDATABASE", default="holdings"),
         "user": _env("DB_USER", "POSTGRES_USER", default="postgres"),
         "password": _env("DB_PASSWORD", "POSTGRES_PASSWORD", default="postgres"),
     }
