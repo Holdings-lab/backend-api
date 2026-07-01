@@ -1,5 +1,4 @@
--- V004: Legacy CODEF naming → Hyphen naming (PostgreSQL)
--- 기존 DB에 codef_* / connected_id / codef_sync_history 가 있을 때 실행
+-- Legacy CODEF naming → Hyphen naming
 
 DO $$
 BEGIN

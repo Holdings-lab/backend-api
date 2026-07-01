@@ -1,8 +1,5 @@
--- Flyway Migration: V3_001__Create_broker_account_tables.sql
--- Hyphen(하이픈) 증권사 계좌 연동 관련 테이블 생성
--- 신규 설치 시 hyphen_* 컬럼명 사용. 기존 codef_* DB는 V004 마이그레이션 참고.
+-- Hyphen(하이픈) 증권사 계좌 연동 테이블 (users 등은 JPA가 먼저 생성)
 
--- 1. Broker Accounts 테이블
 CREATE TABLE IF NOT EXISTS broker_accounts (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL,
@@ -21,15 +18,13 @@ CREATE TABLE IF NOT EXISTS broker_accounts (
     sync_count INTEGER DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, broker_name, account_number),
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    UNIQUE(user_id, broker_name, account_number)
 );
 
-CREATE INDEX idx_broker_accounts_user_id ON broker_accounts(user_id);
-CREATE INDEX idx_broker_accounts_hyphen_status ON broker_accounts(hyphen_status);
-CREATE INDEX idx_broker_accounts_last_synced ON broker_accounts(last_synced_at);
+CREATE INDEX IF NOT EXISTS idx_broker_accounts_user_id ON broker_accounts(user_id);
+CREATE INDEX IF NOT EXISTS idx_broker_accounts_hyphen_status ON broker_accounts(hyphen_status);
+CREATE INDEX IF NOT EXISTS idx_broker_accounts_last_synced ON broker_accounts(last_synced_at);
 
--- 2. Asset Positions 테이블
 CREATE TABLE IF NOT EXISTS asset_positions (
     id BIGSERIAL PRIMARY KEY,
     account_id BIGINT NOT NULL,
@@ -47,16 +42,13 @@ CREATE TABLE IF NOT EXISTS asset_positions (
     purchased_at DATE,
     last_synced_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(account_id) REFERENCES broker_accounts(id) ON DELETE CASCADE,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_asset_positions_account_id ON asset_positions(account_id);
-CREATE INDEX idx_asset_positions_user_id ON asset_positions(user_id);
-CREATE INDEX idx_asset_positions_account_symbol ON asset_positions(account_id, symbol);
+CREATE INDEX IF NOT EXISTS idx_asset_positions_account_id ON asset_positions(account_id);
+CREATE INDEX IF NOT EXISTS idx_asset_positions_user_id ON asset_positions(user_id);
+CREATE INDEX IF NOT EXISTS idx_asset_positions_account_symbol ON asset_positions(account_id, symbol);
 
--- 3. Account Balances 테이블
 CREATE TABLE IF NOT EXISTS account_balances (
     id BIGSERIAL PRIMARY KEY,
     account_id BIGINT NOT NULL,
@@ -71,15 +63,12 @@ CREATE TABLE IF NOT EXISTS account_balances (
     daily_gain_loss_rate NUMERIC(10, 4),
     as_of_date DATE,
     last_synced_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(account_id) REFERENCES broker_accounts(id) ON DELETE CASCADE,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_account_balances_user_account_date ON account_balances(user_id, account_id, as_of_date);
-CREATE INDEX idx_account_balances_account_id ON account_balances(account_id);
+CREATE INDEX IF NOT EXISTS idx_account_balances_user_account_date ON account_balances(user_id, account_id, as_of_date);
+CREATE INDEX IF NOT EXISTS idx_account_balances_account_id ON account_balances(account_id);
 
--- 4. Hyphen Sync History 테이블
 CREATE TABLE IF NOT EXISTS hyphen_sync_history (
     id BIGSERIAL PRIMARY KEY,
     account_id BIGINT NOT NULL,
@@ -92,18 +81,15 @@ CREATE TABLE IF NOT EXISTS hyphen_sync_history (
     sync_duration_ms INTEGER,
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(account_id) REFERENCES broker_accounts(id) ON DELETE CASCADE,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_hyphen_sync_history_user_account_status ON hyphen_sync_history(user_id, account_id, status);
-CREATE INDEX idx_hyphen_sync_history_account_id ON hyphen_sync_history(account_id);
-CREATE INDEX idx_hyphen_sync_history_status ON hyphen_sync_history(status);
+CREATE INDEX IF NOT EXISTS idx_hyphen_sync_history_user_account_status ON hyphen_sync_history(user_id, account_id, status);
+CREATE INDEX IF NOT EXISTS idx_hyphen_sync_history_account_id ON hyphen_sync_history(account_id);
+CREATE INDEX IF NOT EXISTS idx_hyphen_sync_history_status ON hyphen_sync_history(status);
 
--- 사용자 자산 정보 뷰 (선택사항)
 CREATE OR REPLACE VIEW user_total_assets AS
-SELECT 
+SELECT
     ba.user_id,
     ba.broker_name,
     ba.account_number,
