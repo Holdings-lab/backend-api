@@ -60,7 +60,7 @@ public class AdminService {
         UserEntity newUser = UserEntity.builder()
                 .email(normalizedEmail)
                 .nickname(normalizedNickname)
-            .password(passwordEncoder.encode(request.getPassword()))
+                .password(passwordEncoder.encode(request.getPassword()))
                 .fcmToken(request.getFcmToken())
                 .build();
 
@@ -283,109 +283,116 @@ public class AdminService {
             }
         }
 
-        // 요청에서 받은 필드들만 업데이트
-        if (request.getPrincipal() != null) {
-            hyphenDetails.put("totPurchaseAmt", request.getPrincipal());
+        if (request.getAccountDisplay() != null) {
+            hyphenDetails.put("acctDisp", request.getAccountDisplay());
         }
-        if (request.getPurchaseAmount() != null) {
-            hyphenDetails.put("totPurchaseAmt", request.getPurchaseAmount());
+        if (request.getAccountName() != null) {
+            hyphenDetails.put("acctNm", request.getAccountName());
         }
-        if (request.getValuationAmt() != null) {
-            hyphenDetails.put("totValuationAmt", request.getValuationAmt());
+        if (request.getAccountNick() != null) {
+            hyphenDetails.put("acctNick", request.getAccountNick());
         }
-        if (request.getDepositReceived() != null) {
-            hyphenDetails.put("estDepAsset", request.getDepositReceived());
+        if (request.getBalance() != null) {
+            hyphenDetails.put("balance", request.getBalance());
         }
-        if (request.getDepositReceivedD1() != null) {
-            hyphenDetails.put("depositReceivedD1", request.getDepositReceivedD1());
+        if (request.getCurrencyCode() != null) {
+            hyphenDetails.put("curCd", request.getCurrencyCode());
         }
-        if (request.getDepositReceivedD2() != null) {
-            hyphenDetails.put("depositReceivedD2", request.getDepositReceivedD2());
-        }
-        if (request.getDepositReceivedF() != null) {
-            hyphenDetails.put("depositReceivedF", request.getDepositReceivedF());
-        }
-        if (request.getWithdrawalAmt() != null) {
-            hyphenDetails.put("withdrawalAmt", request.getWithdrawalAmt());
-        }
-        if (request.getLoanAmt() != null) {
-            hyphenDetails.put("loanAmt", request.getLoanAmt());
+        if (request.getAvailableBalance() != null) {
+            hyphenDetails.put("ablBal", request.getAvailableBalance());
         }
 
         try {
-            boolean hasPortfolioValues = request.getDepositAmount() != null || request.getCashBalance() != null;
+            boolean hasPortfolioValues = request.getTotalPurchaseAmount() != null
+                    || request.getTotalValuationAmount() != null
+                    || request.getTotalValuationGainLoss() != null
+                    || request.getTotalProfitRate() != null
+                    || request.getEstimatedDepositAsset() != null
+                    || request.getCashBalance() != null;
             boolean hasPositions = request.getPositions() != null && !request.getPositions().isEmpty();
 
             if (hasPortfolioValues || hasPositions) {
                 accountBalanceRepository.deleteByAccountId(account.getId());
                 assetPositionRepository.deleteByAccountId(account.getId());
 
-                BigDecimal depositAmount = request.getDepositAmount() != null ? request.getDepositAmount()
-                        : BigDecimal.ZERO;
                 BigDecimal cashBalance = request.getCashBalance() != null ? request.getCashBalance() : BigDecimal.ZERO;
 
-                // positions로부터 현재가와 매입액 자동 계산
-                BigDecimal derivedCurrentValue = BigDecimal.ZERO;
+                BigDecimal derivedValuationAmount = BigDecimal.ZERO;
                 BigDecimal derivedPurchaseAmount = BigDecimal.ZERO;
+                BigDecimal derivedGainLoss = BigDecimal.ZERO;
                 if (hasPositions) {
                     for (AdminDto.SetAccountDetailsRequest.PortfolioPosition pos : request.getPositions()) {
                         BigDecimal qty = pos.getQuantity() != null ? pos.getQuantity() : BigDecimal.ZERO;
-                        BigDecimal currentPrice = pos.getCurrentPrice() != null ? pos.getCurrentPrice()
+                        BigDecimal presentPrice = pos.getPresentPrice() != null ? pos.getPresentPrice()
                                 : BigDecimal.ZERO;
-                        BigDecimal purchasePrice = pos.getPurchasePrice() != null ? pos.getPurchasePrice()
+                        BigDecimal purchaseUnitPrice = pos.getPurchaseUnitPrice() != null ? pos.getPurchaseUnitPrice()
                                 : BigDecimal.ZERO;
-                        BigDecimal currentValue = qty.multiply(currentPrice);
-                        BigDecimal purchaseAmount = qty.multiply(purchasePrice);
-                        BigDecimal gainLoss = currentValue.subtract(purchaseAmount);
-                        BigDecimal gainLossRate = purchaseAmount.compareTo(BigDecimal.ZERO) > 0
-                                ? gainLoss.divide(purchaseAmount, 4, java.math.RoundingMode.HALF_UP)
+                        BigDecimal valuationAmount = qty.multiply(presentPrice);
+                        BigDecimal purchaseAmount = qty.multiply(purchaseUnitPrice);
+                        BigDecimal valuationGainLoss = valuationAmount.subtract(purchaseAmount);
+                        BigDecimal profitRate = purchaseAmount.compareTo(BigDecimal.ZERO) > 0
+                                ? valuationGainLoss.divide(purchaseAmount, 4, java.math.RoundingMode.HALF_UP)
                                         .multiply(new BigDecimal(100))
                                 : BigDecimal.ZERO;
 
-                        derivedCurrentValue = derivedCurrentValue.add(currentValue);
+                        derivedValuationAmount = derivedValuationAmount.add(valuationAmount);
                         derivedPurchaseAmount = derivedPurchaseAmount.add(purchaseAmount);
+                        derivedGainLoss = derivedGainLoss.add(valuationGainLoss);
 
-                        AssetPositionEntity positionEntity = AssetPositionEntity.builder()
+                        String itemCode = pos.getItemCode() != null ? pos.getItemCode() : "UNKNOWN";
+                        assetPositionRepository.save(AssetPositionEntity.builder()
                                 .accountId(account.getId())
                                 .userId(account.getUserId())
-                                .symbol(pos.getSymbol())
-                                .positionType(pos.getPositionType() != null ? pos.getPositionType() : "STOCK")
+                                .symbol(itemCode)
+                                .itemCode(itemCode)
+                                .itemName(pos.getItemName())
+                                .positionType(pos.getProductType() != null ? pos.getProductType() : "STOCK")
+                                .productCode(pos.getProductCode())
                                 .quantity(qty)
-                                .currentPrice(currentPrice)
-                                .purchasePrice(purchasePrice)
-                                .currentValue(currentValue)
+                                .currentPrice(presentPrice)
+                                .purchasePrice(purchaseUnitPrice)
+                                .currentValue(valuationAmount)
                                 .purchaseAmount(purchaseAmount)
-                                .gainLoss(gainLoss)
-                                .gainLossRate(gainLossRate)
+                                .gainLoss(valuationGainLoss)
+                                .gainLossRate(profitRate)
                                 .currencyCode("KRW")
-                                .build();
-                        assetPositionRepository.save(positionEntity);
+                                .build());
                     }
                 }
 
-                // totalAssetValue는 항상 positions의 현재가 + cashBalance로부터 계산
-                BigDecimal portfolioValue = hasPositions ? derivedCurrentValue : BigDecimal.ZERO;
-                BigDecimal totalAssetValue = portfolioValue.add(cashBalance);
-                BigDecimal evaluationAmount = totalAssetValue.subtract(cashBalance);
-                BigDecimal gainLoss = totalAssetValue.subtract(depositAmount);
-                BigDecimal gainLossRate = depositAmount.compareTo(BigDecimal.ZERO) > 0
-                        ? gainLoss.divide(depositAmount, 4, java.math.RoundingMode.HALF_UP)
-                                .multiply(new BigDecimal(100))
-                        : BigDecimal.ZERO;
+                BigDecimal totalPurchaseAmount = request.getTotalPurchaseAmount() != null
+                        ? request.getTotalPurchaseAmount()
+                        : derivedPurchaseAmount;
+                BigDecimal totalValuationAmount = request.getTotalValuationAmount() != null
+                        ? request.getTotalValuationAmount()
+                        : derivedValuationAmount;
+                BigDecimal totalValuationGainLoss = request.getTotalValuationGainLoss() != null
+                        ? request.getTotalValuationGainLoss()
+                        : derivedGainLoss;
+                BigDecimal estimatedDepositAsset = request.getEstimatedDepositAsset() != null
+                        ? request.getEstimatedDepositAsset()
+                        : totalValuationAmount.add(cashBalance);
+                BigDecimal totalProfitRate = request.getTotalProfitRate() != null
+                        ? request.getTotalProfitRate()
+                        : (totalPurchaseAmount.compareTo(BigDecimal.ZERO) > 0
+                                ? totalValuationGainLoss.divide(totalPurchaseAmount, 4, java.math.RoundingMode.HALF_UP)
+                                        .multiply(new BigDecimal(100))
+                                : BigDecimal.ZERO);
 
-                AccountBalanceEntity balance = AccountBalanceEntity.builder()
+                accountBalanceRepository.save(AccountBalanceEntity.builder()
                         .accountId(account.getId())
                         .userId(account.getUserId())
-                        .totalAssetValue(totalAssetValue)
-                        .depositAmount(depositAmount)
+                        .totalAssetValue(estimatedDepositAsset)
+                        .depositAmount(totalPurchaseAmount)
                         .cashBalance(cashBalance)
-                        .evaluationAmount(evaluationAmount)
-                        .gainLoss(gainLoss)
-                        .gainLossRate(gainLossRate)
+                        .evaluationAmount(totalValuationAmount)
+                        .gainLoss(totalValuationGainLoss)
+                        .gainLossRate(totalProfitRate)
+                        .dailyGainLoss(BigDecimal.ZERO)
+                        .dailyGainLossRate(BigDecimal.ZERO)
                         .asOfDate(LocalDate.now())
                         .lastSyncedAt(LocalDateTime.now())
-                        .build();
-                accountBalanceRepository.save(balance);
+                        .build());
             }
 
             // Map을 JSON 문자열로 변환해서 저장

@@ -23,7 +23,26 @@ public class BrokerAccountDto {
         private String hyphenLoginMethod; // ID, CERT
         private String hyphenLoginRequired; // Y, N
         private String hyphenAccountPassword;
-        private List<String> brokerNames; // 연동할 증권사 목록 (예: ["KIS", "NH"])
+        private List<String> brokerNames;
+    }
+
+    /** 하이픈 in0104000534 전계좌조회 계좌 1건 */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class HyphenAccountSnapshot {
+        private String accountDisplay;
+        private String accountName;
+        private String accountNick;
+        private String openDate;
+        private String endDate;
+        private String lastTradeDate;
+        private String balance;
+        private String currencyCode;
+        private String dormantYn;
+        private String availableBalance;
+        private String accountHolder;
     }
 
     @Data
@@ -36,8 +55,10 @@ public class BrokerAccountDto {
         private String accountNumber;
         private String accountNickname;
         private String accountOwnerName;
+        private String accountType;
         private String status;
         private Boolean isPrimary;
+        private HyphenAccountSnapshot hyphenAccount;
         private LocalDateTime lastSyncedAt;
         private Integer syncCount;
         private LocalDateTime createdAt;
@@ -56,23 +77,9 @@ public class BrokerAccountDto {
         private String accountType;
         private String status;
         private Boolean isPrimary;
+        private HyphenAccountSnapshot hyphenAccount;
         private AccountBalanceDto latestBalance;
         private List<AssetPositionDto> positions;
-        
-        // 하이픈 응답 필드
-        private String accountDisplay;
-        private String principal;
-        private String purchaseAmount;
-        private String valuationAmt;
-        private String valuationPL;
-        private String earningsRate;
-        private String depositReceived;
-        private String depositReceivedD1;
-        private String depositReceivedD2;
-        private String depositReceivedF;
-        private String withdrawalAmt;
-        private String loanAmt;
-
         private LocalDateTime lastSyncedAt;
         private Integer syncCount;
     }
@@ -111,40 +118,42 @@ public class BrokerAccountDto {
         private SimpleAccountInfo previousPrimaryAccount;
     }
 
+    /** 하이픈 in0104000539 계좌 요약 + in0104000536 curBal */
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class AccountBalanceDto {
         private Long id;
-        private BigDecimal totalAssetValue;
+        private BigDecimal estimatedDepositAsset;
         private BigDecimal cashBalance;
-        private BigDecimal depositAmount;
-        private BigDecimal evaluationAmount;
-        private BigDecimal gainLoss;
-        private BigDecimal gainLossRate;
-        private BigDecimal dailyGainLoss;
-        private BigDecimal dailyGainLossRate;
+        private BigDecimal totalPurchaseAmount;
+        private BigDecimal totalValuationAmount;
+        private BigDecimal totalValuationGainLoss;
+        private BigDecimal totalProfitRate;
         private LocalDate asOfDate;
         private LocalDateTime lastSyncedAt;
     }
 
+    /** 하이픈 in0104000539 itemDetail */
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class AssetPositionDto {
-        private String symbol;
-        private String positionType;
+        private String itemCode;
+        private String itemName;
+        private String productType;
+        private String productCode;
         private BigDecimal quantity;
-        private BigDecimal purchasePrice;
-        private BigDecimal currentPrice;
-        private BigDecimal currentValue;
+        private BigDecimal purchaseUnitPrice;
+        private BigDecimal presentPrice;
+        private BigDecimal valuationAmount;
         private BigDecimal purchaseAmount;
-        private BigDecimal gainLoss;
-        private BigDecimal gainLossRate;
+        private BigDecimal valuationGainLoss;
+        private BigDecimal profitRate;
         private String currencyCode;
-        private LocalDate purchasedAt;
+        private String overseasYn;
     }
 
     @Data
@@ -152,7 +161,7 @@ public class BrokerAccountDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SyncRequest {
-        private String syncType; // BALANCE, POSITION, HISTORY, ALL
+        private String syncType;
     }
 
     @Data
@@ -201,14 +210,12 @@ public class BrokerAccountDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CombinedPortfolioResponse {
-        private BigDecimal totalAssetValue;
+        private BigDecimal estimatedDepositAsset;
         private BigDecimal cashBalance;
-        private BigDecimal depositAmount;
-        private BigDecimal evaluationAmount;
-        private BigDecimal gainLoss;
-        private BigDecimal gainLossRate;
-        private BigDecimal dailyGainLoss;
-        private BigDecimal dailyGainLossRate;
+        private BigDecimal totalPurchaseAmount;
+        private BigDecimal totalValuationAmount;
+        private BigDecimal totalValuationGainLoss;
+        private BigDecimal totalProfitRate;
         private List<AssetPositionDto> positions;
         private Map<String, AccountPortfolioDto> byBroker;
         private LocalDateTime lastSyncedAt;
@@ -222,7 +229,7 @@ public class BrokerAccountDto {
         private Long accountId;
         private String accountNumber;
         private String brokerName;
-        private BigDecimal totalAssetValue;
+        private BigDecimal estimatedDepositAsset;
         private BigDecimal cashBalance;
         private List<AssetPositionDto> positions;
         private LocalDateTime lastSyncedAt;

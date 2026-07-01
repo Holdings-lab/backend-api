@@ -116,21 +116,20 @@ public class AdminDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SetAccountDetailsRequest {
-        // 직접 조작 가능한 파라미터들 (모두 선택사항, 최소 1개 이상 필요)
-        // totalAssetValue는 제외 - 서버가 positions + cashBalance로부터 자동 계산
-        private java.math.BigDecimal depositAmount;
         private java.math.BigDecimal cashBalance;
-        private String principal;
-        private String purchaseAmount;
-        private String valuationAmt;
-        private String depositReceived;
-        private String depositReceivedD1;
-        private String depositReceivedD2;
-        private String depositReceivedF;
-        private String withdrawalAmt;
-        private String loanAmt;
+        private java.math.BigDecimal totalPurchaseAmount;
+        private java.math.BigDecimal totalValuationAmount;
+        private java.math.BigDecimal totalValuationGainLoss;
+        private java.math.BigDecimal totalProfitRate;
+        private java.math.BigDecimal estimatedDepositAsset;
 
-        // 임의의 종목 데이터 리스트 (심볼, 수량, 매입가, 현재가)
+        private String accountDisplay;
+        private String accountName;
+        private String accountNick;
+        private String balance;
+        private String currencyCode;
+        private String availableBalance;
+
         private List<PortfolioPosition> positions;
 
         @Data
@@ -138,20 +137,22 @@ public class AdminDto {
         @NoArgsConstructor
         @AllArgsConstructor
         public static class PortfolioPosition {
-            private String symbol;
-            private String positionType; // STOCK, ETF 등
+            private String itemCode;
+            private String itemName;
+            private String productType;
+            private String productCode;
             private java.math.BigDecimal quantity;
-            private java.math.BigDecimal purchasePrice;
-            private java.math.BigDecimal currentPrice;
+            private java.math.BigDecimal purchaseUnitPrice;
+            private java.math.BigDecimal presentPrice;
         }
 
-        // 최소 1개 이상의 파라미터가 필요한지 검증
+        // 최소 1개 이상의 파라미터가 있는지 검증
         public boolean hasAnyParameter() {
-            return depositAmount != null || cashBalance != null ||
-                   principal != null || purchaseAmount != null || valuationAmt != null ||
-                   depositReceived != null || depositReceivedD1 != null || depositReceivedD2 != null ||
-                   depositReceivedF != null || withdrawalAmt != null || loanAmt != null ||
-                   (positions != null && !positions.isEmpty());
+            return cashBalance != null || totalPurchaseAmount != null || totalValuationAmount != null
+                    || totalValuationGainLoss != null || totalProfitRate != null || estimatedDepositAsset != null
+                    || accountDisplay != null || accountName != null || accountNick != null || balance != null
+                    || currencyCode != null || availableBalance != null
+                    || (positions != null && !positions.isEmpty());
         }
     }
 }

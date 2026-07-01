@@ -1,7 +1,6 @@
 package com.project.server.service.broker;
 
 import com.project.server.domain.AccountBalanceEntity;
-import com.project.server.domain.AssetPositionEntity;
 import com.project.server.domain.BrokerAccountEntity;
 import com.project.server.dto.BrokerAccountDto;
 import com.project.server.exception.ApiException;
@@ -30,9 +29,6 @@ public class PortfolioAggregationService {
     private final AssetPositionRepository assetPositionRepository;
     private final AccountBalanceRepository accountBalanceRepository;
 
-    /**
-     * 사용자의 모든 계좌 통합 포트폴리오 조회
-     */
     public BrokerAccountDto.CombinedPortfolioResponse getUserCombinedPortfolio(Long userId) {
         if (userId == null || userId <= 0) {
             throw ApiException.badRequest("유효하지 않은 사용자 ID입니다.", "INVALID_USER_ID");
@@ -41,109 +37,89 @@ public class PortfolioAggregationService {
         List<BrokerAccountEntity> accounts = brokerAccountRepository.findByUserId(userId);
 
         if (accounts.isEmpty()) {
-            // 연동된 계좌가 없으면 빈 포트폴리오 반환
             return BrokerAccountDto.CombinedPortfolioResponse.builder()
-                    .totalAssetValue(BigDecimal.ZERO)
+                    .estimatedDepositAsset(BigDecimal.ZERO)
                     .cashBalance(BigDecimal.ZERO)
-                    .depositAmount(BigDecimal.ZERO)
-                    .evaluationAmount(BigDecimal.ZERO)
-                    .gainLoss(BigDecimal.ZERO)
-                    .gainLossRate(BigDecimal.ZERO)
-                    .dailyGainLoss(BigDecimal.ZERO)
-                    .dailyGainLossRate(BigDecimal.ZERO)
+                    .totalPurchaseAmount(BigDecimal.ZERO)
+                    .totalValuationAmount(BigDecimal.ZERO)
+                    .totalValuationGainLoss(BigDecimal.ZERO)
+                    .totalProfitRate(BigDecimal.ZERO)
                     .positions(List.of())
                     .byBroker(Map.of())
                     .lastSyncedAt(null)
                     .build();
         }
 
-        // 각 계좌별 포트폴리오 계산
-        BigDecimal totalAssetValue = BigDecimal.ZERO;
+        BigDecimal estimatedDepositAsset = BigDecimal.ZERO;
         BigDecimal totalCashBalance = BigDecimal.ZERO;
-        BigDecimal totalDepositAmount = BigDecimal.ZERO;
-        BigDecimal totalEvaluationAmount = BigDecimal.ZERO;
-        BigDecimal totalGainLoss = BigDecimal.ZERO;
-        BigDecimal totalDailyGainLoss = BigDecimal.ZERO;
+        BigDecimal totalPurchaseAmount = BigDecimal.ZERO;
+        BigDecimal totalValuationAmount = BigDecimal.ZERO;
+        BigDecimal totalValuationGainLoss = BigDecimal.ZERO;
 
         Map<String, BrokerAccountDto.AccountPortfolioDto> byBroker = new HashMap<>();
-        List<BrokerAccountDto.AssetPositionDto> allPositions = List.of();
         LocalDateTime latestSyncTime = null;
 
         for (BrokerAccountEntity account : accounts) {
-            // 최신 잔액 정보 조회
             AccountBalanceEntity latestBalance = accountBalanceRepository
                     .findTopByAccountIdOrderByAsOfDateDesc(account.getId())
                     .orElse(null);
 
             if (latestBalance != null) {
-                totalAssetValue = totalAssetValue.add(latestBalance.getTotalAssetValue() != null ? latestBalance.getTotalAssetValue() : BigDecimal.ZERO);
-                totalCashBalance = totalCashBalance.add(latestBalance.getCashBalance() != null ? latestBalance.getCashBalance() : BigDecimal.ZERO);
-                totalDepositAmount = totalDepositAmount.add(latestBalance.getDepositAmount() != null ? latestBalance.getDepositAmount() : BigDecimal.ZERO);
-                totalEvaluationAmount = totalEvaluationAmount.add(latestBalance.getEvaluationAmount() != null ? latestBalance.getEvaluationAmount() : BigDecimal.ZERO);
-                totalGainLoss = totalGainLoss.add(latestBalance.getGainLoss() != null ? latestBalance.getGainLoss() : BigDecimal.ZERO);
-                totalDailyGainLoss = totalDailyGainLoss.add(latestBalance.getDailyGainLoss() != null ? latestBalance.getDailyGainLoss() : BigDecimal.ZERO);
+                estimatedDepositAsset = estimatedDepositAsset.add(
+                        nullToZero(latestBalance.getTotalAssetValue()));
+                totalCashBalance = totalCashBalance.add(nullToZero(latestBalance.getCashBalance()));
+                totalPurchaseAmount = totalPurchaseAmount.add(nullToZero(latestBalance.getDepositAmount()));
+                totalValuationAmount = totalValuationAmount.add(nullToZero(latestBalance.getEvaluationAmount()));
+                totalValuationGainLoss = totalValuationGainLoss.add(nullToZero(latestBalance.getGainLoss()));
 
                 if (latestSyncTime == null || latestBalance.getLastSyncedAt().isAfter(latestSyncTime)) {
                     latestSyncTime = latestBalance.getLastSyncedAt();
                 }
             }
 
-            // 계좌별 포지션 조회
-            List<AssetPositionEntity> positions = assetPositionRepository.findByAccountId(account.getId());
-            List<BrokerAccountDto.AssetPositionDto> positionDtos = positions.stream()
-                    .map(this::toPositionDto)
+            List<BrokerAccountDto.AssetPositionDto> positionDtos = assetPositionRepository
+                    .findByAccountId(account.getId()).stream()
+                    .map(HyphenFieldMapper::toPositionDto)
                     .collect(Collectors.toList());
 
-            BrokerAccountDto.AccountPortfolioDto accountPortfolio = BrokerAccountDto.AccountPortfolioDto.builder()
-                    .accountId(account.getId())
-                    .accountNumber(account.getAccountNumber())
-                    .brokerName(account.getBrokerName())
-                    .totalAssetValue(latestBalance != null ? latestBalance.getTotalAssetValue() : BigDecimal.ZERO)
-                    .cashBalance(latestBalance != null ? latestBalance.getCashBalance() : BigDecimal.ZERO)
-                    .positions(positionDtos)
-                    .lastSyncedAt(latestBalance != null ? latestBalance.getLastSyncedAt() : null)
-                    .build();
-
-            byBroker.put(account.getBrokerName() + "_" + account.getAccountNumber(), accountPortfolio);
+            byBroker.put(account.getBrokerName() + "_" + account.getAccountNumber(),
+                    BrokerAccountDto.AccountPortfolioDto.builder()
+                            .accountId(account.getId())
+                            .accountNumber(account.getAccountNumber())
+                            .brokerName(account.getBrokerName())
+                            .estimatedDepositAsset(
+                                    latestBalance != null ? nullToZero(latestBalance.getTotalAssetValue()) : BigDecimal.ZERO)
+                            .cashBalance(latestBalance != null ? nullToZero(latestBalance.getCashBalance()) : BigDecimal.ZERO)
+                            .positions(positionDtos)
+                            .lastSyncedAt(latestBalance != null ? latestBalance.getLastSyncedAt() : null)
+                            .build());
         }
 
-        // 전체 수익률 계산
-        BigDecimal gainLossRate = BigDecimal.ZERO;
-        if (totalDepositAmount.compareTo(BigDecimal.ZERO) > 0) {
-            gainLossRate = totalGainLoss.divide(totalDepositAmount, 4, java.math.RoundingMode.HALF_UP)
+        BigDecimal totalProfitRate = BigDecimal.ZERO;
+        if (totalPurchaseAmount.compareTo(BigDecimal.ZERO) > 0) {
+            totalProfitRate = totalValuationGainLoss
+                    .divide(totalPurchaseAmount, 4, java.math.RoundingMode.HALF_UP)
                     .multiply(new BigDecimal(100));
         }
 
-        BigDecimal dailyGainLossRate = BigDecimal.ZERO;
-        if (totalAssetValue.compareTo(BigDecimal.ZERO) > 0) {
-            dailyGainLossRate = totalDailyGainLoss.divide(totalAssetValue, 4, java.math.RoundingMode.HALF_UP)
-                    .multiply(new BigDecimal(100));
-        }
-
-        // 모든 포지션 수집
-        allPositions = accounts.stream()
+        List<BrokerAccountDto.AssetPositionDto> allPositions = accounts.stream()
                 .flatMap(account -> assetPositionRepository.findByAccountId(account.getId()).stream())
-                .map(this::toPositionDto)
+                .map(HyphenFieldMapper::toPositionDto)
                 .collect(Collectors.toList());
 
         return BrokerAccountDto.CombinedPortfolioResponse.builder()
-                .totalAssetValue(totalAssetValue)
+                .estimatedDepositAsset(estimatedDepositAsset)
                 .cashBalance(totalCashBalance)
-                .depositAmount(totalDepositAmount)
-                .evaluationAmount(totalEvaluationAmount)
-                .gainLoss(totalGainLoss)
-                .gainLossRate(gainLossRate)
-                .dailyGainLoss(totalDailyGainLoss)
-                .dailyGainLossRate(dailyGainLossRate)
+                .totalPurchaseAmount(totalPurchaseAmount)
+                .totalValuationAmount(totalValuationAmount)
+                .totalValuationGainLoss(totalValuationGainLoss)
+                .totalProfitRate(totalProfitRate)
                 .positions(allPositions)
                 .byBroker(byBroker)
                 .lastSyncedAt(latestSyncTime)
                 .build();
     }
 
-    /**
-     * 특정 계좌의 포트폴리오 조회
-     */
     public BrokerAccountDto.AccountPortfolioDto getAccountPortfolio(Long userId, Long accountId) {
         BrokerAccountEntity account = validateAccountAccess(userId, accountId);
 
@@ -151,44 +127,21 @@ public class PortfolioAggregationService {
                 .findTopByAccountIdOrderByAsOfDateDesc(accountId)
                 .orElse(null);
 
-        List<AssetPositionEntity> positions = assetPositionRepository.findByAccountId(accountId);
-        List<BrokerAccountDto.AssetPositionDto> positionDtos = positions.stream()
-                .map(this::toPositionDto)
+        List<BrokerAccountDto.AssetPositionDto> positionDtos = assetPositionRepository.findByAccountId(accountId).stream()
+                .map(HyphenFieldMapper::toPositionDto)
                 .collect(Collectors.toList());
 
         return BrokerAccountDto.AccountPortfolioDto.builder()
                 .accountId(accountId)
                 .accountNumber(account.getAccountNumber())
                 .brokerName(account.getBrokerName())
-                .totalAssetValue(latestBalance != null ? latestBalance.getTotalAssetValue() : BigDecimal.ZERO)
-                .cashBalance(latestBalance != null ? latestBalance.getCashBalance() : BigDecimal.ZERO)
+                .estimatedDepositAsset(latestBalance != null ? nullToZero(latestBalance.getTotalAssetValue()) : BigDecimal.ZERO)
+                .cashBalance(latestBalance != null ? nullToZero(latestBalance.getCashBalance()) : BigDecimal.ZERO)
                 .positions(positionDtos)
                 .lastSyncedAt(latestBalance != null ? latestBalance.getLastSyncedAt() : null)
                 .build();
     }
 
-    /**
-     * AssetPositionEntity를 DTO로 변환
-     */
-    private BrokerAccountDto.AssetPositionDto toPositionDto(AssetPositionEntity entity) {
-        return BrokerAccountDto.AssetPositionDto.builder()
-                .symbol(entity.getSymbol())
-                .positionType(entity.getPositionType())
-                .quantity(entity.getQuantity())
-                .purchasePrice(entity.getPurchasePrice())
-                .currentPrice(entity.getCurrentPrice())
-                .currentValue(entity.getCurrentValue())
-                .purchaseAmount(entity.getPurchaseAmount())
-                .gainLoss(entity.getGainLoss())
-                .gainLossRate(entity.getGainLossRate())
-                .currencyCode(entity.getCurrencyCode())
-                .purchasedAt(entity.getPurchasedAt())
-                .build();
-    }
-
-    /**
-     * 포트폴리오 분석: 자산 배분
-     */
     public Map<String, Object> analyzeAssetAllocation(Long userId) {
         if (userId == null || userId <= 0) {
             throw ApiException.badRequest("유효하지 않은 사용자 ID입니다.", "INVALID_USER_ID");
@@ -200,21 +153,17 @@ public class PortfolioAggregationService {
         BigDecimal totalValue = BigDecimal.ZERO;
 
         for (BrokerAccountEntity account : accounts) {
-            List<AssetPositionEntity> positions = assetPositionRepository.findByAccountId(account.getId());
-
-            for (AssetPositionEntity position : positions) {
-                String positionType = position.getPositionType() != null ? position.getPositionType() : "UNKNOWN";
-                BigDecimal currentValue = position.getCurrentValue() != null ? position.getCurrentValue() : BigDecimal.ZERO;
-
-                assetTypeDistribution.merge(positionType, currentValue, BigDecimal::add);
-                totalValue = totalValue.add(currentValue);
+            for (var position : assetPositionRepository.findByAccountId(account.getId())) {
+                String productType = position.getPositionType() != null ? position.getPositionType() : "UNKNOWN";
+                BigDecimal valuationAmount = nullToZero(position.getCurrentValue());
+                assetTypeDistribution.merge(productType, valuationAmount, BigDecimal::add);
+                totalValue = totalValue.add(valuationAmount);
             }
         }
 
-        // 비율 계산
         Map<String, Object> allocation = new HashMap<>();
         BigDecimal finalTotalValue = totalValue;
-        
+
         assetTypeDistribution.forEach((type, value) -> {
             BigDecimal percentage = BigDecimal.ZERO;
             
@@ -223,8 +172,6 @@ public class PortfolioAggregationService {
                 percentage = value.divide(finalTotalValue, 4, java.math.RoundingMode.HALF_UP)
                         .multiply(new BigDecimal(100));
             }
-            
-            // 조건문 밖에서 무조건 맵에 삽입!
             allocation.put(type, Map.of("value", value, "percentage", percentage));
         });
         allocation.put("totalValue", totalValue);
@@ -242,14 +189,12 @@ public class PortfolioAggregationService {
         BrokerAccountDto.CombinedPortfolioResponse portfolio = getUserCombinedPortfolio(userId);
 
         return Map.of(
-                "totalInvestment", portfolio.getDepositAmount(),
-                "currentValue", portfolio.getTotalAssetValue(),
-                "totalGain", portfolio.getGainLoss(),
-                "gainRate", portfolio.getGainLossRate(),
-                "dailyGain", portfolio.getDailyGainLoss(),
-                "dailyGainRate", portfolio.getDailyGainLossRate(),
+                "totalPurchaseAmount", portfolio.getTotalPurchaseAmount(),
+                "estimatedDepositAsset", portfolio.getEstimatedDepositAsset(),
+                "totalValuationGainLoss", portfolio.getTotalValuationGainLoss(),
+                "totalProfitRate", portfolio.getTotalProfitRate(),
                 "positions", portfolio.getPositions().size(),
-                "lastSyncedAt", portfolio.getLastSyncedAt()
+                "lastSyncedAt", portfolio.getLastSyncedAt() != null ? portfolio.getLastSyncedAt() : ""
         );
     }
 
@@ -272,5 +217,9 @@ public class PortfolioAggregationService {
         }
 
         return account;
+    }
+
+    private static BigDecimal nullToZero(BigDecimal value) {
+        return value != null ? value : BigDecimal.ZERO;
     }
 }

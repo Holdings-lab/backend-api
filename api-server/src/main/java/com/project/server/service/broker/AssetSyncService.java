@@ -213,16 +213,20 @@ public class AssetSyncService {
         int savedCount = 0;
         if (itemList.isArray()) {
             for (JsonNode position : itemList) {
-                String symbol = textOr(position, "itemCd", "itemNm");
-                if (symbol == null || symbol.isBlank()) {
+                String itemCode = textOr(position, "itemCd");
+                if (itemCode == null || itemCode.isBlank()) {
                     continue;
                 }
 
                 AssetPositionEntity entity = AssetPositionEntity.builder()
                         .accountId(account.getId())
                         .userId(account.getUserId())
-                        .symbol(symbol)
+                        .symbol(itemCode)
+                        .itemCode(itemCode)
+                        .itemName(textOr(position, "itemNm"))
                         .positionType(defaultString(textOr(position, "productType"), "STOCK"))
+                        .productCode(textOr(position, "productCd"))
+                        .overseasYn(textOr(position, "exYn"))
                         .quantity(firstDecimal(position, "quantity"))
                         .purchasePrice(firstDecimal(position, "purchaseUnitPrice"))
                         .currentPrice(firstDecimal(position, "presentAmt"))

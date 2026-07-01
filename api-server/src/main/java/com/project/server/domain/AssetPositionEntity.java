@@ -36,8 +36,20 @@ public class AssetPositionEntity {
     @Column(name = "symbol", nullable = false, length = 20)
     private String symbol;
 
+    @Column(name = "item_code", length = 20)
+    private String itemCode;
+
+    @Column(name = "item_name", length = 100)
+    private String itemName;
+
+    @Column(name = "product_code", length = 10)
+    private String productCode;
+
+    @Column(name = "overseas_yn", length = 1)
+    private String overseasYn;
+
     @Column(name = "position_type", length = 20)
-    private String positionType;  // DOMESTIC_STOCK, FOREIGN_STOCK, FUND, OPTION
+    private String positionType;
 
     @Column(name = "quantity", precision = 15, scale = 2)
     private BigDecimal quantity;

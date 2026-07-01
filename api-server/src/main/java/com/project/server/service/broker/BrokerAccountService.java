@@ -17,7 +17,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -114,7 +113,9 @@ public class BrokerAccountService {
               continue;
             }
 
-            String accountName = textOr(accountNode, "acctNm", "acctNick", "acctHolder");
+            String accountName = textOr(accountNode, "acctNick", "acctNm");
+            String accountOwner = textOr(accountNode, "acctHolder", "acctNm");
+            String accountType = textOr(accountNode, "acctNm");
             String hyphenAccountDetailsJson = accountNode.toString();
             boolean isPrimary = brokerAccountRepository.findByUserId(userId).isEmpty() && linkedAccounts.isEmpty();
 
@@ -123,8 +124,8 @@ public class BrokerAccountService {
                 .brokerName(brokerName.toUpperCase())
                 .accountNumber(accountNumber)
                 .accountNickname(accountName)
-                .accountOwnerName(accountName)
-                .accountType("STOCK")
+                .accountOwnerName(accountOwner)
+                .accountType(accountType != null ? accountType : "UNKNOWN")
                 .hyphenStatus(BrokerAccountEntity.HyphenStatus.CONNECTED)
                 .isPrimary(isPrimary)
                 .syncCount(0)
@@ -252,8 +253,10 @@ public class BrokerAccountService {
         .accountNumber(entity.getAccountNumber())
         .accountNickname(entity.getAccountNickname())
         .accountOwnerName(entity.getAccountOwnerName())
+        .accountType(entity.getAccountType())
         .status(entity.getHyphenStatus() != null ? entity.getHyphenStatus().name() : BrokerAccountEntity.HyphenStatus.PENDING.name())
         .isPrimary(entity.getIsPrimary())
+        .hyphenAccount(parseHyphenAccount(entity))
         .lastSyncedAt(entity.getLastSyncedAt())
         .syncCount(entity.getSyncCount())
         .createdAt(entity.getCreatedAt())
@@ -261,49 +264,13 @@ public class BrokerAccountService {
   }
 
   private BrokerAccountDto.BrokerAccountDetailResponse toDetailResponse(BrokerAccountEntity entity) {
-    Map<String, Object> accountDetails = new HashMap<>();
-    if (entity.getHyphenAccountDetails() != null && !entity.getHyphenAccountDetails().isEmpty()) {
-      try {
-        accountDetails = objectMapper.readValue(
-            entity.getHyphenAccountDetails(),
-            new TypeReference<Map<String, Object>>() {
-            });
-      } catch (Exception e) {
-        log.warn("Failed to parse Hyphen account details JSON for accountId={}", entity.getId(), e);
-      }
-    }
-
     BrokerAccountDto.AccountBalanceDto latestBalance = accountBalanceRepository
         .findTopByAccountIdOrderByAsOfDateDesc(entity.getId())
-        .map(balance -> BrokerAccountDto.AccountBalanceDto.builder()
-            .id(balance.getId())
-            .totalAssetValue(balance.getTotalAssetValue())
-            .cashBalance(balance.getCashBalance())
-            .depositAmount(balance.getDepositAmount())
-            .evaluationAmount(balance.getEvaluationAmount())
-            .gainLoss(balance.getGainLoss())
-            .gainLossRate(balance.getGainLossRate())
-            .dailyGainLoss(balance.getDailyGainLoss())
-            .dailyGainLossRate(balance.getDailyGainLossRate())
-            .asOfDate(balance.getAsOfDate())
-            .lastSyncedAt(balance.getLastSyncedAt())
-            .build())
+        .map(HyphenFieldMapper::toBalanceDto)
         .orElse(null);
 
     List<BrokerAccountDto.AssetPositionDto> positions = assetPositionRepository.findByAccountId(entity.getId()).stream()
-        .map(position -> BrokerAccountDto.AssetPositionDto.builder()
-            .symbol(position.getSymbol())
-            .positionType(position.getPositionType())
-            .quantity(position.getQuantity())
-            .purchasePrice(position.getPurchasePrice())
-            .currentPrice(position.getCurrentPrice())
-            .currentValue(position.getCurrentValue())
-            .purchaseAmount(position.getPurchaseAmount())
-            .gainLoss(position.getGainLoss())
-            .gainLossRate(position.getGainLossRate())
-            .currencyCode(position.getCurrencyCode())
-            .purchasedAt(position.getPurchasedAt())
-            .build())
+        .map(HyphenFieldMapper::toPositionDto)
         .collect(Collectors.toList());
 
     return BrokerAccountDto.BrokerAccountDetailResponse.builder()
@@ -315,33 +282,28 @@ public class BrokerAccountService {
         .accountType(entity.getAccountType())
         .status(entity.getHyphenStatus() != null ? entity.getHyphenStatus().name() : BrokerAccountEntity.HyphenStatus.PENDING.name())
         .isPrimary(entity.getIsPrimary())
+        .hyphenAccount(parseHyphenAccount(entity))
         .latestBalance(latestBalance)
         .positions(positions)
         .lastSyncedAt(entity.getLastSyncedAt())
         .syncCount(entity.getSyncCount())
-        .accountDisplay(getString(accountDetails, "acctDisp"))
-        .principal(getString(accountDetails, "totPurchaseAmt", "balance"))
-        .purchaseAmount(getString(accountDetails, "totPurchaseAmt"))
-        .valuationAmt(getString(accountDetails, "totValuationAmt"))
-        .valuationPL(getString(accountDetails, "totValuationGL"))
-        .earningsRate(getString(accountDetails, "totProfitRate"))
-        .depositReceived(getString(accountDetails, "estDepAsset", "balance"))
-        .depositReceivedD1(getString(accountDetails, "depositReceivedD1"))
-        .depositReceivedD2(getString(accountDetails, "depositReceivedD2"))
-        .depositReceivedF(getString(accountDetails, "depositReceivedF"))
-        .withdrawalAmt(getString(accountDetails, "withdrawalAmt"))
-        .loanAmt(getString(accountDetails, "loanAmt"))
         .build();
   }
 
-  private static String getString(Map<String, Object> map, String... keys) {
-    for (String key : keys) {
-      Object value = map.get(key);
-      if (value != null && !String.valueOf(value).isBlank()) {
-        return String.valueOf(value);
-      }
+  private BrokerAccountDto.HyphenAccountSnapshot parseHyphenAccount(BrokerAccountEntity entity) {
+    if (entity.getHyphenAccountDetails() == null || entity.getHyphenAccountDetails().isEmpty()) {
+      return null;
     }
-    return null;
+    try {
+      Map<String, Object> accountDetails = objectMapper.readValue(
+          entity.getHyphenAccountDetails(),
+          new TypeReference<Map<String, Object>>() {
+          });
+      return HyphenFieldMapper.toAccountSnapshot(accountDetails);
+    } catch (Exception e) {
+      log.warn("Failed to parse Hyphen account details JSON for accountId={}", entity.getId(), e);
+      return null;
+    }
   }
 
   private void validateUserAndBrokers(Long userId, BrokerAccountDto.LinkRequest request) {
