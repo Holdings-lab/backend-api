@@ -1,9 +1,9 @@
 -- PostgreSQL 초기화 스크립트
 -- 이 스크립트는 Docker 컨테이너 시작 시 자동으로 실행됩니다.
 
--- pwa_db 데이터베이스 존재 확인 후 생성
-SELECT 'CREATE DATABASE pwa_db'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'pwa_db')\gexec
+-- holdings 데이터베이스 존재 확인 후 생성
+SELECT 'CREATE DATABASE holdings'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'holdings')\gexec
 
 -- 기본 테이블들은 Spring JPA (Hibernate)에서 ddl-auto: update로 자동 생성됩니다.
 -- 필요시 여기에 추가 초기화 스크립트를 작성하세요.

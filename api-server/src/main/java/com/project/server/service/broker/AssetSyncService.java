@@ -4,14 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.project.server.domain.AccountBalanceEntity;
 import com.project.server.domain.AssetPositionEntity;
 import com.project.server.domain.BrokerAccountEntity;
-import com.project.server.domain.CodefSyncHistoryEntity;
+import com.project.server.domain.HyphenSyncHistoryEntity;
 import com.project.server.dto.BrokerAccountDto;
 import com.project.server.exception.ApiException;
 import com.project.server.repository.AccountBalanceRepository;
 import com.project.server.repository.AssetPositionRepository;
 import com.project.server.repository.BrokerAccountRepository;
-import com.project.server.repository.CodefSyncHistoryRepository;
-import com.project.server.service.integration.CodefApiClientService;
+import com.project.server.repository.HyphenSyncHistoryRepository;
+import com.project.server.service.integration.HyphenApiClient;
 import com.project.server.service.security.CryptoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,8 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -32,48 +32,47 @@ import java.util.stream.Collectors;
 @Transactional
 public class AssetSyncService {
 
+    private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
+
     private final BrokerAccountRepository brokerAccountRepository;
     private final AssetPositionRepository assetPositionRepository;
     private final AccountBalanceRepository accountBalanceRepository;
-    private final CodefSyncHistoryRepository syncHistoryRepository;
-    private final CodefApiClientService codefApiClientService;
+    private final HyphenSyncHistoryRepository syncHistoryRepository;
+    private final HyphenApiClient hyphenApiClient;
     private final CryptoService cryptoService;
 
-    /**
-     * 즉시 동기화 요청
-     */
     public BrokerAccountDto.SyncResponse requestSync(Long userId, Long accountId) {
         BrokerAccountEntity account = validateAccountAccess(userId, accountId);
 
-        if (account.getCodefStatus() != BrokerAccountEntity.CodefStatus.CONNECTED) {
+        if (account.getHyphenStatus() != BrokerAccountEntity.HyphenStatus.CONNECTED) {
             throw ApiException.badRequest("연동되지 않은 계좌입니다.", "ACCOUNT_NOT_CONNECTED");
         }
 
-        // 동기화 시작 기록
-        CodefSyncHistoryEntity history = CodefSyncHistoryEntity.builder()
+        long startedAtMs = System.currentTimeMillis();
+        HyphenSyncHistoryEntity history = HyphenSyncHistoryEntity.builder()
                 .accountId(accountId)
                 .userId(userId)
                 .syncType("ALL")
-                .status(CodefSyncHistoryEntity.SyncStatus.PENDING)
+                .status(HyphenSyncHistoryEntity.SyncStatus.PENDING)
                 .startedAt(LocalDateTime.now())
                 .build();
         syncHistoryRepository.save(history);
 
         Long syncId = history.getId();
 
-        // 비동기로 동기화 수행 (실제 구현에서는 별도 스레드/큐 사용)
         try {
             performSync(account);
 
-            history.setStatus(CodefSyncHistoryEntity.SyncStatus.SUCCESS);
+            history.setStatus(HyphenSyncHistoryEntity.SyncStatus.SUCCESS);
             history.setCompletedAt(LocalDateTime.now());
-            history.setSyncDurationMs((int) (System.currentTimeMillis() - history.getStartedAt().toString().hashCode()));
+            history.setSyncDurationMs((int) (System.currentTimeMillis() - startedAtMs));
 
         } catch (Exception e) {
             log.error("Sync failed for account: {}", accountId, e);
-            history.setStatus(CodefSyncHistoryEntity.SyncStatus.FAILURE);
+            history.setStatus(HyphenSyncHistoryEntity.SyncStatus.FAILURE);
             history.setErrorMessage(e.getMessage());
             history.setCompletedAt(LocalDateTime.now());
+            history.setSyncDurationMs((int) (System.currentTimeMillis() - startedAtMs));
         }
 
         syncHistoryRepository.save(history);
@@ -83,21 +82,18 @@ public class AssetSyncService {
 
         return BrokerAccountDto.SyncResponse.builder()
                 .syncId(syncId)
-                .status("STARTED")
-                .syncType("ALL")
-                .startedAt(LocalDateTime.now())
+                .status(history.getStatus().name())
+                .syncType(history.getSyncType())
+                .startedAt(history.getStartedAt())
                 .build();
     }
 
-    /**
-     * 정기 동기화 (스케줄러)
-     */
-    @Scheduled(cron = "${codef.sync.schedule-cron:0 0 12,18 * * *}")
+    @Scheduled(cron = "${hyphen.sync.schedule-cron:0 0 12,18 * * *}")
     public void scheduledSync() {
-        log.info("Starting scheduled CODEF sync...");
+        log.info("Starting scheduled Hyphen sync...");
 
         List<BrokerAccountEntity> connectedAccounts = brokerAccountRepository
-                .findByCodefStatusIn(List.of(BrokerAccountEntity.CodefStatus.CONNECTED));
+                .findByHyphenStatusIn(List.of(BrokerAccountEntity.HyphenStatus.CONNECTED));
 
         connectedAccounts.forEach(account -> {
             try {
@@ -106,158 +102,218 @@ public class AssetSyncService {
                 brokerAccountRepository.save(account);
             } catch (Exception e) {
                 log.error("Scheduled sync failed for account: {}", account.getId(), e);
-                account.setCodefStatus(BrokerAccountEntity.CodefStatus.ERROR);
+                account.setHyphenStatus(BrokerAccountEntity.HyphenStatus.ERROR);
                 brokerAccountRepository.save(account);
             }
         });
 
-        log.info("Scheduled sync completed");
+        log.info("Scheduled Hyphen sync completed");
     }
 
-    /**
-     * 실제 동기화 수행
-     */
     private void performSync(BrokerAccountEntity account) {
-        String accessToken = codefApiClientService.getAccessToken();
-        String connectedId = account.getConnectedId();
+        HyphenApiClient.HyphenCredential credential = buildCredential(account);
 
-        if (connectedId == null || connectedId.isBlank()) {
-            throw ApiException.badRequest("연동 ID가 누락되었습니다.", "MISSING_CONNECTED_ID");
-        }
-
-        connectedId = cryptoService.decrypt(connectedId);
-
-        syncBalance(account, accessToken, connectedId);
-        syncPositions(account, accessToken, connectedId);
-        syncHistory(account, accessToken, connectedId);
+        syncHoldings(account, credential);
+        syncCashBalance(account, credential);
+        syncDepositWithdrawHistory(account, credential);
+        syncAssetTransactionHistory(account, credential);
     }
 
-    /**
-     * 계좌 잔액 동기화
-     */
-    private void syncBalance(BrokerAccountEntity account, String accessToken, String connectedId) {
+    private HyphenApiClient.HyphenCredential buildCredential(BrokerAccountEntity account) {
+        String hyphenUserId = decryptRequired(account.getHyphenUserId(), "NO_HYPHEN_USER_ID");
+        String hyphenUserPw = decryptRequired(account.getHyphenUserPassword(), "NO_HYPHEN_USER_PW");
+        String accountPassword = decryptOptional(account.getHyphenAccountPassword());
+
+        return new HyphenApiClient.HyphenCredential(
+                hyphenUserId,
+                hyphenUserPw,
+                "ID",
+                "N",
+                accountPassword);
+    }
+
+    private void syncHoldings(BrokerAccountEntity account, HyphenApiClient.HyphenCredential credential) {
         try {
-            JsonNode balanceData = codefApiClientService.fetchAccountBalance(accessToken, connectedId, account.getBrokerName(), account.getAccountNumber());
+            JsonNode holdingsData = hyphenApiClient.fetchHoldings(
+                    credential, account.getBrokerName(), account.getAccountNumber());
+            JsonNode data = extractDataNode(holdingsData);
+            JsonNode accountNode = findHoldingsAccountNode(data, account.getAccountNumber());
 
-            if (balanceData == null || !balanceData.has("result")) {
-                throw ApiException.internalServerError("잔액 조회 응답이 올바르지 않습니다.", "INVALID_BALANCE_RESPONSE");
-            }
+            saveBalanceFromHoldings(account, accountNode);
+            savePositionsFromHoldings(account, accountNode);
 
-            JsonNode data = balanceData.path("result").path("data");
-
-            AccountBalanceEntity balance = AccountBalanceEntity.builder()
-                    .accountId(account.getId())
-                    .userId(account.getUserId())
-                    .totalAssetValue(new BigDecimal(data.path("totalAsset").asText("0")))
-                    .cashBalance(new BigDecimal(data.path("cashBalance").asText("0")))
-                    .depositAmount(new BigDecimal(data.path("depositAmount").asText("0")))
-                    .evaluationAmount(new BigDecimal(data.path("evaluationAmount").asText("0")))
-                    .gainLoss(new BigDecimal(data.path("gainLoss").asText("0")))
-                    .gainLossRate(new BigDecimal(data.path("gainLossRate").asText("0")))
-                    .dailyGainLoss(new BigDecimal(data.path("dailyGainLoss").asText("0")))
-                    .dailyGainLossRate(new BigDecimal(data.path("dailyGainLossRate").asText("0")))
-                    .asOfDate(LocalDate.now())
-                    .lastSyncedAt(LocalDateTime.now())
-                    .build();
-
-            accountBalanceRepository.save(balance);
-            log.info("Balance synced for account: {}", account.getId());
-
+        } catch (ApiException ae) {
+            throw ae;
         } catch (Exception e) {
-            log.error("Error syncing balance for account: {}", account.getId(), e);
-            throw ApiException.internalServerError("잔액 동기화에 실패했습니다.", "BALANCE_SYNC_FAILED");
+            log.error("Error syncing holdings for account: {}", account.getId(), e);
+            throw ApiException.internalServerError("잔고 동기화에 실패했습니다.", "HOLDINGS_SYNC_FAILED");
         }
     }
 
-    /**
-     * 보유 자산(포지션) 동기화
-     */
-    private void syncPositions(BrokerAccountEntity account, String accessToken, String connectedId) {
+    private void syncCashBalance(BrokerAccountEntity account, HyphenApiClient.HyphenCredential credential) {
         try {
-            JsonNode holdingData = codefApiClientService.fetchHoldingAssets(accessToken, connectedId, account.getBrokerName(), account.getAccountNumber());
+            JsonNode cashData = hyphenApiClient.fetchCashBalance(
+                    credential, account.getBrokerName(), account.getAccountNumber());
+            JsonNode data = extractDataNode(cashData);
+            BigDecimal cashBalance = firstDecimal(data, "curBal");
 
-            if (holdingData == null || !holdingData.has("result")) {
-                throw ApiException.internalServerError("보유 자산 조회 응답이 올바르지 않습니다.", "INVALID_HOLDING_RESPONSE");
-            }
-
-            JsonNode positions = holdingData.path("result").path("data").path("holdings");
-
-            // 기존 포지션 삭제
-            assetPositionRepository.deleteByAccountId(account.getId());
-
-            // 새로운 포지션 저장
-            if (positions.isArray()) {
-                for (JsonNode position : positions) {
-                    AssetPositionEntity entity = AssetPositionEntity.builder()
-                            .accountId(account.getId())
-                            .userId(account.getUserId())
-                            .symbol(position.path("symbol").asText())
-                            .positionType(position.path("type").asText("STOCK"))
-                            .quantity(new BigDecimal(position.path("quantity").asText("0")))
-                            .purchasePrice(new BigDecimal(position.path("purchasePrice").asText("0")))
-                            .currentPrice(new BigDecimal(position.path("currentPrice").asText("0")))
-                            .currentValue(new BigDecimal(position.path("currentValue").asText("0")))
-                            .purchaseAmount(new BigDecimal(position.path("purchaseAmount").asText("0")))
-                            .gainLoss(new BigDecimal(position.path("gainLoss").asText("0")))
-                            .gainLossRate(new BigDecimal(position.path("gainLossRate").asText("0")))
-                            .currencyCode(position.path("currency").asText("KRW"))
-                            .lastSyncedAt(LocalDateTime.now())
-                            .build();
-
-                    assetPositionRepository.save(entity);
-                }
-            }
-
-            log.info("Positions synced for account: {}", account.getId());
-
-        } catch (Exception e) {
-            log.error("Error syncing positions for account: {}", account.getId(), e);
-            throw ApiException.internalServerError("자산 포지션 동기화에 실패했습니다.", "POSITION_SYNC_FAILED");
-        }
-    }
-
-    /**
-     * 거래 내역 동기화 (필요시)
-     */
-    private void syncHistory(BrokerAccountEntity account, String accessToken, String connectedId) {
-        try {
-            // 최근 1개월 거래내역 조회
-            String toDate = LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
-            String fromDate = LocalDate.now().minusMonths(1).format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
-
-            JsonNode historyData = codefApiClientService.fetchTransactionHistory(
-                    accessToken,
-                    connectedId,
-                    account.getBrokerName(),
-                    account.getAccountNumber(),
-                    fromDate.toString(),
-                    toDate.toString()
-            );
-
-            if (historyData == null || !historyData.has("result")) {
-                log.warn("Empty transaction history for account: {}", account.getId());
+            if (cashBalance.compareTo(BigDecimal.ZERO) == 0) {
                 return;
             }
 
-            // 거래 내역은 별도 테이블에 저장 (구현 생략)
-            log.info("History synced for account: {}", account.getId());
+            accountBalanceRepository.findTopByAccountIdOrderByAsOfDateDesc(account.getId())
+                    .ifPresentOrElse(balance -> {
+                        balance.setCashBalance(cashBalance);
+                        balance.setTotalAssetValue(balance.getEvaluationAmount().add(cashBalance));
+                        balance.setLastSyncedAt(LocalDateTime.now());
+                        accountBalanceRepository.save(balance);
+                    }, () -> log.warn("No balance record to update cash for account: {}", account.getId()));
 
+            log.info("Cash balance synced for account: {}", account.getId());
         } catch (Exception e) {
-            log.error("Error syncing history for account: {}", account.getId(), e);
-            // 거래 내역 조회 실패는 치명적이지 않으므로 로그만 기록
+            log.error("Error syncing cash balance for account: {}", account.getId(), e);
         }
     }
 
-    /**
-     * 동기화 상태 조회
-     */
+    private void saveBalanceFromHoldings(BrokerAccountEntity account, JsonNode accountNode) {
+        BigDecimal evaluationAmount = firstDecimal(accountNode, "totValuationAmt");
+        BigDecimal depositAmount = firstDecimal(accountNode, "totPurchaseAmt");
+        BigDecimal gainLoss = firstDecimal(accountNode, "totValuationGL");
+        BigDecimal gainLossRate = firstDecimal(accountNode, "totProfitRate");
+        BigDecimal estimatedDepositAsset = firstDecimal(accountNode, "estDepAsset");
+
+        BigDecimal totalAssetValue = estimatedDepositAsset;
+        if (totalAssetValue.compareTo(BigDecimal.ZERO) == 0) {
+            totalAssetValue = evaluationAmount;
+        }
+
+        AccountBalanceEntity balance = AccountBalanceEntity.builder()
+                .accountId(account.getId())
+                .userId(account.getUserId())
+                .totalAssetValue(totalAssetValue)
+                .cashBalance(BigDecimal.ZERO)
+                .depositAmount(depositAmount)
+                .evaluationAmount(evaluationAmount)
+                .gainLoss(gainLoss)
+                .gainLossRate(gainLossRate)
+                .dailyGainLoss(BigDecimal.ZERO)
+                .dailyGainLossRate(BigDecimal.ZERO)
+                .asOfDate(LocalDate.now())
+                .lastSyncedAt(LocalDateTime.now())
+                .build();
+
+        accountBalanceRepository.save(balance);
+        log.info("Holdings balance synced for account: {}", account.getId());
+    }
+
+    private void savePositionsFromHoldings(BrokerAccountEntity account, JsonNode accountNode) {
+        JsonNode itemList = accountNode.path("itemList");
+        assetPositionRepository.deleteByAccountId(account.getId());
+
+        int savedCount = 0;
+        if (itemList.isArray()) {
+            for (JsonNode position : itemList) {
+                String symbol = textOr(position, "itemCd", "itemNm");
+                if (symbol == null || symbol.isBlank()) {
+                    continue;
+                }
+
+                AssetPositionEntity entity = AssetPositionEntity.builder()
+                        .accountId(account.getId())
+                        .userId(account.getUserId())
+                        .symbol(symbol)
+                        .positionType(defaultString(textOr(position, "productType"), "STOCK"))
+                        .quantity(firstDecimal(position, "quantity"))
+                        .purchasePrice(firstDecimal(position, "purchaseUnitPrice"))
+                        .currentPrice(firstDecimal(position, "presentAmt"))
+                        .currentValue(firstDecimal(position, "valuationAmt", "valuationAmt_KRW"))
+                        .purchaseAmount(firstDecimal(position, "purchaseAmt", "purchaseAmt_KRW"))
+                        .gainLoss(firstDecimal(position, "valuationGL"))
+                        .gainLossRate(firstDecimal(position, "profitRate"))
+                        .currencyCode(defaultString(textOr(position, "curCd"), "KRW"))
+                        .lastSyncedAt(LocalDateTime.now())
+                        .build();
+
+                assetPositionRepository.save(entity);
+                savedCount++;
+            }
+        }
+
+        log.info("Positions synced for account: {}, count={}", account.getId(), savedCount);
+    }
+
+    private void syncDepositWithdrawHistory(BrokerAccountEntity account, HyphenApiClient.HyphenCredential credential) {
+        try {
+            String toDate = LocalDate.now().format(DATE_FORMAT);
+            String fromDate = LocalDate.now().minusMonths(1).format(DATE_FORMAT);
+
+            JsonNode historyData = hyphenApiClient.fetchDepositWithdrawHistory(
+                    credential,
+                    account.getBrokerName(),
+                    account.getAccountNumber(),
+                    fromDate,
+                    toDate);
+
+            JsonNode data = extractDataNode(historyData);
+            JsonNode transactions = data.path("list");
+            if (!transactions.isArray() || transactions.isEmpty()) {
+                log.warn("Empty deposit/withdraw history for account: {}", account.getId());
+                return;
+            }
+
+            log.info("Deposit/withdraw history synced for account: {}, count={}", account.getId(), transactions.size());
+        } catch (Exception e) {
+            log.error("Error syncing deposit/withdraw history for account: {}", account.getId(), e);
+        }
+    }
+
+    private void syncAssetTransactionHistory(BrokerAccountEntity account, HyphenApiClient.HyphenCredential credential) {
+        try {
+            String toDate = LocalDate.now().format(DATE_FORMAT);
+            String fromDate = LocalDate.now().minusMonths(1).format(DATE_FORMAT);
+
+            JsonNode historyData = hyphenApiClient.fetchAssetTransactionHistory(
+                    credential,
+                    account.getBrokerName(),
+                    account.getAccountNumber(),
+                    fromDate,
+                    toDate);
+
+            JsonNode data = extractDataNode(historyData);
+            JsonNode transactions = data.path("list");
+            if (!transactions.isArray() || transactions.isEmpty()) {
+                log.warn("Empty asset transaction history for account: {}", account.getId());
+                return;
+            }
+
+            log.info("Asset transaction history synced for account: {}, count={}", account.getId(), transactions.size());
+        } catch (Exception e) {
+            log.error("Error syncing asset transaction history for account: {}", account.getId(), e);
+        }
+    }
+
+    private JsonNode findHoldingsAccountNode(JsonNode data, String accountNumber) {
+        JsonNode list = data.path("list");
+        if (list.isArray()) {
+            for (JsonNode node : list) {
+                if (accountNumber != null && accountNumber.equals(node.path("acctNo").asText())) {
+                    return node;
+                }
+            }
+            if (!list.isEmpty()) {
+                return list.get(0);
+            }
+        }
+        return data;
+    }
+
     @Transactional(readOnly = true)
     public BrokerAccountDto.SyncStatusResponse getSyncStatus(Long userId, Long accountId, Long syncId) {
         validateAccountAccess(userId, accountId);
 
-        List<CodefSyncHistoryEntity> histories = syncHistoryRepository.findByAccountIdOrderByCreatedAtDesc(accountId);
+        List<HyphenSyncHistoryEntity> histories = syncHistoryRepository.findByAccountIdOrderByCreatedAtDesc(accountId);
 
-        CodefSyncHistoryEntity history = histories.stream()
+        HyphenSyncHistoryEntity history = histories.stream()
                 .filter(h -> h.getId().equals(syncId))
                 .findFirst()
                 .orElseThrow(() -> ApiException.notFound("동기화 기록을 찾을 수 없습니다.", "SYNC_NOT_FOUND"));
@@ -274,9 +330,6 @@ public class AssetSyncService {
                 .build();
     }
 
-    /**
-     * 동기화 이력 조회
-     */
     @Transactional(readOnly = true)
     public List<BrokerAccountDto.SyncHistoryResponse> getSyncHistory(Long userId, Long accountId) {
         validateAccountAccess(userId, accountId);
@@ -296,9 +349,6 @@ public class AssetSyncService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * 계좌 접근 권한 검증
-     */
     private BrokerAccountEntity validateAccountAccess(Long userId, Long accountId) {
         if (userId == null || userId <= 0) {
             throw ApiException.badRequest("유효하지 않은 사용자 ID입니다.", "INVALID_USER_ID");
@@ -315,5 +365,60 @@ public class AssetSyncService {
         }
 
         return account;
+    }
+
+    private JsonNode extractDataNode(JsonNode root) {
+        if (root == null || root.isMissingNode()) {
+            throw ApiException.internalServerError("하이픈 API 응답이 올바르지 않습니다.", "INVALID_HYPHEN_RESPONSE");
+        }
+        return root.path("data");
+    }
+
+    private String decryptRequired(String encrypted, String errorCode) {
+        if (encrypted == null || encrypted.isBlank()) {
+            throw ApiException.badRequest("저장된 하이픈 인증 정보가 없습니다.", errorCode);
+        }
+        return cryptoService.decrypt(encrypted);
+    }
+
+    private String decryptOptional(String encrypted) {
+        if (encrypted == null || encrypted.isBlank()) {
+            return "";
+        }
+        return cryptoService.decrypt(encrypted);
+    }
+
+    private static String textOr(JsonNode node, String... keys) {
+        for (String key : keys) {
+            JsonNode value = node.path(key);
+            if (!value.isMissingNode() && !value.isNull()) {
+                String text = value.asText();
+                if (text != null && !text.isBlank()) {
+                    return text;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String defaultString(String value, String fallback) {
+        return (value == null || value.isBlank()) ? fallback : value;
+    }
+
+    private static BigDecimal firstDecimal(JsonNode node, String... keys) {
+        for (String key : keys) {
+            JsonNode value = node.path(key);
+            if (!value.isMissingNode() && !value.isNull()) {
+                String text = value.asText("").trim();
+                if (!text.isEmpty()) {
+                    try {
+                        return new BigDecimal(text.replace(",", ""));
+                    } catch (NumberFormatException ignored) {
+                        // try next key
+                    }
+                }
+            }
+        }
+        return BigDecimal.ZERO;
     }
 }

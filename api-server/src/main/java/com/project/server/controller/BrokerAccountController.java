@@ -23,15 +23,16 @@ public class BrokerAccountController {
 
     /**
      * 계좌 연동 (최초 연동 및 추가 연동 통합)
-     * - connectedId가 있으면 최초 연동 (저장 및 연동)
-     * - connectedId가 없으면 추가 연동 (기존 저장된 connectedId 활용)
+     * - 하이픈 로그인 식별자가 있으면 최초 연동
+     * - 없으면 기존 저장 계정 기반 추가 연동
      */
     @PostMapping("/{userId}/accounts")
     public ResponseEntity<List<BrokerAccountDto.BrokerAccountResponse>> linkAccount(
             @PathVariable Long userId,
             @RequestBody BrokerAccountDto.LinkRequest request) {
         List<BrokerAccountDto.BrokerAccountResponse> response;
-        if (request.getConnectedId() != null && !request.getConnectedId().isEmpty()) {
+        boolean hasHyphenUserId = request.getHyphenUserId() != null && !request.getHyphenUserId().isBlank();
+        if (hasHyphenUserId) {
             response = brokerAccountService.initialLink(userId, request);
         } else {
             response = brokerAccountService.addLink(userId, request);

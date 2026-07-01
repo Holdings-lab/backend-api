@@ -18,8 +18,11 @@ public class BrokerAccountDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class LinkRequest {
-        // 최초 연동 시 필수, 추가 연동 시 null/empty 가능
-        private String connectedId;
+        private String hyphenUserId;
+        private String hyphenUserPw;
+        private String hyphenLoginMethod; // ID, CERT
+        private String hyphenLoginRequired; // Y, N
+        private String hyphenAccountPassword;
         private List<String> brokerNames; // 연동할 증권사 목록 (예: ["KIS", "NH"])
     }
 
@@ -56,7 +59,7 @@ public class BrokerAccountDto {
         private AccountBalanceDto latestBalance;
         private List<AssetPositionDto> positions;
         
-        // CODEF 응답 필드
+        // 하이픈 응답 필드
         private String accountDisplay;
         private String principal;
         private String purchaseAmount;

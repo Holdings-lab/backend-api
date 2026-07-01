@@ -120,15 +120,15 @@ public class AdminDto {
         // totalAssetValue는 제외 - 서버가 positions + cashBalance로부터 자동 계산
         private java.math.BigDecimal depositAmount;
         private java.math.BigDecimal cashBalance;
-        private String principal;             // resPrincipal - 자산
-        private String purchaseAmount;        // resPurchaseAmount - 매입금
-        private String valuationAmt;          // resValuationAmt - 평가액
-        private String depositReceived;       // resDepositReceived - 입금액
-        private String depositReceivedD1;     // resDepositReceivedD1 - D1 입금액
-        private String depositReceivedD2;     // resDepositReceivedD2 - D2 입금액
-        private String depositReceivedF;      // resDepositReceivedF - F 입금액
-        private String withdrawalAmt;         // resWithdrawalAmt - 출금액
-        private String loanAmt;               // resLoanAmt - 대출금
+        private String principal;
+        private String purchaseAmount;
+        private String valuationAmt;
+        private String depositReceived;
+        private String depositReceivedD1;
+        private String depositReceivedD2;
+        private String depositReceivedF;
+        private String withdrawalAmt;
+        private String loanAmt;
 
         // 임의의 종목 데이터 리스트 (심볼, 수량, 매입가, 현재가)
         private List<PortfolioPosition> positions;

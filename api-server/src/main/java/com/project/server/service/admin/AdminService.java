@@ -271,45 +271,45 @@ public class AdminService {
         BrokerAccountEntity account = brokerAccountRepository.findById(accountId)
                 .orElseThrow(() -> ApiException.notFound("존재하지 않는 계좌입니다.", "ACCOUNT_NOT_FOUND"));
 
-        // 기존 CODEF 응답 데이터를 가져와서 업데이트 (있으면)
-        Map<String, Object> codefDetails = new java.util.HashMap<>();
-        if (account.getCodefAccountDetails() != null && !account.getCodefAccountDetails().isEmpty()) {
+        // 기존 하이픈 응답 데이터를 가져와서 업데이트 (있으면)
+        Map<String, Object> hyphenDetails = new java.util.HashMap<>();
+        if (account.getHyphenAccountDetails() != null && !account.getHyphenAccountDetails().isEmpty()) {
             try {
-                codefDetails = objectMapper.readValue(account.getCodefAccountDetails(),
+                hyphenDetails = objectMapper.readValue(account.getHyphenAccountDetails(),
                         new TypeReference<Map<String, Object>>() {
                         });
             } catch (Exception e) {
-                log.warn("Failed to parse existing CODEF account details", e);
+                log.warn("Failed to parse existing Hyphen account details", e);
             }
         }
 
         // 요청에서 받은 필드들만 업데이트
         if (request.getPrincipal() != null) {
-            codefDetails.put("resPrincipal", request.getPrincipal());
+            hyphenDetails.put("totPurchaseAmt", request.getPrincipal());
         }
         if (request.getPurchaseAmount() != null) {
-            codefDetails.put("resPurchaseAmount", request.getPurchaseAmount());
+            hyphenDetails.put("totPurchaseAmt", request.getPurchaseAmount());
         }
         if (request.getValuationAmt() != null) {
-            codefDetails.put("resValuationAmt", request.getValuationAmt());
+            hyphenDetails.put("totValuationAmt", request.getValuationAmt());
         }
         if (request.getDepositReceived() != null) {
-            codefDetails.put("resDepositReceived", request.getDepositReceived());
+            hyphenDetails.put("estDepAsset", request.getDepositReceived());
         }
         if (request.getDepositReceivedD1() != null) {
-            codefDetails.put("resDepositReceivedD1", request.getDepositReceivedD1());
+            hyphenDetails.put("depositReceivedD1", request.getDepositReceivedD1());
         }
         if (request.getDepositReceivedD2() != null) {
-            codefDetails.put("resDepositReceivedD2", request.getDepositReceivedD2());
+            hyphenDetails.put("depositReceivedD2", request.getDepositReceivedD2());
         }
         if (request.getDepositReceivedF() != null) {
-            codefDetails.put("resDepositReceivedF", request.getDepositReceivedF());
+            hyphenDetails.put("depositReceivedF", request.getDepositReceivedF());
         }
         if (request.getWithdrawalAmt() != null) {
-            codefDetails.put("resWithdrawalAmt", request.getWithdrawalAmt());
+            hyphenDetails.put("withdrawalAmt", request.getWithdrawalAmt());
         }
         if (request.getLoanAmt() != null) {
-            codefDetails.put("resLoanAmt", request.getLoanAmt());
+            hyphenDetails.put("loanAmt", request.getLoanAmt());
         }
 
         try {
@@ -389,8 +389,8 @@ public class AdminService {
             }
 
             // Map을 JSON 문자열로 변환해서 저장
-            String codefDetailsJson = objectMapper.writeValueAsString(codefDetails);
-            account.setCodefAccountDetails(codefDetailsJson);
+            String hyphenDetailsJson = objectMapper.writeValueAsString(hyphenDetails);
+            account.setHyphenAccountDetails(hyphenDetailsJson);
             account.setUpdatedAt(java.time.LocalDateTime.now());
             account.setLastSyncedAt(LocalDateTime.now());
             brokerAccountRepository.save(account);

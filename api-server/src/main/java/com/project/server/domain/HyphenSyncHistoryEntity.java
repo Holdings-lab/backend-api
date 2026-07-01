@@ -10,15 +10,15 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "codef_sync_history", indexes = {
-    @Index(name = "idx_user_account_status", columnList = "user_id,account_id,status")
+@Table(name = "hyphen_sync_history", indexes = {
+    @Index(name = "idx_hyphen_sync_history_user_account_status", columnList = "user_id,account_id,status")
 })
 @Getter
 @Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CodefSyncHistoryEntity {
+public class HyphenSyncHistoryEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -31,7 +31,7 @@ public class CodefSyncHistoryEntity {
     private Long userId;
 
     @Column(name = "sync_type", nullable = false, length = 30)
-    private String syncType;  // BALANCE, POSITION, HISTORY, ALL
+    private String syncType;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)

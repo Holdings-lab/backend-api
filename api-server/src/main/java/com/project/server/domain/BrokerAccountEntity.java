@@ -28,7 +28,7 @@ public class BrokerAccountEntity {
     private Long userId;
 
     @Column(name = "broker_name", nullable = false, length = 50)
-    private String brokerName;  // 'KIS' (한국투자증권)
+    private String brokerName;
 
     @Column(name = "account_number", nullable = false, length = 50)
     private String accountNumber;
@@ -37,26 +37,29 @@ public class BrokerAccountEntity {
     private String accountNickname;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "codef_status")
-    private CodefStatus codefStatus;
+    @Column(name = "hyphen_status")
+    private HyphenStatus hyphenStatus;
 
-    @Column(name = "codef_token_id", length = 255)
-    private String codefTokenId;
+    /** AES 암호화된 증권사 계좌 비밀번호 (일부 증권사 조회 시 필요) */
+    @Column(name = "hyphen_account_password", length = 255)
+    private String hyphenAccountPassword;
 
-    @Column(name = "codef_token_secret", length = 500)
-    private String codefTokenSecret;  // AES 암호화
+    /** AES 암호화된 하이픈 증권사 로그인 비밀번호 */
+    @Column(name = "hyphen_user_password", length = 500)
+    private String hyphenUserPassword;
 
-    @Column(name = "connected_id", length = 255)
-    private String connectedId; // CODEF connectedId (스크래핑 식별자)
+    /** AES 암호화된 하이픈 증권사 로그인 사용자 ID */
+    @Column(name = "hyphen_user_id", length = 255)
+    private String hyphenUserId;
 
     @Column(name = "account_owner_name", length = 100)
     private String accountOwnerName;
 
     @Column(name = "account_type", length = 20)
-    private String accountType;  // STOCK, FUTURES, OPTION, FUND
+    private String accountType;
 
-    @Column(name = "codef_account_details", columnDefinition = "TEXT")
-    private String codefAccountDetails;  // CODEF 응답 전체 JSON 저장
+    @Column(name = "hyphen_account_details", columnDefinition = "TEXT")
+    private String hyphenAccountDetails;
 
     @Column(name = "is_primary")
     private Boolean isPrimary;
@@ -84,6 +87,9 @@ public class BrokerAccountEntity {
         if (syncCount == null) {
             syncCount = 0;
         }
+        if (hyphenStatus == null) {
+            hyphenStatus = HyphenStatus.PENDING;
+        }
     }
 
     @PreUpdate
@@ -91,7 +97,7 @@ public class BrokerAccountEntity {
         updatedAt = LocalDateTime.now();
     }
 
-    public enum CodefStatus {
+    public enum HyphenStatus {
         CONNECTED,      // 정상 연동됨
         PENDING,        // 연동 대기 중
         EXPIRED,        // 토큰 만료
