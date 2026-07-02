@@ -1,12 +1,14 @@
+# 운영 시 backend-api/.env.docker 필수 (POSTGRES_PASSWORD 등)
 services:
   postgres:
     image: postgres:16-alpine
     container_name: pwa-postgres
     restart: always
+    env_file:
+      - .env.docker
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-holdings}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
     ports:
       - ${POSTGRES_PORT:-5432}:5432
     volumes:
@@ -34,13 +36,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    env_file:
+      - .env.docker
     environment:
       SERVER_PORT: 8080
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-holdings}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       llm.provider: ${LLM_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
@@ -89,13 +90,12 @@ services:
         condition: service_healthy
       api-server:
         condition: service_started
+    env_file:
+      - .env.docker
     environment:
       ML_API_PORT: 9000
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-holdings}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       SCHEDULE_MODE: ${SCHEDULE_MODE:-interval}
       INTERVAL_MINUTES: ${INTERVAL_MINUTES:-30}
       DAILY_HOUR: ${DAILY_HOUR:-9}
