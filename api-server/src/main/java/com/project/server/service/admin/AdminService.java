@@ -272,34 +272,34 @@ public class AdminService {
                 .orElseThrow(() -> ApiException.notFound("존재하지 않는 계좌입니다.", "ACCOUNT_NOT_FOUND"));
 
         // 기존 하이픈 응답 데이터를 가져와서 업데이트 (있으면)
-        Map<String, Object> hyphenDetails = new java.util.HashMap<>();
-        if (account.getHyphenAccountDetails() != null && !account.getHyphenAccountDetails().isEmpty()) {
+        Map<String, Object> accountDetailsMap = new java.util.HashMap<>();
+        if (account.getAccountDetails() != null && !account.getAccountDetails().isEmpty()) {
             try {
-                hyphenDetails = objectMapper.readValue(account.getHyphenAccountDetails(),
+                accountDetailsMap = objectMapper.readValue(account.getAccountDetails(),
                         new TypeReference<Map<String, Object>>() {
                         });
             } catch (Exception e) {
-                log.warn("Failed to parse existing Hyphen account details", e);
+                log.warn("Failed to parse existing account details", e);
             }
         }
 
         if (request.getAccountDisplay() != null) {
-            hyphenDetails.put("acctDisp", request.getAccountDisplay());
+            accountDetailsMap.put("acctDisp", request.getAccountDisplay());
         }
         if (request.getAccountName() != null) {
-            hyphenDetails.put("acctNm", request.getAccountName());
+            accountDetailsMap.put("acctNm", request.getAccountName());
         }
         if (request.getAccountNick() != null) {
-            hyphenDetails.put("acctNick", request.getAccountNick());
+            accountDetailsMap.put("acctNick", request.getAccountNick());
         }
         if (request.getBalance() != null) {
-            hyphenDetails.put("balance", request.getBalance());
+            accountDetailsMap.put("balance", request.getBalance());
         }
         if (request.getCurrencyCode() != null) {
-            hyphenDetails.put("curCd", request.getCurrencyCode());
+            accountDetailsMap.put("curCd", request.getCurrencyCode());
         }
         if (request.getAvailableBalance() != null) {
-            hyphenDetails.put("ablBal", request.getAvailableBalance());
+            accountDetailsMap.put("ablBal", request.getAvailableBalance());
         }
 
         try {
@@ -396,8 +396,8 @@ public class AdminService {
             }
 
             // Map을 JSON 문자열로 변환해서 저장
-            String hyphenDetailsJson = objectMapper.writeValueAsString(hyphenDetails);
-            account.setHyphenAccountDetails(hyphenDetailsJson);
+            String accountDetailsJson = objectMapper.writeValueAsString(accountDetailsMap);
+            account.setAccountDetails(accountDetailsJson);
             account.setUpdatedAt(java.time.LocalDateTime.now());
             account.setLastSyncedAt(LocalDateTime.now());
             brokerAccountRepository.save(account);

@@ -38,13 +38,13 @@ public class AssetSyncService {
     private final AssetPositionRepository assetPositionRepository;
     private final AccountBalanceRepository accountBalanceRepository;
     private final HyphenSyncHistoryRepository syncHistoryRepository;
-    private final HyphenApiClient hyphenApiClient;
+    private final HyphenApiClient apiClient;
     private final CryptoService cryptoService;
 
     public BrokerAccountDto.SyncResponse requestSync(Long userId, Long accountId) {
         BrokerAccountEntity account = validateAccountAccess(userId, accountId);
 
-        if (account.getHyphenStatus() != BrokerAccountEntity.HyphenStatus.CONNECTED) {
+        if (account.getConnectionStatus() != BrokerAccountEntity.ConnectionStatus.CONNECTED) {
             throw ApiException.badRequest("연동되지 않은 계좌입니다.", "ACCOUNT_NOT_CONNECTED");
         }
 
@@ -90,10 +90,10 @@ public class AssetSyncService {
 
     @Scheduled(cron = "${hyphen.sync.schedule-cron:0 0 12,18 * * *}")
     public void scheduledSync() {
-        log.info("Starting scheduled Hyphen sync...");
+        log.info("Starting scheduled broker sync...");
 
         List<BrokerAccountEntity> connectedAccounts = brokerAccountRepository
-                .findByHyphenStatusIn(List.of(BrokerAccountEntity.HyphenStatus.CONNECTED));
+                .findByConnectionStatusIn(List.of(BrokerAccountEntity.ConnectionStatus.CONNECTED));
 
         connectedAccounts.forEach(account -> {
             try {
@@ -102,12 +102,12 @@ public class AssetSyncService {
                 brokerAccountRepository.save(account);
             } catch (Exception e) {
                 log.error("Scheduled sync failed for account: {}", account.getId(), e);
-                account.setHyphenStatus(BrokerAccountEntity.HyphenStatus.ERROR);
+                account.setConnectionStatus(BrokerAccountEntity.ConnectionStatus.ERROR);
                 brokerAccountRepository.save(account);
             }
         });
 
-        log.info("Scheduled Hyphen sync completed");
+        log.info("Scheduled broker sync completed");
     }
 
     private void performSync(BrokerAccountEntity account) {
@@ -120,13 +120,13 @@ public class AssetSyncService {
     }
 
     private HyphenApiClient.HyphenCredential buildCredential(BrokerAccountEntity account) {
-        String hyphenUserId = decryptRequired(account.getHyphenUserId(), "NO_HYPHEN_USER_ID");
-        String hyphenUserPw = decryptRequired(account.getHyphenUserPassword(), "NO_HYPHEN_USER_PW");
-        String accountPassword = decryptOptional(account.getHyphenAccountPassword());
+        String loginUserId = decryptRequired(account.getLoginUserId(), "NO_USER_ID");
+        String userPw = decryptRequired(account.getUserPassword(), "NO_USER_PW");
+        String accountPassword = decryptOptional(account.getAccountPassword());
 
         return new HyphenApiClient.HyphenCredential(
-                hyphenUserId,
-                hyphenUserPw,
+                loginUserId,
+                userPw,
                 "ID",
                 "N",
                 accountPassword);
@@ -134,7 +134,7 @@ public class AssetSyncService {
 
     private void syncHoldings(BrokerAccountEntity account, HyphenApiClient.HyphenCredential credential) {
         try {
-            JsonNode holdingsData = hyphenApiClient.fetchHoldings(
+            JsonNode holdingsData = apiClient.fetchHoldings(
                     credential, account.getBrokerName(), account.getAccountNumber());
             JsonNode data = extractDataNode(holdingsData);
             JsonNode accountNode = findHoldingsAccountNode(data, account.getAccountNumber());
@@ -152,7 +152,7 @@ public class AssetSyncService {
 
     private void syncCashBalance(BrokerAccountEntity account, HyphenApiClient.HyphenCredential credential) {
         try {
-            JsonNode cashData = hyphenApiClient.fetchCashBalance(
+            JsonNode cashData = apiClient.fetchCashBalance(
                     credential, account.getBrokerName(), account.getAccountNumber());
             JsonNode data = extractDataNode(cashData);
             BigDecimal cashBalance = firstDecimal(data, "curBal");
@@ -251,7 +251,7 @@ public class AssetSyncService {
             String toDate = LocalDate.now().format(DATE_FORMAT);
             String fromDate = LocalDate.now().minusMonths(1).format(DATE_FORMAT);
 
-            JsonNode historyData = hyphenApiClient.fetchDepositWithdrawHistory(
+            JsonNode historyData = apiClient.fetchDepositWithdrawHistory(
                     credential,
                     account.getBrokerName(),
                     account.getAccountNumber(),
@@ -276,7 +276,7 @@ public class AssetSyncService {
             String toDate = LocalDate.now().format(DATE_FORMAT);
             String fromDate = LocalDate.now().minusMonths(1).format(DATE_FORMAT);
 
-            JsonNode historyData = hyphenApiClient.fetchAssetTransactionHistory(
+            JsonNode historyData = apiClient.fetchAssetTransactionHistory(
                     credential,
                     account.getBrokerName(),
                     account.getAccountNumber(),
@@ -373,14 +373,14 @@ public class AssetSyncService {
 
     private JsonNode extractDataNode(JsonNode root) {
         if (root == null || root.isMissingNode()) {
-            throw ApiException.internalServerError("하이픈 API 응답이 올바르지 않습니다.", "INVALID_HYPHEN_RESPONSE");
+            throw ApiException.internalServerError("증권사 API 응답이 올바르지 않습니다.", "INVALID_API_RESPONSE");
         }
         return root.path("data");
     }
 
     private String decryptRequired(String encrypted, String errorCode) {
         if (encrypted == null || encrypted.isBlank()) {
-            throw ApiException.badRequest("저장된 하이픈 인증 정보가 없습니다.", errorCode);
+            throw ApiException.badRequest("저장된 증권사 인증 정보가 없습니다.", errorCode);
         }
         return cryptoService.decrypt(encrypted);
     }

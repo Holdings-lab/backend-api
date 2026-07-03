@@ -38,19 +38,19 @@ public class BrokerAccountEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "hyphen_status")
-    private HyphenStatus hyphenStatus;
+    private ConnectionStatus connectionStatus;
 
     /** AES 암호화된 증권사 계좌 비밀번호 (일부 증권사 조회 시 필요) */
     @Column(name = "hyphen_account_password", length = 255)
-    private String hyphenAccountPassword;
+    private String accountPassword;
 
     /** AES 암호화된 하이픈 증권사 로그인 비밀번호 */
     @Column(name = "hyphen_user_password", length = 500)
-    private String hyphenUserPassword;
+    private String userPassword;
 
     /** AES 암호화된 하이픈 증권사 로그인 사용자 ID */
     @Column(name = "hyphen_user_id", length = 255)
-    private String hyphenUserId;
+    private String loginUserId;
 
     @Column(name = "account_owner_name", length = 100)
     private String accountOwnerName;
@@ -59,7 +59,7 @@ public class BrokerAccountEntity {
     private String accountType;
 
     @Column(name = "hyphen_account_details", columnDefinition = "TEXT")
-    private String hyphenAccountDetails;
+    private String accountDetails;
 
     @Column(name = "is_primary")
     private Boolean isPrimary;
@@ -87,8 +87,8 @@ public class BrokerAccountEntity {
         if (syncCount == null) {
             syncCount = 0;
         }
-        if (hyphenStatus == null) {
-            hyphenStatus = HyphenStatus.PENDING;
+        if (connectionStatus == null) {
+            connectionStatus = ConnectionStatus.PENDING;
         }
     }
 
@@ -97,7 +97,7 @@ public class BrokerAccountEntity {
         updatedAt = LocalDateTime.now();
     }
 
-    public enum HyphenStatus {
+    public enum ConnectionStatus {
         CONNECTED,      // 정상 연동됨
         PENDING,        // 연동 대기 중
         EXPIRED,        // 토큰 만료

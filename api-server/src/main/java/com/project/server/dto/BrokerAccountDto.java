@@ -18,11 +18,11 @@ public class BrokerAccountDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class LinkRequest {
-        private String hyphenUserId;
-        private String hyphenUserPw;
-        private String hyphenLoginMethod; // ID, CERT
-        private String hyphenLoginRequired; // Y, N
-        private String hyphenAccountPassword;
+        private String userId;
+        private String userPw;
+        private String loginMethod; // ID, CERT
+        private String loginRequired; // Y, N
+        private String accountPassword;
         private List<String> brokerNames;
     }
 
@@ -31,7 +31,7 @@ public class BrokerAccountDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class HyphenAccountSnapshot {
+    public static class AccountSnapshot {
         private String accountDisplay;
         private String accountName;
         private String accountNick;
@@ -58,7 +58,7 @@ public class BrokerAccountDto {
         private String accountType;
         private String status;
         private Boolean isPrimary;
-        private HyphenAccountSnapshot hyphenAccount;
+        private AccountSnapshot account;
         private LocalDateTime lastSyncedAt;
         private Integer syncCount;
         private LocalDateTime createdAt;
@@ -77,7 +77,7 @@ public class BrokerAccountDto {
         private String accountType;
         private String status;
         private Boolean isPrimary;
-        private HyphenAccountSnapshot hyphenAccount;
+        private AccountSnapshot account;
         private AccountBalanceDto latestBalance;
         private List<AssetPositionDto> positions;
         private LocalDateTime lastSyncedAt;

@@ -31,8 +31,8 @@ public class BrokerAccountController {
             @PathVariable Long userId,
             @RequestBody BrokerAccountDto.LinkRequest request) {
         List<BrokerAccountDto.BrokerAccountResponse> response;
-        boolean hasHyphenUserId = request.getHyphenUserId() != null && !request.getHyphenUserId().isBlank();
-        if (hasHyphenUserId) {
+        boolean hasUserId = request.getUserId() != null && !request.getUserId().isBlank();
+        if (hasUserId) {
             response = brokerAccountService.initialLink(userId, request);
         } else {
             response = brokerAccountService.addLink(userId, request);

@@ -33,7 +33,7 @@ public class HyphenApiStubClientService implements HyphenApiClient {
     /** 전계좌조회 - 전계좌 목록 (in0104000534) */
     @Override
     public JsonNode fetchAccountList(HyphenCredential credential, String brokerName) {
-        validateCredential(credential);
+        validateHyphenCredential(credential);
         requireKisBroker(brokerName);
         log.info("[Hyphen STUB] KIS 전계좌조회");
 
@@ -79,7 +79,7 @@ public class HyphenApiStubClientService implements HyphenApiClient {
     /** 잔액조회 - 입출금/외화/대출 잔액 (in0104000536) */
     @Override
     public JsonNode fetchCashBalance(HyphenCredential credential, String brokerName, String accountNumber) {
-        validateCredential(credential);
+        validateHyphenCredential(credential);
         requireKisBroker(brokerName);
         requireAccountNumber(accountNumber);
         log.info("[Hyphen STUB] KIS 잔액조회 acctNo={}", accountNumber);
@@ -98,7 +98,7 @@ public class HyphenApiStubClientService implements HyphenApiClient {
     /** 잔고조회 - 보유종목·평가금액 (in0104000539) */
     @Override
     public JsonNode fetchHoldings(HyphenCredential credential, String brokerName, String accountNumber) {
-        validateCredential(credential);
+        validateHyphenCredential(credential);
         requireKisBroker(brokerName);
         requireAccountNumber(accountNumber);
         log.info("[Hyphen STUB] KIS 잔고조회 acctNo={}", accountNumber);
@@ -197,7 +197,7 @@ public class HyphenApiStubClientService implements HyphenApiClient {
             String accountNumber,
             String fromDate,
             String toDate) {
-        validateCredential(credential);
+        validateHyphenCredential(credential);
         requireKisBroker(brokerName);
         validateDateRange(fromDate, toDate);
         requireAccountNumber(accountNumber);
@@ -275,7 +275,7 @@ public class HyphenApiStubClientService implements HyphenApiClient {
             String accountNumber,
             String fromDate,
             String toDate) {
-        validateCredential(credential);
+        validateHyphenCredential(credential);
         requireKisBroker(brokerName);
         validateDateRange(fromDate, toDate);
         requireAccountNumber(accountNumber);
@@ -364,7 +364,7 @@ public class HyphenApiStubClientService implements HyphenApiClient {
         }
     }
 
-    private void validateCredential(HyphenCredential credential) {
+    private void validateHyphenCredential(HyphenCredential credential) {
         if (credential == null || isBlank(credential.userId()) || isBlank(credential.userPw())) {
             throw ApiException.badRequest("하이픈 연동 사용자 정보가 누락되었습니다.", "HYPHEN_LOGIN_INFO_MISSING");
         }

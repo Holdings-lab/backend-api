@@ -30,24 +30,24 @@ public class BrokerAccountService {
   private final BrokerAccountRepository brokerAccountRepository;
   private final AccountBalanceRepository accountBalanceRepository;
   private final AssetPositionRepository assetPositionRepository;
-  private final HyphenApiClient hyphenApiClient;
+  private final HyphenApiClient apiClient;
   private final CryptoService cryptoService;
   private final ObjectMapper objectMapper;
 
   public List<BrokerAccountDto.BrokerAccountResponse> initialLink(Long userId, BrokerAccountDto.LinkRequest request) {
     validateUserAndBrokers(userId, request);
 
-    String hyphenUserId = resolveHyphenUserId(request);
-    String hyphenUserPw = request.getHyphenUserPw();
-    if (hyphenUserPw == null || hyphenUserPw.isBlank()) {
-      throw ApiException.badRequest("hyphenUserPw가 필요합니다.", "MISSING_HYPHEN_USER_PW");
+    String loginUserId = resolveUserId(request);
+    String userPw = request.getUserPw();
+    if (userPw == null || userPw.isBlank()) {
+      throw ApiException.badRequest("userPw가 필요합니다.", "MISSING_USER_PW");
     }
 
-    String loginMethod = defaultString(request.getHyphenLoginMethod(), "ID");
-    String loginRequired = defaultString(request.getHyphenLoginRequired(), "N");
-    String accountPassword = defaultString(request.getHyphenAccountPassword(), "");
+    String loginMethod = defaultString(request.getLoginMethod(), "ID");
+    String loginRequired = defaultString(request.getLoginRequired(), "N");
+    String accountPassword = defaultString(request.getAccountPassword(), "");
 
-    return linkAccountsForBrokers(userId, hyphenUserId, hyphenUserPw, loginMethod, loginRequired, accountPassword,
+    return linkAccountsForBrokers(userId, loginUserId, userPw, loginMethod, loginRequired, accountPassword,
         request.getBrokerNames());
   }
 
@@ -56,23 +56,23 @@ public class BrokerAccountService {
 
     BrokerAccountEntity anchor = brokerAccountRepository.findByUserId(userId).stream()
         .findFirst()
-        .orElseThrow(() -> ApiException.badRequest("저장된 하이픈 연동 정보가 없습니다. 최초 연동을 먼저 진행해주세요.", "NO_HYPHEN_INFO"));
+        .orElseThrow(() -> ApiException.badRequest("저장된 증권사 연동 정보가 없습니다. 최초 연동을 먼저 진행해주세요.", "NO_LINK_INFO"));
 
-    String hyphenUserId = decryptRequired(anchor.getHyphenUserId(), "NO_HYPHEN_USER_ID");
-    String hyphenUserPw = decryptRequired(anchor.getHyphenUserPassword(), "NO_HYPHEN_USER_PW");
-    String accountPassword = decryptOptional(anchor.getHyphenAccountPassword());
+    String loginUserId = decryptRequired(anchor.getLoginUserId(), "NO_USER_ID");
+    String userPw = decryptRequired(anchor.getUserPassword(), "NO_USER_PW");
+    String accountPassword = decryptOptional(anchor.getAccountPassword());
 
-    String loginMethod = defaultString(request.getHyphenLoginMethod(), "ID");
-    String loginRequired = defaultString(request.getHyphenLoginRequired(), "N");
+    String loginMethod = defaultString(request.getLoginMethod(), "ID");
+    String loginRequired = defaultString(request.getLoginRequired(), "N");
 
-    return linkAccountsForBrokers(userId, hyphenUserId, hyphenUserPw, loginMethod, loginRequired, accountPassword,
+    return linkAccountsForBrokers(userId, loginUserId, userPw, loginMethod, loginRequired, accountPassword,
         request.getBrokerNames());
   }
 
   private List<BrokerAccountDto.BrokerAccountResponse> linkAccountsForBrokers(
       Long userId,
-      String hyphenUserId,
-      String hyphenUserPw,
+      String loginUserId,
+      String userPw,
       String loginMethod,
       String loginRequired,
       String accountPassword,
@@ -82,8 +82,8 @@ public class BrokerAccountService {
     int alreadyLinkedCount = 0;
 
     HyphenApiClient.HyphenCredential credential = new HyphenApiClient.HyphenCredential(
-        hyphenUserId,
-        hyphenUserPw,
+        loginUserId,
+        userPw,
         loginMethod,
         loginRequired,
         accountPassword);
@@ -91,7 +91,7 @@ public class BrokerAccountService {
     try {
       for (String brokerName : brokerNames) {
         try {
-          JsonNode accountList = hyphenApiClient.fetchAccountList(credential, brokerName);
+          JsonNode accountList = apiClient.fetchAccountList(credential, brokerName);
           JsonNode accounts = accountList.path("data").path("list");
           if (!accounts.isArray() || accounts.isEmpty()) {
             log.warn("No accounts found for broker: {}", brokerName);
@@ -116,7 +116,7 @@ public class BrokerAccountService {
             String accountName = textOr(accountNode, "acctNick", "acctNm");
             String accountOwner = textOr(accountNode, "acctHolder", "acctNm");
             String accountType = textOr(accountNode, "acctNm");
-            String hyphenAccountDetailsJson = accountNode.toString();
+            String accountDetailsJson = accountNode.toString();
             boolean isPrimary = brokerAccountRepository.findByUserId(userId).isEmpty() && linkedAccounts.isEmpty();
 
             BrokerAccountEntity account = BrokerAccountEntity.builder()
@@ -126,29 +126,29 @@ public class BrokerAccountService {
                 .accountNickname(accountName)
                 .accountOwnerName(accountOwner)
                 .accountType(accountType != null ? accountType : "UNKNOWN")
-                .hyphenStatus(BrokerAccountEntity.HyphenStatus.CONNECTED)
+                .connectionStatus(BrokerAccountEntity.ConnectionStatus.CONNECTED)
                 .isPrimary(isPrimary)
                 .syncCount(0)
-                .hyphenUserId(cryptoService.encrypt(hyphenUserId))
-                .hyphenUserPassword(cryptoService.encrypt(hyphenUserPw))
-                .hyphenAccountPassword((accountPassword == null || accountPassword.isBlank()) ? null : cryptoService.encrypt(accountPassword))
-                .hyphenAccountDetails(hyphenAccountDetailsJson)
+                .loginUserId(cryptoService.encrypt(loginUserId))
+                .userPassword(cryptoService.encrypt(userPw))
+                .accountPassword((accountPassword == null || accountPassword.isBlank()) ? null : cryptoService.encrypt(accountPassword))
+                .accountDetails(accountDetailsJson)
                 .build();
 
             brokerAccountRepository.save(account);
             linkedAccounts.add(toResponse(account));
-            log.info("Hyphen linked broker account: userId={}, broker={}, accountNumber={}", userId, brokerName,
+            log.info("Linked broker account: userId={}, broker={}, accountNumber={}", userId, brokerName,
                 accountNumber);
           }
         } catch (Exception e) {
-          log.error("Error linking broker via Hyphen: {}", brokerName, e);
+          log.error("Error linking broker: {}", brokerName, e);
         }
       }
     } catch (ApiException ae) {
       throw ae;
     } catch (Exception e) {
-      log.error("Error during Hyphen linking", e);
-      throw ApiException.internalServerError("하이픈 연동 중 오류가 발생했습니다.", "HYPHEN_LINKING_ERROR");
+      log.error("Error during broker linking", e);
+      throw ApiException.internalServerError("증권사 연동 중 오류가 발생했습니다.", "LINKING_ERROR");
     }
 
     if (linkedAccounts.isEmpty()) {
@@ -254,9 +254,9 @@ public class BrokerAccountService {
         .accountNickname(entity.getAccountNickname())
         .accountOwnerName(entity.getAccountOwnerName())
         .accountType(entity.getAccountType())
-        .status(entity.getHyphenStatus() != null ? entity.getHyphenStatus().name() : BrokerAccountEntity.HyphenStatus.PENDING.name())
+        .status(entity.getConnectionStatus() != null ? entity.getConnectionStatus().name() : BrokerAccountEntity.ConnectionStatus.PENDING.name())
         .isPrimary(entity.getIsPrimary())
-        .hyphenAccount(parseHyphenAccount(entity))
+        .account(parseAccountSnapshot(entity))
         .lastSyncedAt(entity.getLastSyncedAt())
         .syncCount(entity.getSyncCount())
         .createdAt(entity.getCreatedAt())
@@ -280,9 +280,9 @@ public class BrokerAccountService {
         .accountNickname(entity.getAccountNickname())
         .accountOwnerName(entity.getAccountOwnerName())
         .accountType(entity.getAccountType())
-        .status(entity.getHyphenStatus() != null ? entity.getHyphenStatus().name() : BrokerAccountEntity.HyphenStatus.PENDING.name())
+        .status(entity.getConnectionStatus() != null ? entity.getConnectionStatus().name() : BrokerAccountEntity.ConnectionStatus.PENDING.name())
         .isPrimary(entity.getIsPrimary())
-        .hyphenAccount(parseHyphenAccount(entity))
+        .account(parseAccountSnapshot(entity))
         .latestBalance(latestBalance)
         .positions(positions)
         .lastSyncedAt(entity.getLastSyncedAt())
@@ -290,18 +290,18 @@ public class BrokerAccountService {
         .build();
   }
 
-  private BrokerAccountDto.HyphenAccountSnapshot parseHyphenAccount(BrokerAccountEntity entity) {
-    if (entity.getHyphenAccountDetails() == null || entity.getHyphenAccountDetails().isEmpty()) {
+  private BrokerAccountDto.AccountSnapshot parseAccountSnapshot(BrokerAccountEntity entity) {
+    if (entity.getAccountDetails() == null || entity.getAccountDetails().isEmpty()) {
       return null;
     }
     try {
       Map<String, Object> accountDetails = objectMapper.readValue(
-          entity.getHyphenAccountDetails(),
+          entity.getAccountDetails(),
           new TypeReference<Map<String, Object>>() {
           });
       return HyphenFieldMapper.toAccountSnapshot(accountDetails);
     } catch (Exception e) {
-      log.warn("Failed to parse Hyphen account details JSON for accountId={}", entity.getId(), e);
+      log.warn("Failed to parse account details JSON for accountId={}", entity.getId(), e);
       return null;
     }
   }
@@ -315,17 +315,17 @@ public class BrokerAccountService {
     }
   }
 
-  private String resolveHyphenUserId(BrokerAccountDto.LinkRequest request) {
-    String value = request.getHyphenUserId();
+  private String resolveUserId(BrokerAccountDto.LinkRequest request) {
+    String value = request.getUserId();
     if (value == null || value.isBlank()) {
-      throw ApiException.badRequest("hyphenUserId가 필요합니다.", "MISSING_HYPHEN_USER_ID");
+      throw ApiException.badRequest("userId가 필요합니다.", "MISSING_USER_ID");
     }
     return value;
   }
 
   private String decryptRequired(String encrypted, String errorCode) {
     if (encrypted == null || encrypted.isBlank()) {
-      throw ApiException.badRequest("저장된 하이픈 인증 정보가 없습니다.", errorCode);
+      throw ApiException.badRequest("저장된 증권사 인증 정보가 없습니다.", errorCode);
     }
     return cryptoService.decrypt(encrypted);
   }
