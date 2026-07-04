@@ -263,11 +263,6 @@ public class AdminService {
     @Transactional
     public BrokerAccountDto.BrokerAccountDetailResponse updateAccountDetails(Long accountId,
             AdminDto.SetAccountDetailsRequest request) {
-        // 최소 1개 이상의 파라미터가 있는지 검증
-        if (!request.hasAnyParameter()) {
-            throw ApiException.badRequest("최소 1개 이상의 파라미터를 입력하세요.", "NO_PARAMETERS_PROVIDED");
-        }
-
         BrokerAccountEntity account = brokerAccountRepository.findById(accountId)
                 .orElseThrow(() -> ApiException.notFound("존재하지 않는 계좌입니다.", "ACCOUNT_NOT_FOUND"));
 
