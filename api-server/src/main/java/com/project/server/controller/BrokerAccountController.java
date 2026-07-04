@@ -22,22 +22,14 @@ public class BrokerAccountController {
     private final PortfolioAggregationService portfolioAggregationService;
 
     /**
-     * 계좌 연동 (최초 연동 및 추가 연동 통합)
-     * - 하이픈 로그인 식별자가 있으면 최초 연동
-     * - 없으면 기존 저장 계정 기반 추가 연동
+     * 증권사 계좌 연동.
+     * path userId = 앱 사용자 ID, body hyphenUserId/hyphenUserPw = 증권사 로그인 자격증명.
      */
     @PostMapping("/{userId}/accounts")
     public ResponseEntity<List<BrokerAccountDto.BrokerAccountResponse>> linkAccount(
             @PathVariable Long userId,
             @RequestBody BrokerAccountDto.LinkRequest request) {
-        List<BrokerAccountDto.BrokerAccountResponse> response;
-        boolean hasUserId = request.getUserId() != null && !request.getUserId().isBlank();
-        if (hasUserId) {
-            response = brokerAccountService.initialLink(userId, request);
-        } else {
-            response = brokerAccountService.addLink(userId, request);
-        }
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(brokerAccountService.linkAccounts(userId, request));
     }
 
     /**

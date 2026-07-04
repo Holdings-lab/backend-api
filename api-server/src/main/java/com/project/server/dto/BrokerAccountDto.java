@@ -17,12 +17,16 @@ public class BrokerAccountDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    /**
+     * 증권사 계좌 연동 요청.
+     * path의 userId는 앱 사용자 ID, body의 hyphenUserId는 증권사 로그인 ID.
+     */
     public static class LinkRequest {
-        private String userId;
-        private String userPw;
-        private String loginMethod; // ID, CERT
-        private String loginRequired; // Y, N
-        private String accountPassword;
+        private String hyphenUserId;
+        private String hyphenUserPw;
+        private String hyphenLoginMethod; // ID, CERT
+        private String hyphenLoginRequired; // Y, N
+        private String hyphenAccountPassword;
         private List<String> brokerNames;
     }
 
@@ -31,7 +35,7 @@ public class BrokerAccountDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class AccountSnapshot {
+    public static class HyphenAccountSnapshot {
         private String accountDisplay;
         private String accountName;
         private String accountNick;
@@ -50,6 +54,7 @@ public class BrokerAccountDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class BrokerAccountResponse {
+        /** 앱 내부 연동 계좌 PK */
         private Long accountId;
         private String brokerName;
         private String accountNumber;
@@ -58,7 +63,7 @@ public class BrokerAccountDto {
         private String accountType;
         private String status;
         private Boolean isPrimary;
-        private AccountSnapshot account;
+        private HyphenAccountSnapshot hyphenAccount;
         private LocalDateTime lastSyncedAt;
         private Integer syncCount;
         private LocalDateTime createdAt;
@@ -69,6 +74,7 @@ public class BrokerAccountDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class BrokerAccountDetailResponse {
+        /** 앱 내부 연동 계좌 PK */
         private Long accountId;
         private String brokerName;
         private String accountNumber;
@@ -77,7 +83,7 @@ public class BrokerAccountDto {
         private String accountType;
         private String status;
         private Boolean isPrimary;
-        private AccountSnapshot account;
+        private HyphenAccountSnapshot hyphenAccount;
         private AccountBalanceDto latestBalance;
         private List<AssetPositionDto> positions;
         private LocalDateTime lastSyncedAt;

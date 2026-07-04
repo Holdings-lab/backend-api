@@ -44,7 +44,7 @@ public class AssetSyncService {
     public BrokerAccountDto.SyncResponse requestSync(Long userId, Long accountId) {
         BrokerAccountEntity account = validateAccountAccess(userId, accountId);
 
-        if (account.getConnectionStatus() != BrokerAccountEntity.ConnectionStatus.CONNECTED) {
+        if (account.getHyphenStatus() != BrokerAccountEntity.HyphenStatus.CONNECTED) {
             throw ApiException.badRequest("연동되지 않은 계좌입니다.", "ACCOUNT_NOT_CONNECTED");
         }
 
@@ -93,7 +93,7 @@ public class AssetSyncService {
         log.info("Starting scheduled broker sync...");
 
         List<BrokerAccountEntity> connectedAccounts = brokerAccountRepository
-                .findByConnectionStatusIn(List.of(BrokerAccountEntity.ConnectionStatus.CONNECTED));
+                .findByHyphenStatusIn(List.of(BrokerAccountEntity.HyphenStatus.CONNECTED));
 
         connectedAccounts.forEach(account -> {
             try {
@@ -102,7 +102,7 @@ public class AssetSyncService {
                 brokerAccountRepository.save(account);
             } catch (Exception e) {
                 log.error("Scheduled sync failed for account: {}", account.getId(), e);
-                account.setConnectionStatus(BrokerAccountEntity.ConnectionStatus.ERROR);
+                account.setHyphenStatus(BrokerAccountEntity.HyphenStatus.ERROR);
                 brokerAccountRepository.save(account);
             }
         });
@@ -120,16 +120,16 @@ public class AssetSyncService {
     }
 
     private HyphenApiClient.HyphenCredential buildCredential(BrokerAccountEntity account) {
-        String loginUserId = decryptRequired(account.getLoginUserId(), "NO_USER_ID");
-        String userPw = decryptRequired(account.getUserPassword(), "NO_USER_PW");
-        String accountPassword = decryptOptional(account.getAccountPassword());
+        String hyphenUserId = decryptRequired(account.getHyphenUserId(), "NO_HYPHEN_USER_ID");
+        String hyphenUserPw = decryptRequired(account.getHyphenUserPassword(), "NO_HYPHEN_USER_PW");
+        String hyphenAccountPassword = decryptOptional(account.getHyphenAccountPassword());
 
         return new HyphenApiClient.HyphenCredential(
-                loginUserId,
-                userPw,
+                hyphenUserId,
+                hyphenUserPw,
                 "ID",
                 "N",
-                accountPassword);
+                hyphenAccountPassword);
     }
 
     private void syncHoldings(BrokerAccountEntity account, HyphenApiClient.HyphenCredential credential) {

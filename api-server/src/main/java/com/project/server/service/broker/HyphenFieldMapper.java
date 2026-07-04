@@ -15,11 +15,11 @@ public final class HyphenFieldMapper {
     private HyphenFieldMapper() {
     }
 
-    public static BrokerAccountDto.AccountSnapshot toAccountSnapshot(Map<String, Object> details) {
+    public static BrokerAccountDto.HyphenAccountSnapshot toAccountSnapshot(Map<String, Object> details) {
         if (details == null || details.isEmpty()) {
             return null;
         }
-        return BrokerAccountDto.AccountSnapshot.builder()
+        return BrokerAccountDto.HyphenAccountSnapshot.builder()
                 .accountDisplay(stringValue(details, "acctDisp"))
                 .accountName(stringValue(details, "acctNm"))
                 .accountNick(stringValue(details, "acctNick"))
@@ -34,11 +34,11 @@ public final class HyphenFieldMapper {
                 .build();
     }
 
-    public static BrokerAccountDto.AccountSnapshot toAccountSnapshot(JsonNode node) {
+    public static BrokerAccountDto.HyphenAccountSnapshot toAccountSnapshot(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return null;
         }
-        return BrokerAccountDto.AccountSnapshot.builder()
+        return BrokerAccountDto.HyphenAccountSnapshot.builder()
                 .accountDisplay(text(node, "acctDisp"))
                 .accountName(text(node, "acctNm"))
                 .accountNick(text(node, "acctNick"))
