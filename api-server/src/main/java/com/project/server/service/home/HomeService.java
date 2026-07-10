@@ -12,11 +12,17 @@ import com.project.server.repository.PolicyEventJpaRepository;
 import com.project.server.repository.HomeBriefingRepository;
 import com.project.server.repository.UserJpaRepository;
 import com.project.server.repository.UserWatchAssetRepository;
-import com.project.server.service.portfolio.PortfolioService;
+import com.project.server.domain.AssetPositionEntity;
+import com.project.server.domain.BrokerAccountEntity;
+import com.project.server.repository.AssetPositionRepository;
+import com.project.server.repository.BrokerAccountRepository;
+import com.project.server.service.asset.AssetMetricsService;
 import com.project.server.service.auth.WatchAssetSelectionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -43,7 +49,9 @@ public class HomeService {
         private final HomeBriefingRepository homeBriefingRepository;
         private final UserWatchAssetRepository userWatchAssetRepository;
         private final WatchAssetSelectionService watchAssetSelectionService;
-        private final PortfolioService portfolioService;
+        private final AssetMetricsService assetMetricsService;
+        private final AssetPositionRepository assetPositionRepository;
+        private final BrokerAccountRepository brokerAccountRepository;
         private final FeaturedEventStateService featuredEventStateService;
         private final com.project.server.service.integration.MlPredictionProxyService mlPredictionProxyService;
         private final HomeBriefingLlmService homeBriefingLlmService;
@@ -68,10 +76,10 @@ public class HomeService {
                         dDayText = featured.dDayText();
                 }
 
-                HomeCopy copy = buildHomeCopy(name, featuredEvent, portfolioSummary, watchAssetImpacts.size(), featuredTitle,
-                                featuredSummary, dDayText);
+                HomeCopy copy = buildHomeCopy(name, featuredEvent, portfolioSummary, context.linkedAssetCount(),
+                                featuredTitle, featuredSummary, dDayText);
 
-                List<HomeDto.InsightCard> insights = buildInsights(featuredEvent, watchAssetImpacts.size());
+                List<HomeDto.InsightCard> insights = buildInsights(featuredEvent, context.linkedAssetCount());
                 List<HomeDto.ReasonItem> reasonItems = buildReasonItems(featuredSummary);
 
                 return HomeDto.HomeResponse.builder()
@@ -197,7 +205,7 @@ public class HomeService {
                 String profileInitial = resolveProfileInitial(userName);
                 Map<String, Object> portfolioSummary = context.portfolioSummary();
                 HomeCopy copy = buildHomeCopy(userName, context.featuredEvent(), portfolioSummary,
-                                context.watchAssetImpacts().size(), context.featuredTitle(), context.featuredSummary(),
+                                context.linkedAssetCount(), context.featuredTitle(), context.featuredSummary(),
                                 context.dDayText());
 
                 List<AssetPosition> positions = loadAssetPositions(userId);
@@ -239,7 +247,7 @@ public class HomeService {
                                 userName,
                                 context.featuredEvent(),
                                 portfolioSummary,
-                                context.watchAssetImpacts().size(),
+                                context.linkedAssetCount(),
                                 featured,
                                 ranked,
                                 aggregateRisk,
@@ -526,6 +534,37 @@ public class HomeService {
         }
 
         private List<AssetPosition> loadAssetPositions(Long userId) {
+                if (assetMetricsService.hasConnectedAccounts(userId)) {
+                        BigDecimal totalAsset = assetMetricsService.getAssetTotal(userId);
+                        List<AssetPositionEntity> positions = brokerAccountRepository.findByUserId(userId).stream()
+                                        .filter(account -> account.getHyphenStatus() == BrokerAccountEntity.HyphenStatus.CONNECTED)
+                                        .flatMap(account -> assetPositionRepository.findByAccountId(account.getId()).stream())
+                                        .toList();
+
+                        if (!positions.isEmpty()) {
+                                return positions.stream()
+                                                .map(position -> {
+                                                        BigDecimal currentValue = position.getCurrentValue() != null
+                                                                        ? position.getCurrentValue()
+                                                                        : BigDecimal.ZERO;
+                                                        double weight = totalAsset.compareTo(BigDecimal.ZERO) > 0
+                                                                        ? currentValue.divide(totalAsset, 6, RoundingMode.HALF_UP)
+                                                                                        .doubleValue()
+                                                                        : 0.0;
+                                                        double changePercent = position.getGainLossRate() != null
+                                                                        ? position.getGainLossRate().doubleValue()
+                                                                        : 0.0;
+                                                        String assetName = position.getItemName() != null
+                                                                        ? position.getItemName()
+                                                                        : (position.getSymbol() != null
+                                                                                        ? position.getSymbol()
+                                                                                        : "보유종목");
+                                                        return new AssetPosition(assetName, weight, changePercent);
+                                                })
+                                                .collect(Collectors.toList());
+                        }
+                }
+
                 List<UserWatchAssetEntity> watchAssets = userWatchAssetRepository
                                 .findByUserIdOrderByDisplayOrderAsc(userId);
                 List<com.project.server.dto.WatchAssetDto.Asset> selected = watchAssets.isEmpty()
@@ -676,6 +715,8 @@ public class HomeService {
                                                                 .build())
                                                 .toList();
 
+                int linkedAssetCount = resolveLinkedAssetCount(userId, watchAssetImpacts.size());
+
                 return new HomeContext(
                                 userId,
                                 user,
@@ -683,9 +724,24 @@ public class HomeService {
                                 featuredEvent,
                                 portfolioSummary,
                                 watchAssetImpacts,
+                                linkedAssetCount,
                                 resolveFeaturedTitle(featuredEvent),
                                 resolveFeaturedSummary(featuredEvent),
                                 resolveDDayText(featuredEvent));
+        }
+
+        private int resolveLinkedAssetCount(Long userId, int watchAssetCount) {
+                if (!assetMetricsService.hasConnectedAccounts(userId)) {
+                        return watchAssetCount;
+                }
+                long positionCount = brokerAccountRepository.findByUserId(userId).stream()
+                                .filter(account -> account.getHyphenStatus() == BrokerAccountEntity.HyphenStatus.CONNECTED)
+                                .flatMap(account -> assetPositionRepository.findByAccountId(account.getId()).stream())
+                                .map(position -> position.getSymbol() != null ? position.getSymbol() : position.getItemCode())
+                                .filter(symbol -> symbol != null && !symbol.isBlank())
+                                .distinct()
+                                .count();
+                return positionCount > 0 ? (int) positionCount : watchAssetCount;
         }
 
         private HomeCopy buildHomeCopy(String displayName, PolicyEventEntity featuredEvent,
@@ -760,7 +816,17 @@ public class HomeService {
         }
 
         private Map<String, Object> loadPortfolioSummary(Long userId) {
-                return portfolioService.aggregatePortfolio(userId);
+                AssetMetricsService.AssetMetrics metrics = assetMetricsService.compute(userId);
+                BigDecimal totalAssets = metrics.assetTotal();
+                BigDecimal dailyReturnRate = metrics.dailyChangePct();
+                BigDecimal dailyReturnAmount = totalAssets.multiply(dailyReturnRate)
+                                .divide(BigDecimal.valueOf(100), 0, RoundingMode.HALF_UP);
+
+                Map<String, Object> summary = new HashMap<>();
+                summary.put("totalAssets", totalAssets);
+                summary.put("dailyReturnRate", dailyReturnRate);
+                summary.put("dailyReturnAmount", dailyReturnAmount);
+                return summary;
         }
 
         private String formatCurrencyValue(Object value) {
@@ -856,6 +922,7 @@ public class HomeService {
                         PolicyEventEntity featuredEvent,
                         Map<String, Object> portfolioSummary,
                         List<HomeDto.WatchAssetImpact> watchAssetImpacts,
+                        int linkedAssetCount,
                         String featuredTitle,
                         String featuredSummary,
                         String dDayText) {

@@ -100,7 +100,21 @@ hyphen:
     gustation-enabled: ${HYPHEN_GUSTATION_ENABLED:false}
   sync:
     schedule-cron: ${HYPHEN_SYNC_CRON:0 0 12,18 * * *}  # 매일 정오, 18시
+    global-schedule-enabled: ${HYPHEN_SYNC_GLOBAL_SCHEDULE_ENABLED:false}
     batch-size: ${HYPHEN_SYNC_BATCH_SIZE:10}
+
+asset:
+  session:
+    heartbeat-ttl-minutes: ${ASSET_SESSION_HEARTBEAT_TTL_MINUTES:15}
+    sync-throttle-minutes: ${ASSET_SESSION_SYNC_THROTTLE_MINUTES:5}
+    refresh-lock-seconds: ${ASSET_SESSION_REFRESH_LOCK_SECONDS:10}
+    background-sync-interval-ms: ${ASSET_BACKGROUND_SYNC_INTERVAL_MS:60000}
+  status:
+    watch-ratio: ${ASSET_STATUS_WATCH_RATIO:0.5}
+    alert-ratio: ${ASSET_STATUS_ALERT_RATIO:1.0}
+  batch:
+    previous-day-snapshot-cron: ${ASSET_PREVIOUS_DAY_SNAPSHOT_CRON:0 30 8 * * *}
+    all-time-high-scan-cron: ${ASSET_ATH_SCAN_CRON:0 30 6 * * 2-6}
 
 # AES-256 암호화 설정 (하이픈 로그인 정보 및 민감 정보 저장)
 crypto:

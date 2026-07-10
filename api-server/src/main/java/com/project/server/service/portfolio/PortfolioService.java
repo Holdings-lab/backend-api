@@ -2,31 +2,39 @@ package com.project.server.service.portfolio;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.project.server.service.integration.MlPredictionProxyService;
+import com.project.server.service.asset.AssetMetricsService;
 import org.springframework.stereotype.Service;
-import java.util.*;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @Service
 public class PortfolioService {
 
     private final MlPredictionProxyService mlPredictionProxyService;
+    private final AssetMetricsService assetMetricsService;
 
-    public PortfolioService(MlPredictionProxyService mlPredictionProxyService) {
+    public PortfolioService(MlPredictionProxyService mlPredictionProxyService,
+                            AssetMetricsService assetMetricsService) {
         this.mlPredictionProxyService = mlPredictionProxyService;
+        this.assetMetricsService = assetMetricsService;
     }
 
     public Map<String, Object> aggregatePortfolio(Long userId) {
-        JsonNode mlResult = mlPredictionProxyService.fetchPredictionResult();
-        double policyScore = 0.0;
-        if (mlResult != null && !mlResult.isMissingNode()) {
-            policyScore = mlResult.path("metrics").path("policyScore").asDouble(0.0);
-        }
-        
-        // 포트폴리오 수익률을 ML 모델의 기대수익률(policyScore)을 반영하여 동적으로 계산
-        double baseReturn = 1.2;
-        double adjustedReturn = Math.round((baseReturn + (policyScore * 100)) * 100.0) / 100.0;
-        double returnAmount = Math.round(15000000 * (adjustedReturn / 100.0));
-        
-        return Map.of("totalAssets", 15000000, "dailyReturnRate", adjustedReturn, "dailyReturnAmount", returnAmount);
+        AssetMetricsService.AssetMetrics metrics = assetMetricsService.compute(userId);
+        BigDecimal totalAssets = metrics.assetTotal();
+        BigDecimal dailyReturnRate = metrics.dailyChangePct();
+        BigDecimal dailyReturnAmount = totalAssets.multiply(dailyReturnRate)
+                .divide(BigDecimal.valueOf(100), 0, RoundingMode.HALF_UP);
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("totalAssets", totalAssets);
+        summary.put("dailyReturnRate", dailyReturnRate);
+        summary.put("dailyReturnAmount", dailyReturnAmount);
+        return summary;
     }
 
     public Map<String, Object> assessPortfolioRisk(Map<String, Object> metrics) {

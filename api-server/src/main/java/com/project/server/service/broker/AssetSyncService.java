@@ -15,6 +15,7 @@ import com.project.server.service.integration.HyphenApiClient;
 import com.project.server.service.security.CryptoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +24,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -88,7 +90,41 @@ public class AssetSyncService {
                 .build();
     }
 
+    public void syncAllConnectedAccounts(Long userId) {
+        if (userId == null || userId <= 0) {
+            throw ApiException.badRequest("유효하지 않은 사용자 ID입니다.", "INVALID_USER_ID");
+        }
+
+        List<BrokerAccountEntity> connectedAccounts = brokerAccountRepository.findByUserId(userId).stream()
+                .filter(account -> account.getHyphenStatus() == BrokerAccountEntity.HyphenStatus.CONNECTED)
+                .toList();
+
+        if (connectedAccounts.isEmpty()) {
+            return;
+        }
+
+        List<String> failures = new ArrayList<>();
+        for (BrokerAccountEntity account : connectedAccounts) {
+            try {
+                performSync(account);
+                account.setSyncCount((account.getSyncCount() != null ? account.getSyncCount() : 0) + 1);
+                account.setLastSyncedAt(LocalDateTime.now());
+                brokerAccountRepository.save(account);
+            } catch (Exception e) {
+                log.error("Sync failed for account: {}", account.getId(), e);
+                failures.add(account.getId() + ": " + e.getMessage());
+            }
+        }
+
+        if (!failures.isEmpty()) {
+            throw ApiException.internalServerError(
+                    "연동 계좌 동기화에 실패했습니다.",
+                    "MULTI_ACCOUNT_SYNC_FAILED");
+        }
+    }
+
     @Scheduled(cron = "${hyphen.sync.schedule-cron:0 0 12,18 * * *}")
+    @ConditionalOnProperty(name = "hyphen.sync.global-schedule-enabled", havingValue = "true")
     public void scheduledSync() {
         log.info("Starting scheduled broker sync...");
 
