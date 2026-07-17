@@ -24,8 +24,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.4'     # 평소 DB 쿼리 처리를 위해 CPU 점유율 40% 제한
-          memory: 250M    # 데이터가 적으므로 메모리는 250MB로 타이트하게 홀딩
+          cpus: '0.5'
+          # Hibernate ddl-auto / Flyway 기동 시 250M이면 OOM으로 연결이 끊길 수 있음
+          memory: 512M
     networks:
       - app-network
 
@@ -59,6 +60,10 @@ services:
       HYPHEN_OAUTH_ENABLED: ${HYPHEN_OAUTH_ENABLED:-true}
       HYPHEN_GUSTATION_ENABLED: ${HYPHEN_GUSTATION_ENABLED:-false}
       CRYPTO_AES_KEY: ${CRYPTO_AES_KEY:-}
+      # 컨테이너 limit(768M) 안에서 힙을 고정해 cgroup OOM을 줄임
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=70.0 -XX:+UseContainerSupport}
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${HIKARI_MAX_POOL_SIZE:-5}
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: ${HIKARI_MIN_IDLE:-2}
     ports:
       - ${API_SERVER_PORT:-8080}:8080
     volumes:
@@ -72,12 +77,12 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 90s
     deploy:
       resources:
         limits:
-          cpus: '0.6'     # 대고객 API 서비스용 코어 지분 항상 확보
-          memory: 450M    # 톰캣 및 스프링 부트 구동을 위한 안정적 최소 메모리 격리
+          cpus: '0.75'
+          memory: 768M
     networks:
       - app-network
 
