@@ -89,9 +89,9 @@ jobs:
             docker compose -f docker-compose.prod.yml --env-file .env.docker pull postgres
             docker compose -f docker-compose.prod.yml --env-file .env.docker pull api-server
             docker compose -f docker-compose.prod.yml --env-file .env.docker pull data-ml
-            
+
             echo "=== Starting Docker containers ==="
-            docker compose -f docker-compose.prod.yml --env-file .env.docker up -d
+            docker compose -f docker-compose.prod.yml --env-file .env.docker up -d --remove-orphans
             
             echo "=== Cleaning up unused images ==="
             docker image prune -af || true

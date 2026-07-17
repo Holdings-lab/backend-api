@@ -2,7 +2,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: pwa-postgres
+    container_name: postgres
     restart: always
     env_file:
       - .env.docker
@@ -31,7 +31,7 @@ services:
 
   api-server:
     image: ghcr.io/holdings-lab/api-server:latest
-    container_name: pwa-api-server
+    container_name: api-server
     restart: always
     depends_on:
       postgres:
@@ -83,7 +83,7 @@ services:
 
   data-ml:
     image: ghcr.io/holdings-lab/data-ml:latest
-    container_name: pwa-data-ml
+    container_name: data-ml
     restart: always
     depends_on:
       postgres:

@@ -1,0 +1,16 @@
+[Unit]
+Description=Holdings Lab Docker Compose Stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/backend-api
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.docker up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.docker down
+RemainAfterExit=yes
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
