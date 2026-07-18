@@ -40,6 +40,8 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JavaMailSender mailSender;
     private final SettingsService settingsService;
+    private final com.project.server.service.security.JwtTokenProvider jwtTokenProvider;
+    private final RefreshTokenService refreshTokenService;
 
     @Value("${auth.email.from}")
     private String authMailFrom;
@@ -153,14 +155,46 @@ public class AuthService {
 
         log.info("사용자 로그인: {}", normalizedEmail);
 
+        String accessToken = jwtTokenProvider.generateAccessToken(user.getId(), user.getEmail());
+        String refreshToken = refreshTokenService.issue(user.getId());
+
         return AuthDto.LoginResult.builder()
                 .userId(user.getId())
                 .email(user.getEmail())
                 .nickname(user.getNickname())
-                .accessToken(UUID.randomUUID().toString())
-                .refreshToken(UUID.randomUUID().toString())
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .tokenType("Bearer")
+                .accessTokenExpiresIn(jwtTokenProvider.getAccessTokenExpirationSeconds())
                 .onboardingCompleted(false)
                 .build();
+    }
+
+    /**
+     * 리프레시 토큰으로 액세스 토큰을 재발급한다(리프레시 토큰 회전 포함).
+     */
+    public AuthDto.TokenResponse refresh(String rawRefreshToken) {
+        RefreshTokenService.Rotation rotation = refreshTokenService.rotate(rawRefreshToken);
+
+        UserEntity user = userJpaRepository.findById(rotation.userId())
+                .orElseThrow(() -> ApiException.unauthorized("존재하지 않는 사용자입니다.", "AUTH_USER_NOT_FOUND"));
+
+        String accessToken = jwtTokenProvider.generateAccessToken(user.getId(), user.getEmail());
+
+        return AuthDto.TokenResponse.builder()
+                .userId(user.getId())
+                .accessToken(accessToken)
+                .refreshToken(rotation.refreshToken())
+                .tokenType("Bearer")
+                .accessTokenExpiresIn(jwtTokenProvider.getAccessTokenExpirationSeconds())
+                .build();
+    }
+
+    /**
+     * 로그아웃: 전달받은 리프레시 토큰을 폐기한다.
+     */
+    public void logout(String rawRefreshToken) {
+        refreshTokenService.revoke(rawRefreshToken);
     }
 
     public AuthDto.AuthResponse registerFCMToken(AuthDto.FCMTokenRequest request) {
@@ -425,12 +459,17 @@ public class AuthService {
             log.info("OAuth 사용자 로그인: provider={}, email={}", provider, oauthEmail);
         }
 
+        String accessToken = jwtTokenProvider.generateAccessToken(user.getId(), user.getEmail());
+        String refreshToken = refreshTokenService.issue(user.getId());
+
         return AuthDto.OAuthLoginResult.builder()
                 .userId(user.getId())
                 .email(user.getEmail())
                 .nickname(user.getNickname())
-                .accessToken(UUID.randomUUID().toString())
-                .refreshToken(UUID.randomUUID().toString())
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .tokenType("Bearer")
+                .accessTokenExpiresIn(jwtTokenProvider.getAccessTokenExpirationSeconds())
                 .onboardingCompleted(false)
                 .newUser(isNewUser)
                 .build();

@@ -44,6 +44,19 @@ public class AuthController {
         return ResponseEntity.ok(loginResult);
     }
 
+    @PostMapping("/refresh")
+    public ResponseEntity<AuthDto.TokenResponse> refresh(
+            @Valid @RequestBody AuthDto.TokenRefreshRequest request) {
+        AuthDto.TokenResponse response = authService.refresh(request.getRefreshToken());
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@Valid @RequestBody AuthDto.LogoutRequest request) {
+        authService.logout(request.getRefreshToken());
+        return ResponseEntity.ok().build();
+    }
+
     @PostMapping("/fcm-token")
     public ResponseEntity<AuthDto.AuthResponse> registerFCMToken(@Valid @RequestBody AuthDto.FCMTokenRequest request) {
         AuthDto.AuthResponse response = authService.registerFCMToken(request);

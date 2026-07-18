@@ -86,6 +86,15 @@ auth:
     verify-code-expire-minutes: ${AUTH_VERIFY_CODE_EXPIRE_MINUTES:3}
     master-verification-code: ${MASTER_VERIFICATION_CODE:}
 
+# JWT 세션 토큰 설정
+# secret 은 HS256 서명키(최소 32바이트)
+# 비워두면 부팅 시 임시 키 생성, 재시작 시 기존 토큰이 모두 무효화
+jwt:
+  secret: ${JWT_SECRET:}
+  issuer: ${JWT_ISSUER:holdings-lab}
+  access-token-expiration-minutes: ${JWT_ACCESS_TOKEN_EXPIRATION_MINUTES:30}
+  refresh-token-expiration-days: ${JWT_REFRESH_TOKEN_EXPIRATION_DAYS:14}
+
 # Hyphen API 설정 (개인계좌 증권사 조회)
 hyphen:
   user-id: ${HYPHEN_USER_ID:}

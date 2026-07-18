@@ -82,6 +82,9 @@ public class AuthDto {
         private String nickname;
         private String accessToken;
         private String refreshToken;
+        @Builder.Default
+        private String tokenType = "Bearer";
+        private long accessTokenExpiresIn;
         private boolean onboardingCompleted;
     }
 
@@ -186,7 +189,35 @@ public class AuthDto {
         private String nickname;
         private String accessToken;
         private String refreshToken;
+        @Builder.Default
+        private String tokenType = "Bearer";
+        private long accessTokenExpiresIn;
         private boolean onboardingCompleted;
         private boolean newUser;
+    }
+
+    @Data
+    @Builder
+    public static class TokenRefreshRequest {
+        @NotBlank(message = "리프레시 토큰은 필수입니다.")
+        private String refreshToken;
+    }
+
+    @Data
+    @Builder
+    public static class LogoutRequest {
+        @NotBlank(message = "리프레시 토큰은 필수입니다.")
+        private String refreshToken;
+    }
+
+    @Data
+    @Builder
+    public static class TokenResponse {
+        private Long userId;
+        private String accessToken;
+        private String refreshToken;
+        @Builder.Default
+        private String tokenType = "Bearer";
+        private long accessTokenExpiresIn;
     }
 }

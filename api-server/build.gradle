@@ -29,6 +29,11 @@ dependencies {
     implementation 'org.springframework.security:spring-security-crypto'
     implementation 'jakarta.validation:jakarta.validation-api:3.0.2'
     implementation 'org.hibernate.validator:hibernate-validator:8.0.1.Final'
+
+    // JWT (세션 액세스/리프레시 토큰)
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
     
     // Database
     runtimeOnly 'org.postgresql:postgresql:42.7.3'
