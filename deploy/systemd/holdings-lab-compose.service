@@ -6,7 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/ubuntu/backend-api
+WorkingDirectory=/opt/riseai/apps/backend-api
 ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.docker up -d
 ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.docker down
 RemainAfterExit=yes
