@@ -29,7 +29,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{apiBaseUrl}}/api/home?userId={{userId}}"
+            "url": "{{apiBaseUrl}}/api/users/{{userId}}/home"
           }
         },
         {
@@ -38,14 +38,6 @@
             "method": "GET",
             "header": [],
             "url": "{{apiBaseUrl}}/api/events?userId={{userId}}&dateSegment=today&category=all"
-          }
-        },
-        {
-          "name": "POST /api/events/refresh",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{apiBaseUrl}}/api/events/refresh?userId={{userId}}&dateSegment=today&category=all"
           }
         },
         {
@@ -67,7 +59,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{apiBaseUrl}}/api/insights/heatmap?marketScope=all&country=all"
+            "url": "{{apiBaseUrl}}/api/insights/heatmap"
           }
         },
         {
@@ -75,19 +67,19 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{apiBaseUrl}}/api/me?userId={{userId}}"
+            "url": "{{apiBaseUrl}}/api/users/{{userId}}"
           }
         },
         {
-          "name": "GET /api/me/settings/notifications",
+          "name": "GET /api/me/settings",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{apiBaseUrl}}/api/me/settings/notifications?userId={{userId}}"
+            "url": "{{apiBaseUrl}}/api/users/{{userId}}/settings"
           }
         },
         {
-          "name": "PATCH /api/me/settings/notifications",
+          "name": "PATCH /api/me/settings",
           "request": {
             "method": "PATCH",
             "header": [
@@ -97,7 +89,7 @@
               "mode": "raw",
               "raw": "{\n  \"before30m\": true,\n  \"importantEventBriefing\": true,\n  \"learningReminder\": false\n}"
             },
-            "url": "{{apiBaseUrl}}/api/me/settings/notifications?userId={{userId}}"
+            "url": "{{apiBaseUrl}}/api/users/{{userId}}/settings"
           }
         },
         {
@@ -105,7 +97,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{apiBaseUrl}}/api/me/watch-assets/options"
+            "url": "{{apiBaseUrl}}/api/assets/options"
           }
         },
         {
@@ -119,7 +111,7 @@
               "mode": "raw",
               "raw": "{\n  \"assetNames\": [\"QQQ\", \"TLT\", \"SPY\"]\n}"
             },
-            "url": "{{apiBaseUrl}}/api/me/watch-assets?userId={{userId}}"
+            "url": "{{apiBaseUrl}}/api/users/{{userId}}/watchlist"
           }
         }
       ]
@@ -138,7 +130,7 @@
               "mode": "raw",
               "raw": "{\n  \"email\": \"test@example.com\",\n  \"nickname\": \"tester\",\n  \"password\": \"test1234\"\n}"
             },
-            "url": "{{apiBaseUrl}}/api/auth/register"
+            "url": "{{apiBaseUrl}}/api/auth/signup"
           }
         },
         {
@@ -166,7 +158,7 @@
               "mode": "raw",
               "raw": "{\n  \"userId\": {{userId}},\n  \"fcmToken\": \"sample_fcm_token_1234567890\"\n}"
             },
-            "url": "{{apiBaseUrl}}/api/auth/register-fcm-token"
+            "url": "{{apiBaseUrl}}/api/auth/fcm-token"
           }
         },
         {
@@ -205,23 +197,31 @@
       "name": "API Server - Integration/Content/Webhook",
       "item": [
         {
-          "name": "POST /api/ai/trigger",
+          "name": "POST /api/ml/users/{userId}/sync",
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{apiBaseUrl}}/api/ai/trigger?userId={{userId}}"
+            "url": "{{apiBaseUrl}}/api/ml/users/{{userId}}/sync"
           }
         },
         {
-          "name": "POST /api/ai/train-regression",
+          "name": "POST /api/ml/models/regression/training",
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{apiBaseUrl}}/api/ai/train-regression"
+            "url": "{{apiBaseUrl}}/api/ml/models/regression/training"
           }
         },
         {
-          "name": "POST /api/content/policy-feed",
+          "name": "POST /api/ml/signal",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{apiBaseUrl}}/api/ml/signal?ticker=QQQ"
+          }
+        },
+        {
+          "name": "GET /api/content/policy-feed",
           "request": {
             "method": "POST",
             "header": [
@@ -231,7 +231,7 @@
               "mode": "raw",
               "raw": "{\n  \"limit\": 10,\n  \"category\": \"all\",\n  \"userId\": {{userId}},\n  \"dateFrom\": \"\",\n  \"dateTo\": \"\"\n}"
             },
-            "url": "{{apiBaseUrl}}/api/content/policy-feed"
+            "url": "{{apiBaseUrl}}/api/feeds/policy"
           }
         },
         {
@@ -246,7 +246,7 @@
               "mode": "raw",
               "raw": "{\n  \"eventId\": {{eventId}},\n  \"keyword\": \"fomc\"\n}"
             },
-            "url": "{{apiBaseUrl}}/api/internal/webhook/event"
+            "url": "{{apiBaseUrl}}/api/internal/webhooks/events"
           }
         }
       ]
@@ -271,15 +271,15 @@
           }
         },
         {
-          "name": "POST /ml/predict/run",
+          "name": "POST /ml/predictions/run",
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{mlBaseUrl}}/ml/predict/run"
+            "url": "{{mlBaseUrl}}/ml/predictions/run"
           }
         },
         {
-          "name": "POST /ml/content/policy-feed",
+          "name": "GET /ml/content/policy-feed",
           "request": {
             "method": "POST",
             "header": [
@@ -289,7 +289,7 @@
               "mode": "raw",
               "raw": "{\n  \"limit\": 10,\n  \"category\": \"all\",\n  \"userId\": {{userId}},\n  \"dateFrom\": \"\",\n  \"dateTo\": \"\"\n}"
             },
-            "url": "{{mlBaseUrl}}/ml/content/policy-feed"
+            "url": "{{mlBaseUrl}}/ml/feeds/policy"
           }
         },
         {

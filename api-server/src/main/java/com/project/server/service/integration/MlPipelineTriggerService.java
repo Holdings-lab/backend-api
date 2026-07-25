@@ -16,7 +16,7 @@ import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
-public class AiPipelineTriggerService {
+public class MlPipelineTriggerService {
 
     private final EventScheduleService eventScheduleService;
     private final FeaturedEventStateService featuredEventStateService;
@@ -41,7 +41,7 @@ public class AiPipelineTriggerService {
         );
 
         return ActionDto.ActionResponse.builder()
-                .action("ai-trigger")
+                .action("ml-trigger")
                 .status("completed")
                 .userId(userId)
                 .eventId(current.eventId())
@@ -55,13 +55,13 @@ public class AiPipelineTriggerService {
 
     private void validateUser(Long userId) {
         if (userId == null) {
-            throw ApiException.badRequest("userId는 필수 파라미터입니다.", "AI_TRIGGER_INVALID_USER_ID");
+            throw ApiException.badRequest("userId는 필수 파라미터입니다.", "ML_TRIGGER_INVALID_USER_ID");
         }
         if (userId <= 0) {
-            throw ApiException.badRequest("userId는 양수여야 합니다.", "AI_TRIGGER_INVALID_USER_ID");
+            throw ApiException.badRequest("userId는 양수여야 합니다.", "ML_TRIGGER_INVALID_USER_ID");
         }
         if (!userJpaRepository.existsById(userId)) {
-            throw ApiException.notFound("존재하지 않는 사용자입니다.", "AI_TRIGGER_USER_NOT_FOUND");
+            throw ApiException.notFound("존재하지 않는 사용자입니다.", "ML_TRIGGER_USER_NOT_FOUND");
         }
     }
 
@@ -130,7 +130,7 @@ public class AiPipelineTriggerService {
             }
         }
         if (parts.isEmpty()) {
-            parts.add("AI 파이프라인 실행 완료");
+            parts.add("ML 파이프라인 실행 완료");
         }
         return String.join(" · ", parts);
     }

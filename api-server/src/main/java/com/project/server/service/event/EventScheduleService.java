@@ -71,10 +71,10 @@ public class EventScheduleService {
 
     private void validateUser(Long userId) {
         if (userId == null || userId <= 0) {
-            throw ApiException.badRequest("userId는 양수여야 합니다.", "AI_TRIGGER_INVALID_USER_ID");
+            throw ApiException.badRequest("userId는 양수여야 합니다.", "ML_TRIGGER_INVALID_USER_ID");
         }
         if (!userJpaRepository.existsById(userId)) {
-            throw ApiException.notFound("존재하지 않는 사용자입니다.", "AI_TRIGGER_USER_NOT_FOUND");
+            throw ApiException.notFound("존재하지 않는 사용자입니다.", "ML_TRIGGER_USER_NOT_FOUND");
         }
     }
 

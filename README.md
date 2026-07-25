@@ -65,7 +65,7 @@ api-server/
 │  ├─ config/
 │  ├─ controller/
 │  │  ├─ AdminController.java
-│  │  ├─ AiPipelineController.java
+│  │  ├─ MlPipelineController.java
 │  │  ├─ AuthController.java
 │  │  ├─ BrokerAccountController.java
 │  │  ├─ ContentFeedController.java
@@ -124,7 +124,7 @@ data-ml/
 
 - `src/main/java/com/project/server/controller/AdminController.java`
 	관리자 계정/알림/계좌 모의 데이터 관리 엔드포인트.
-- `src/main/java/com/project/server/controller/AiPipelineController.java`
+- `src/main/java/com/project/server/controller/MlPipelineController.java`
 	ML 파이프라인 트리거와 학습 요청 엔드포인트.
 - `src/main/java/com/project/server/controller/AuthController.java`
 	인증/사용자 관련 엔드포인트.
@@ -204,7 +204,7 @@ data-ml/
 서버 정상 작동 여부 확인.
 
 ```bash
-curl http://<server-address>:8080/health
+curl http://<server-address>:8080/api/health
 ```
 
 ### 상세 스펙
