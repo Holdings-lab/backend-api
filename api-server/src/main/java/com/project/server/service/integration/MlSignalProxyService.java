@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.project.server.exception.ApiException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -20,6 +22,7 @@ import java.util.concurrent.CompletionException;
 @Service
 public class MlSignalProxyService {
 
+    private static final Logger log = LoggerFactory.getLogger(MlSignalProxyService.class);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(130);
 
     private final ObjectMapper objectMapper;
@@ -40,6 +43,8 @@ public class MlSignalProxyService {
         ObjectNode body = objectMapper.createObjectNode();
         body.put("ticker", ticker == null || ticker.isBlank() ? "QQQ" : ticker.trim().toUpperCase());
 
+        log.info("Calling ML signal endpoint: url={}, ticker={}", targetUrl, body.path("ticker").asText());
+
         HttpRequest request;
         try {
             request = HttpRequest.newBuilder()
@@ -50,7 +55,10 @@ public class MlSignalProxyService {
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body), StandardCharsets.UTF_8))
                     .build();
         } catch (Exception exception) {
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "SIGNAL-500", "시그널 요청 생성에 실패했습니다.");
+            throw new ApiException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "SIGNAL-500",
+                    "시그널 요청 생성에 실패했습니다. url=" + targetUrl + ", cause=" + rootMessage(exception));
         }
 
         try {
@@ -66,13 +74,25 @@ public class MlSignalProxyService {
                 throw new ApiException(HttpStatus.GATEWAY_TIMEOUT, "SIGNAL-TIMEOUT", "시그널 예측이 시간 초과되었습니다.");
             }
             if (response.statusCode() == 404) {
-                throw new ApiException(HttpStatus.NOT_FOUND, "SIGNAL-FEATURES-OR-RESULT", upstreamMessage(response.body(), "시그널 feature 또는 결과 파일을 찾을 수 없습니다."));
+                throw new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        "SIGNAL-FEATURES-OR-RESULT",
+                        upstreamMessage(response.body(), "시그널 feature 또는 결과 파일을 찾을 수 없습니다.")
+                                + " url=" + targetUrl);
             }
             if (response.statusCode() >= 500) {
-                throw new ApiException(HttpStatus.BAD_GATEWAY, "SIGNAL-UPSTREAM-500", upstreamMessage(response.body(), "ML 서비스 시그널 호출에 실패했습니다."));
+                throw new ApiException(
+                        HttpStatus.BAD_GATEWAY,
+                        "SIGNAL-UPSTREAM-500",
+                        upstreamMessage(response.body(), "ML 서비스 시그널 호출에 실패했습니다.")
+                                + " url=" + targetUrl);
             }
             if (response.statusCode() >= 400) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "SIGNAL-UPSTREAM-400", upstreamMessage(response.body(), "ML 서비스 시그널 요청이 거부되었습니다."));
+                throw new ApiException(
+                        HttpStatus.BAD_REQUEST,
+                        "SIGNAL-UPSTREAM-400",
+                        upstreamMessage(response.body(), "ML 서비스 시그널 요청이 거부되었습니다.")
+                                + " url=" + targetUrl);
             }
 
             JsonNode responseBody = objectMapper.readTree(response.body());
@@ -82,15 +102,27 @@ public class MlSignalProxyService {
             }
             return result;
         } catch (CompletionException completionException) {
-            throw new ApiException(HttpStatus.BAD_GATEWAY, "SIGNAL-UPSTREAM-CONNECT", "ML 서비스에 연결할 수 없습니다.");
+            String cause = rootMessage(completionException);
+            log.warn("ML signal upstream connect failed: url={}, cause={}", targetUrl, cause);
+            throw new ApiException(
+                    HttpStatus.BAD_GATEWAY,
+                    "SIGNAL-UPSTREAM-CONNECT",
+                    "ML 서비스에 연결할 수 없습니다. url=" + targetUrl + ", cause=" + cause);
         } catch (ApiException apiException) {
             throw apiException;
         } catch (Exception exception) {
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "SIGNAL-500", "시그널 예측 처리 중 오류가 발생했습니다.");
+            log.warn("ML signal processing failed: url={}, cause={}", targetUrl, rootMessage(exception));
+            throw new ApiException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "SIGNAL-500",
+                    "시그널 예측 처리 중 오류가 발생했습니다. url=" + targetUrl + ", cause=" + rootMessage(exception));
         }
     }
 
     private String normalizeBaseUrl(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return "http://localhost:9000";
+        }
         if (baseUrl.endsWith("/")) {
             return baseUrl.substring(0, baseUrl.length() - 1);
         }
@@ -108,5 +140,17 @@ public class MlSignalProxyService {
             // fallback
         }
         return fallback;
+    }
+
+    private String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        if (message == null || message.isBlank()) {
+            return current.getClass().getSimpleName();
+        }
+        return current.getClass().getSimpleName() + ": " + message;
     }
 }

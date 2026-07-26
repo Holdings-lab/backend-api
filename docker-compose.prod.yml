@@ -63,7 +63,7 @@ services:
       JWT_ISSUER: ${JWT_ISSUER:-holdings-lab}
       JWT_ACCESS_TOKEN_EXPIRATION_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRATION_MINUTES:-30}
       JWT_REFRESH_TOKEN_EXPIRATION_DAYS: ${JWT_REFRESH_TOKEN_EXPIRATION_DAYS:-14}
-      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=70.0 -XX:+UseContainerSupport}
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=70.0 -XX:+UseContainerSupport -Djava.net.preferIPv4Stack=true}
       SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${HIKARI_MAX_POOL_SIZE:-5}
       SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: ${HIKARI_MIN_IDLE:-2}
     ports:
@@ -121,7 +121,8 @@ services:
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3.5-haiku-20241022}
       PYTHON_DOTENV_DISABLED: "1"
       ML_WORKER_ROOT: ${ML_WORKER_ROOT:-/opt/riseai/apps/ml-worker}
-      ML_WORKER_PYTHON: ${ML_WORKER_PYTHON:-/opt/riseai/apps/ml-worker/.venv/bin/python}
+      # Docker 안에서는 호스트 venv 대신 컨테이너 python 사용
+      ML_WORKER_PYTHON: ${ML_WORKER_PYTHON:-python}
       SIGNAL_OUTPUT_PATH: ${SIGNAL_OUTPUT_PATH:-/opt/riseai/data/predictions/qqq_latest_signal.json}
       SIGNAL_NEWS_FEATURES_PATH: ${SIGNAL_NEWS_FEATURES_PATH:-/opt/riseai/data/features/qqq/news_event_features.csv}
       SIGNAL_MARKET_FEATURES_PATH: ${SIGNAL_MARKET_FEATURES_PATH:-/opt/riseai/data/features/qqq/market_long_features.csv}

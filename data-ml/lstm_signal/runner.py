@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -34,11 +35,37 @@ def _ml_worker_root() -> Path:
     return Path(os.getenv("ML_WORKER_ROOT", str(DEFAULT_ML_WORKER_ROOT)))
 
 
-def _ml_worker_python(worker_root: Path) -> Path:
-    env_value = os.getenv("ML_WORKER_PYTHON")
-    if env_value:
-        return Path(env_value)
-    return worker_root / ".venv" / "bin" / "python"
+def _in_docker() -> bool:
+    return Path("/.dockerenv").exists()
+
+
+def _ml_worker_python(worker_root: Path) -> str:
+    configured = (os.getenv("ML_WORKER_PYTHON") or "").strip()
+    if _in_docker():
+        if configured and ".venv" in configured.replace("\\", "/"):
+            logger.warning(
+                "[Signal] Ignoring host venv python inside Docker (%s); using container python",
+                configured,
+            )
+        return sys.executable
+
+    if configured:
+        if configured in {"python", "python3"}:
+            return configured
+        return configured
+
+    venv_python = worker_root / ".venv" / "bin" / "python"
+    if venv_python.exists():
+        return str(venv_python)
+    return sys.executable
+
+
+def _predict_env(worker_root: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "")
+    worker = str(worker_root)
+    env["PYTHONPATH"] = worker if not existing else f"{worker}{os.pathsep}{existing}"
+    return env
 
 
 def _predictions_dir() -> Path:
@@ -299,7 +326,8 @@ def run_signal(
     news_features_path = Path(feature_prep["news_features_path"])
     market_features_path = Path(feature_prep["market_features_path"])
 
-    if not python_bin.exists():
+    python_path = Path(python_bin)
+    if python_bin not in {"python", "python3"} and not python_path.exists():
         raise SignalRunnerError(
             f"ml-worker Python 을 찾을 수 없습니다: {python_bin}",
             code="ML_SIGNAL_CONFIG_ERROR",
@@ -321,7 +349,7 @@ def run_signal(
         )
 
     command = [
-        str(python_bin),
+        python_bin,
         "-B",
         str(script_path),
         "--ticker",
@@ -341,6 +369,7 @@ def run_signal(
         completed = subprocess.run(
             command,
             cwd=str(worker_root),
+            env=_predict_env(worker_root),
             capture_output=True,
             text=True,
             encoding="utf-8",
