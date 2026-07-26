@@ -28,6 +28,12 @@ from training.service import run_prediction_now
 from db.db import fetch_policy_feed_frame, fetch_user_watch_asset_names, init_db
 from llm.service import ArticleInsightGenerationService, HomeBriefingGenerationService
 from llm.providers import build_llm_client
+from lstm_signal.runner import (
+    SignalRunnerError,
+    load_latest_signal,
+    parse_signal_request,
+    run_signal,
+)
 
 
 load_dotenv(Path(__file__).resolve().with_name(".env"))
@@ -186,6 +192,13 @@ def _remove_message_fields(value):
     if isinstance(value, list):
         return [_remove_message_fields(item) for item in value]
     return value
+
+
+def _tail_text(value: str | None, limit: int = 500) -> str:
+    text = value or ""
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
 
 
 def _build_failure_reason(result: dict, fallback_message: str) -> str:
@@ -1018,6 +1031,56 @@ def get_predict_result_endpoint():
     if not summary:
         return _error_response("예측 결과가 존재하지 않습니다.", code="ML_PREDICT_RESULT_NOT_FOUND", status_code=404)
     return _success_response(summary, message="예측 연산 결과를 성공적으로 불러왔습니다.")
+
+
+@app.post(f"{ML_PREFIX}/signal/run")
+async def run_signal_endpoint(request: Request, date: str | None = None):
+    if not run_lock.acquire(blocking=False):
+        return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_SIGNAL_BUSY", status_code=409)
+    try:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        # pipelines/run 과 동일하게 query `date` 우선
+        if date:
+            payload = {**payload, "targetDate": date}
+        try:
+            params = parse_signal_request(payload)
+            result = run_signal(**params)
+            return _success_response(result, message="시그널 예측에 성공했습니다.")
+        except SignalRunnerError as error:
+            status_code = 400
+            if error.code in {"ML_SIGNAL_TIMEOUT"}:
+                status_code = 504
+            elif error.code in {"ML_SIGNAL_RESULT_NOT_FOUND", "ML_SIGNAL_FEATURES_NOT_FOUND"}:
+                status_code = 404
+            elif error.code in {
+                "ML_SIGNAL_CONFIG_ERROR",
+                "ML_SIGNAL_EXEC_FAILED",
+                "ML_SIGNAL_FAILED",
+                "ML_SIGNAL_RESULT_INVALID",
+                "ML_SIGNAL_CRAWL_FAILED",
+            }:
+                status_code = 500
+            message = error.message
+            if error.details.get("stderr_tail"):
+                message = f"{message} ({_tail_text(error.details.get('stderr_tail'))})"
+            return _error_response(message=message, code=error.code, status_code=status_code)
+    finally:
+        run_lock.release()
+
+
+@app.get(f"{ML_PREFIX}/signal/latest")
+def get_latest_signal_endpoint(ticker: str = "QQQ"):
+    try:
+        result = load_latest_signal(ticker=ticker)
+        return _success_response(result, message="최신 시그널 조회에 성공했습니다.")
+    except SignalRunnerError as error:
+        status_code = 404 if error.code == "ML_SIGNAL_RESULT_NOT_FOUND" else 500
+        return _error_response(message=error.message, code=error.code, status_code=status_code)
 
 
 @app.get(f"{ML_PREFIX}/llm/article-insights")

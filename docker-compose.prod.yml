@@ -120,11 +120,22 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3.5-haiku-20241022}
       PYTHON_DOTENV_DISABLED: "1"
+      ML_WORKER_ROOT: ${ML_WORKER_ROOT:-/opt/riseai/apps/ml-worker}
+      ML_WORKER_PYTHON: ${ML_WORKER_PYTHON:-/opt/riseai/apps/ml-worker/.venv/bin/python}
+      SIGNAL_OUTPUT_PATH: ${SIGNAL_OUTPUT_PATH:-/opt/riseai/data/predictions/qqq_latest_signal.json}
+      SIGNAL_NEWS_FEATURES_PATH: ${SIGNAL_NEWS_FEATURES_PATH:-/opt/riseai/data/features/qqq/news_event_features.csv}
+      SIGNAL_MARKET_FEATURES_PATH: ${SIGNAL_MARKET_FEATURES_PATH:-/opt/riseai/data/features/qqq/market_long_features.csv}
+      SIGNAL_TIMEOUT_SEC: ${SIGNAL_TIMEOUT_SEC:-120}
+      SIGNAL_REFRESH_FEATURES: ${SIGNAL_REFRESH_FEATURES:-false}
     ports:
       - ${ML_API_PORT:-9000}:9000
     volumes:
       - ./data-ml/data:/app/data
       - ./data-ml/training:/app/training
+      - /opt/riseai/apps/ml-worker:/opt/riseai/apps/ml-worker:ro
+      - /opt/riseai/models:/opt/riseai/models:ro
+      - /opt/riseai/data/predictions:/opt/riseai/data/predictions
+      - /opt/riseai/data/features:/opt/riseai/data/features
     healthcheck:
       test:
         - CMD
@@ -139,7 +150,7 @@ services:
       resources:
         limits:
           cpus: '1.0'     # 크롤링/Pandas/예측 연산 시 코어 1개로 상한선 차단
-          memory: 800M    # 데이터가 적으므로 스왑을 최소화하며 연산할 수 있는 크기
+          memory: 1536M   # LSTM+XGB subprocess(torch) 로딩 여유
     networks:
       - app-network
 

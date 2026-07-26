@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -29,10 +30,26 @@ def run_crawl_now(
     keyword_config_path: str | Path | None = None,
     doc_types: list[str] | None = None,
     target_date: date | None = None,
+    *,
+    raw_csv_path: str | Path | None = None,
+    processed_csv_path: str | Path | None = None,
+    run_type: str = "crawler_service",
 ) -> dict:
+    """
+    정책 뉴스 수집 + 후처리.
+
+    기본 경로(/ml/pipelines/run 용):
+      - raw: data/crawler/collected/policy_updates_monitor.csv
+      - processed: data/crawler/features/policy_updates_features.csv
+
+    /ml/signal 은 raw_csv_path / processed_csv_path 로
+    /opt/riseai/data/features/qqq/... 쪽 경로를 넘긴다.
+    """
     init_db()
-    raw_csv = collected_csv_path("policy_updates_monitor.csv")
-    processed_csv = feature_csv_path("policy_updates_features.csv")
+    raw_csv = str(raw_csv_path) if raw_csv_path else collected_csv_path("policy_updates_monitor.csv")
+    processed_csv = (
+        str(processed_csv_path) if processed_csv_path else feature_csv_path("policy_updates_features.csv")
+    )
 
     raw_df = collect_policy_updates(
         bis_max_pages=bis_max_pages,
@@ -48,7 +65,7 @@ def run_crawl_now(
             processed_df=pd.DataFrame(),
             raw_csv_path=raw_csv,
             processed_csv_path=processed_csv,
-            run_type="crawler_service",
+            run_type=run_type,
         )
         return {
             "status": "success",
@@ -60,13 +77,12 @@ def run_crawl_now(
 
     processed_df = run_postprocessing_pipeline(raw_df)
 
-    # CSV와 DB에 동시에 저장한다.
     persist_result = persist_policy_pipeline_outputs(
         raw_df=raw_df,
         processed_df=processed_df,
         raw_csv_path=raw_csv,
         processed_csv_path=processed_csv,
-        run_type="crawler_service",
+        run_type=run_type,
     )
 
     return {
