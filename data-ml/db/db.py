@@ -215,8 +215,9 @@ def upsert_policy_document(record: dict[str, Any]) -> int:
         raise RuntimeError("psycopg2 is not installed")
 
     payload = _row_to_dict(record)
-    published_date = _safe_date(payload.get("published_date"))
+    published_date = _safe_date(payload.get("published_date") or payload.get("release_date"))
     collected_at = payload.get("collected_at")
+    body_text = _safe_str(payload.get("body"), "") or ""
 
     query = """
         INSERT INTO policy_documents (
@@ -232,13 +233,16 @@ def upsert_policy_document(record: dict[str, Any]) -> int:
             source = EXCLUDED.source,
             category = EXCLUDED.category,
             doc_type = EXCLUDED.doc_type,
-            published_date = EXCLUDED.published_date,
-            release_date = EXCLUDED.release_date,
-            title = EXCLUDED.title,
-            body = EXCLUDED.body,
-            matched_keyword_groups = EXCLUDED.matched_keyword_groups,
-            matched_keywords = EXCLUDED.matched_keywords,
-            collected_at = EXCLUDED.collected_at,
+            published_date = COALESCE(EXCLUDED.published_date, policy_documents.published_date),
+            release_date = COALESCE(NULLIF(EXCLUDED.release_date, ''), policy_documents.release_date),
+            title = COALESCE(NULLIF(EXCLUDED.title, ''), policy_documents.title),
+            body = CASE
+                WHEN EXCLUDED.body IS NOT NULL AND EXCLUDED.body <> '' THEN EXCLUDED.body
+                ELSE policy_documents.body
+            END,
+            matched_keyword_groups = COALESCE(NULLIF(EXCLUDED.matched_keyword_groups, ''), policy_documents.matched_keyword_groups),
+            matched_keywords = COALESCE(NULLIF(EXCLUDED.matched_keywords, ''), policy_documents.matched_keywords),
+            collected_at = COALESCE(EXCLUDED.collected_at, policy_documents.collected_at),
             raw_payload = EXCLUDED.raw_payload,
             updated_at = NOW()
         RETURNING id
@@ -252,7 +256,7 @@ def upsert_policy_document(record: dict[str, Any]) -> int:
         "release_date": _safe_str(payload.get("release_date"), "") or "",
         "title": _safe_str(payload.get("title"), "") or "",
         "url": _safe_str(payload.get("url"), "") or "",
-        "body": _safe_str(payload.get("body"), "") or "",
+        "body": body_text,
         "matched_keyword_groups": _safe_str(payload.get("matched_keyword_groups"), "") or "",
         "matched_keywords": _safe_str(payload.get("matched_keywords"), "") or "",
         "collected_at": collected_at,
@@ -388,8 +392,10 @@ def persist_policy_pipeline_outputs(
     raw_csv_path: str,
     processed_csv_path: str,
     run_type: str = "policy_monitor",
+    *,
+    append_processed: bool = True,
 ) -> dict[str, Any]:
-    """CSV(최신 실행분)와 DB(누적)에 동시에 저장한다."""
+    """CSV와 DB에 저장한다. processed CSV 는 기본적으로 기존 파일에 누적(append)한다."""
     init_db()
 
     raw_path = Path(raw_csv_path)
@@ -397,18 +403,45 @@ def persist_policy_pipeline_outputs(
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     processed_path.parent.mkdir(parents=True, exist_ok=True)
 
+    def _dedupe_policy_frame(frame: pd.DataFrame) -> pd.DataFrame:
+        if frame is None or frame.empty:
+            return frame
+        if {"sector", "url"}.issubset(frame.columns):
+            return frame.drop_duplicates(subset=["sector", "url"], keep="last")
+        if "url" in frame.columns:
+            return frame.drop_duplicates(subset=["url"], keep="last")
+        return frame
+
     if raw_df is not None:
-        if not raw_df.empty and "url" in raw_df.columns:
-            raw_df = raw_df.drop_duplicates(subset=["url"], keep="last")
+        raw_df = _dedupe_policy_frame(raw_df)
         raw_df.to_csv(raw_path, index=False, encoding="utf-8-sig")
 
+    cycle_processed = (
+        _dedupe_policy_frame(processed_df.copy())
+        if processed_df is not None and not processed_df.empty
+        else pd.DataFrame()
+    )
+
+    persisted_processed = cycle_processed
     if processed_df is not None:
-        if not processed_df.empty and "url" in processed_df.columns:
-            processed_df = processed_df.drop_duplicates(subset=["url"], keep="last")
-        processed_df.to_csv(processed_path, index=False, encoding="utf-8-sig")
+        to_write = cycle_processed.copy() if not cycle_processed.empty else pd.DataFrame()
+        if append_processed and processed_path.exists() and not to_write.empty:
+            try:
+                existing = pd.read_csv(processed_path, encoding="utf-8-sig")
+            except Exception:
+                existing = pd.DataFrame()
+            if not existing.empty:
+                to_write = pd.concat([existing, to_write], ignore_index=True, sort=False)
+                to_write = _dedupe_policy_frame(to_write)
+        if not to_write.empty and "sector" in to_write.columns:
+            ordered = ["sector"] + [c for c in to_write.columns if c != "sector"]
+            to_write = to_write[ordered]
+        to_write.to_csv(processed_path, index=False, encoding="utf-8-sig")
+        persisted_processed = to_write
 
     raw_count = int(len(raw_df)) if raw_df is not None else 0
-    processed_count = int(len(processed_df)) if processed_df is not None else 0
+    cycle_count = int(len(cycle_processed))
+    processed_count = int(len(persisted_processed)) if persisted_processed is not None else 0
 
     inserted_documents = 0
     inserted_features = 0
@@ -418,8 +451,8 @@ def persist_policy_pipeline_outputs(
             upsert_policy_document(row.to_dict())
             inserted_documents += 1
 
-    if processed_df is not None and not processed_df.empty:
-        for _, row in processed_df.iterrows():
+    if not cycle_processed.empty:
+        for _, row in cycle_processed.iterrows():
             document_id = upsert_policy_document(row.to_dict())
             upsert_policy_document_features(document_id, row.to_dict())
             inserted_features += 1
@@ -430,12 +463,14 @@ def persist_policy_pipeline_outputs(
         counts={
             "raw_count": raw_count,
             "processed_count": processed_count,
+            "cycle_processed_count": cycle_count,
             "inserted_documents": inserted_documents,
             "inserted_features": inserted_features,
         },
         payload={
             "raw_csv_path": str(raw_path),
             "processed_csv_path": str(processed_path),
+            "append_processed": append_processed,
         },
     )
 
@@ -444,6 +479,7 @@ def persist_policy_pipeline_outputs(
         "processed_csv_path": str(processed_path),
         "raw_count": raw_count,
         "processed_count": processed_count,
+        "cycle_processed_count": cycle_count,
         "inserted_documents": inserted_documents,
         "inserted_features": inserted_features,
     }
@@ -467,7 +503,11 @@ def fetch_policy_training_frame() -> pd.DataFrame:
 
     query = """
         SELECT
-            COALESCE(d.published_date::text, to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')) AS date,
+            COALESCE(
+                d.published_date::text,
+                NULLIF(d.release_date, ''),
+                to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+            ) AS date,
             d.source,
             d.category,
             d.doc_type,
@@ -508,7 +548,11 @@ def fetch_policy_feed_frame(
         """
         SELECT
             d.id AS document_id,
-            COALESCE(d.published_date::text, to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')) AS date,
+            COALESCE(
+                d.published_date::text,
+                NULLIF(d.release_date, ''),
+                to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+            ) AS date,
             d.source,
             d.category,
             d.doc_type,
@@ -553,7 +597,11 @@ def fetch_policy_feed_frame(
         fallback_query = """
             SELECT
                 d.id AS document_id,
-                COALESCE(d.published_date::text, to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')) AS date,
+                COALESCE(
+                d.published_date::text,
+                NULLIF(d.release_date, ''),
+                to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+            ) AS date,
                 d.source,
                 d.category,
                 d.doc_type,
@@ -665,7 +713,11 @@ def fetch_article_insights(document_ids: list[int] | None = None, insight_date: 
             d.title,
             d.url,
             d.body,
-            COALESCE(d.published_date::text, to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')) AS published_date
+            COALESCE(
+                d.published_date::text,
+                NULLIF(d.release_date, ''),
+                to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+            ) AS published_date
         FROM article_insights ai
         JOIN policy_documents d ON d.id = ai.document_id
         WHERE 1 = 1

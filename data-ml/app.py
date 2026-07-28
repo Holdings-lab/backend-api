@@ -314,10 +314,10 @@ def _split_value_list(value) -> list[str]:
 def _build_news_id(row: pd.Series) -> str:
     seed = "|".join([
         _safe_str(row.get("source"), _safe_str(row.get("category"))),
-        _safe_str(row.get("date")),
+        _safe_str(row.get("date"), _safe_str(row.get("release_date"))),
         _safe_str(row.get("doc_type")),
         _safe_str(row.get("title")),
-        _safe_str(row.get("link")),
+        _safe_str(row.get("url"), _safe_str(row.get("link"))),
     ])
     digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
     return f"policy-{digest}"
@@ -553,12 +553,17 @@ def _read_policy_feed_frame(payload: dict, apply_limit: bool = True) -> pd.DataF
         logger.info(f"[PolicyFeed] After category filter: {len(frame)} rows")
 
     if "date" not in frame.columns:
-        if "published_date" in frame.columns:
+        if "release_date" in frame.columns:
+            frame["date"] = frame["release_date"]
+        elif "published_date" in frame.columns:
             frame["date"] = frame["published_date"]
         elif "collected_at" in frame.columns:
             frame["date"] = frame["collected_at"]
         else:
             frame["date"] = ""
+
+    if "link" not in frame.columns and "url" in frame.columns:
+        frame["link"] = frame["url"]
 
     if "date" in frame.columns and (date_from or date_to):
         date_series = pd.to_datetime(frame["date"], errors="coerce")
@@ -612,7 +617,9 @@ def _build_policy_feed_stats(payload: dict) -> dict:
     unique_categories = list(dict.fromkeys(categories))
 
     if "date" not in df.columns:
-        if "published_date" in df.columns:
+        if "release_date" in df.columns:
+            df["date"] = df["release_date"]
+        elif "published_date" in df.columns:
             df["date"] = df["published_date"]
         elif "collected_at" in df.columns:
             df["date"] = df["collected_at"]
@@ -712,7 +719,7 @@ def _build_policy_feed(payload: dict) -> dict:
         row_category = _safe_str(row.get("category"), row_source)
         row_keywords = _split_value_list(row.get("matched_keyword_groups"))
         row_keyword_terms = _split_value_list(row.get("matched_keywords"))
-        row_body = _safe_str(row.get("body"))
+        row_body = _safe_str(row.get("body_summary"), _safe_str(row.get("body")))
         keyword_signals = _build_keyword_asset_signals(
             keywords=row_keywords + row_keyword_terms,
             source_text=" ".join([row_category, row_source, _safe_str(row.get("title")), row_body]),
@@ -732,13 +739,14 @@ def _build_policy_feed(payload: dict) -> dict:
             {
                 "id": f"card-{idx}",
                 "newsId": _build_news_id(row),
-                "date": _safe_str(row.get("date")),
+                "date": _safe_str(row.get("date"), _safe_str(row.get("release_date"))),
                 "source": row_source,
                 "category": row_category,
                 "docType": _safe_str(row.get("doc_type")),
+                "sector": _safe_str(row.get("sector")),
                 "title": _safe_str(row.get("title")),
                 "bodySummary": _safe_str(row.get("body_summary"), _safe_str(row.get("body"))),
-                "link": _safe_str(row.get("link")),
+                "link": _safe_str(row.get("url"), _safe_str(row.get("link"))),
                 "matchedKeywordGroups": row_keywords,
                 "matchedKeywords": row_keyword_terms,
                 "assetSignals": asset_signals,

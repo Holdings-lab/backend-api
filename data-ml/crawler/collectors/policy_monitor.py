@@ -21,10 +21,12 @@ if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
 from crawler.collectors.bis import create_requests_session, crawl_bis_news_index_selenium, extract_article
+from crawler.collectors.eia import get_steo_body, get_steo_items, get_today_body, get_today_items
+from crawler.collectors.fraser import DEFAULT_KEYWORDS as FRASER_DEFAULT_KEYWORDS, collect_fraser_documents
 from crawler.collectors.fed import crawl_implementation_note, crawl_fomc_statement, crawl_minutes
+from crawler.collectors.yfinance import scrape_news_sync as scrape_yahoo_news
 from crawler.collectors.ucsb import (
     DOC_TYPE_URLS,
-    DEFAULT_KEYWORD_CONFIG_PATH,
     crawl_listing,
     load_keyword_dictionary,
     parse_article,
@@ -33,26 +35,39 @@ from crawler.postprocessing.unified_pipeline import apply_unified_pipeline
 from crawler.support_legacy.data_paths import collected_csv_path, feature_csv_path
 
 BASE_URL = "https://www.federalreserve.gov"
-FOMC_CALENDAR_URL = f"{BASE_URL}/monetarypolicy/fomccalendars.htm"
+FOMC_CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 
-DEFAULT_OUTPUT_CSV = collected_csv_path("policy_updates_monitor.csv")
-DEFAULT_PROCESSED_OUTPUT_CSV = feature_csv_path("policy_updates_features.csv")
-DEFAULT_INTERVAL_SEC = 86400
-US_EASTERN_TZ = ZoneInfo("America/New_York")
+DEFAULT_OUTPUT_CSV = feature_csv_path("policy_updates_features.csv")
+DEFAULT_INTERVAL_SEC = 24 * 60 * 60 # 하루 1회 실행 주기 (초 단위)
+US_EASTERN_TZ = ZoneInfo("America/New_York")    # 미국 동부시간 기준
+KEYWORD_CONFIG_DIR = Path(__file__).with_name("keywords")   # American Presidential Project 관련 키워드 JSON 파일이 있는 디렉토리
+MONITOR_SECTORS = ("qqq", "xlf", "xle")
+
+SECTOR_MONITOR_CONFIGS: dict[str, dict[str, Any]] = {
+    "qqq": {
+        "sources": ("FOMC", "BIS", "UCSB", "YAHOO"),
+        "keyword_config_path": KEYWORD_CONFIG_DIR / "qqq_keywords.json",
+    },
+    "xlf": {
+        "sources": ("FOMC", "FRASER", "UCSB", "YAHOO"),
+        "keyword_config_path": KEYWORD_CONFIG_DIR / "xlf_keywords.json",
+    },
+    "xle": {
+        "sources": ("FOMC", "EIA", "UCSB", "YAHOO"),
+        "keyword_config_path": KEYWORD_CONFIG_DIR / "xle_keywords.json",
+    },
+}
 
 CANONICAL_COLUMNS = [
     # 새 기록과 기존 기록을 같은 스키마로 합치기 위한 표준 컬럼 순서.
+    "sector",
     "source",
     "category",
     "doc_type",
-    "published_date",
     "release_date",
-    "title",
     "url",
-    "body",
-    "matched_keyword_groups",
-    "matched_keywords",
-    "collected_at",
+    "title",
+    "body"
 ]
 
 HEADERS = {
@@ -85,7 +100,7 @@ def _us_eastern_now() -> datetime:
     return datetime.now(US_EASTERN_TZ)
 
 
-def _target_policy_news_date(reference_dt: datetime | None = None) -> date:
+def _get_target_date(reference_dt: datetime | None = None) -> date:
     current_dt = reference_dt or _us_eastern_now()
     # 모니터링 대상은 "현재 시점의 전날"로 고정한다.
     return current_dt.date() - timedelta(days=1)
@@ -98,17 +113,6 @@ def _seconds_until_next_us_eastern_midnight(reference_dt: datetime | None = None
     return max(0.0, (next_midnight - current_dt).total_seconds())
 
 
-def _existing_frame(output_csv: str) -> pd.DataFrame:
-    path = Path(output_csv)
-    if not path.exists():
-        return pd.DataFrame()
-
-    try:
-        return pd.read_csv(path)
-    except pd.errors.EmptyDataError:
-        return pd.DataFrame()
-
-
 def _normalise_records(records: list[dict[str, Any]]) -> pd.DataFrame:
     if not records:
         return pd.DataFrame()
@@ -116,9 +120,77 @@ def _normalise_records(records: list[dict[str, Any]]) -> pd.DataFrame:
     df = pd.DataFrame(records)
 
     if "url" in df.columns:
-        df = df.drop_duplicates(subset=["url"], keep="last")
+        dedupe_columns = ["sector", "url"] if "sector" in df.columns else ["url"]
+        df = df.drop_duplicates(subset=dedupe_columns, keep="last")
+
+    # Ensure canonical columns exist
+    for column in CANONICAL_COLUMNS:
+        if column not in df.columns:
+            df[column] = ""
+
+    # Normalize release_date to ISO format (YYYY-MM-DD) when possible.
+    if "release_date" in df.columns:
+        parsed = pd.to_datetime(df["release_date"], errors="coerce")
+        df["release_date"] = parsed.dt.strftime("%Y-%m-%d").fillna("")
+
+    ordered_columns = [column for column in CANONICAL_COLUMNS if column in df.columns]
+    remaining_columns = [column for column in df.columns if column not in ordered_columns]
+    df = df[ordered_columns + remaining_columns]
 
     return df
+
+
+def _sector_keyword_config_path(sector: str) -> Path:
+    config = SECTOR_MONITOR_CONFIGS.get(sector)
+    if config is None:
+        raise ValueError(f"Unsupported sector: {sector}")
+    return config["keyword_config_path"]
+
+
+def _parse_iso_date(raw_value: str | None) -> date | None:
+    if not raw_value:
+        return None
+
+    parsed = pd.to_datetime(raw_value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
+
+
+# sector 태그를 각 레코드에 붙이는 헬퍼. 이후 중복 제거 시 sector+url 조합으로 고유성을 판단할 때 유용하다.
+def _tag_records(records: list[dict[str, Any]], sector: str) -> list[dict[str, Any]]:
+    tagged_records: list[dict[str, Any]] = []
+    for record in records:
+        tagged = record.copy()
+        tagged["sector"] = sector
+        tagged_records.append(tagged)
+    return tagged_records
+
+
+# --- Caching helpers to avoid repeated network / file reads during a single run ---
+_FOMC_CACHE: dict[str, list] = {}
+_KEYWORD_DICT_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _get_fomc_records_cached(target_date: date) -> list[dict[str, Any]]:
+    key = target_date.isoformat()
+    if key in _FOMC_CACHE:
+        return _FOMC_CACHE[key]
+
+    records = _collect_fomc_records(target_date)
+    _FOMC_CACHE[key] = records
+    return records
+
+
+def _load_keyword_dictionary_cached(path: str | Path) -> dict[str, dict[str, Any]]:
+    path_obj = Path(path)
+    cache_key = str(path_obj.resolve())
+    if cache_key in _KEYWORD_DICT_CACHE:
+        return _KEYWORD_DICT_CACHE[cache_key]
+
+    payload = load_keyword_dictionary(path_obj)
+    _KEYWORD_DICT_CACHE[cache_key] = payload
+    return payload
 
 
 def _collect_fomc_records(target_date: date) -> list[dict[str, Any]]:
@@ -186,16 +258,89 @@ def _collect_fomc_records(target_date: date) -> list[dict[str, Any]]:
                         "source": "FOMC",
                         "category": "FOMC",
                         "doc_type": doc_type,
-                        "published_date": _format_iso_date(article.get("release_date")),
-                        "release_date": article.get("release_date", ""),
-                        "title": article.get("title", ""),
+                        "release_date": _format_iso_date(article.get("release_date")),
                         "url": url,
-                        "body": article.get("body", ""),
-                        "matched_keyword_groups": "",
-                        "matched_keywords": "",
-                        "collected_at": datetime.utcnow().isoformat(timespec="seconds"),
+                        "title": article.get("title", ""),
+                        "body": article.get("body", "")
                     }
                 )
+
+    return records
+
+
+def _collect_fraser_records(target_date: date) -> list[dict[str, Any]]:
+    frame = collect_fraser_documents(
+        FRASER_DEFAULT_KEYWORDS,
+        start_date=target_date.isoformat(),
+        per_page=100,
+        max_results=None,
+        page_delay=0.5,
+        doc_delay=0.3,
+    )
+
+    if frame.empty:
+        return []
+
+    records: list[dict[str, Any]] = []
+    for _, row in frame.iterrows():
+        release_date = str(row.get("release_date", ""))
+        if _parse_iso_date(release_date) != target_date:
+            continue
+
+        records.append(
+            {
+                "source": "FRASER",
+                "category": "FRASER",
+                "doc_type": str(row.get("doc_type", "fraser")),
+                "release_date": release_date,
+                "url": str(row.get("url", "")),
+                "title": str(row.get("title", "")),
+                "body": str(row.get("body", ""))
+            }
+        )
+
+    return records
+
+
+def _collect_eia_records(target_date: date) -> list[dict[str, Any]]:
+    start_date = target_date.isoformat()
+    records: list[dict[str, Any]] = []
+
+    for item in get_steo_items(start_date=start_date):
+        release_date = str(item.get("release_date", ""))
+        if _parse_iso_date(release_date) != target_date:
+            continue
+
+        url = str(item.get("url", ""))
+        records.append(
+            {
+                "source": "EIA",
+                "category": "EIA",
+                "doc_type": str(item.get("doc_type", "STEO")),
+                "release_date": release_date,
+                "url": url,
+                "title": str(item.get("title", "")),
+                "body": get_steo_body(url)
+            }
+        )
+
+    for item in get_today_items(start_date=start_date):
+        release_date = str(item.get("release_date", ""))
+        if _parse_iso_date(release_date) != target_date:
+            continue
+
+        url = str(item.get("url", ""))
+        records.append(
+            {
+                "source": "EIA",
+                "category": "EIA",
+                "doc_type": str(item.get("doc_type", "TODAY_IN_ENERGY")),
+                "release_date": release_date,
+                "url": url,
+                "title": str(item.get("title", "")),
+                "body": get_today_body(url)
+            }
+        )
 
     return records
 
@@ -239,16 +384,12 @@ def _collect_bis_records(target_date: date, max_pages: int, sleep_sec: float) ->
         records.append(
             {
                 "source": "BIS",
-                "category": article.get("category", "BIS"),
+                "category": "BIS",
                 "doc_type": article.get("doc_type", "press_release"),
-                "published_date": article.get("published_date", ""),
-                "release_date": "",
-                "title": article.get("title", ""),
+                "release_date": article.get("published_date", ""),
                 "url": item["url"],
-                "body": article.get("body", ""),
-                "matched_keyword_groups": "",
-                "matched_keywords": "",
-                "collected_at": datetime.utcnow().isoformat(timespec="seconds"),
+                "title": article.get("title", ""),
+                "body": article.get("body", "")
             }
         )
 
@@ -259,14 +400,16 @@ def _collect_ucsb_records(
     target_date: date,
     sleep_sec: float,
     keyword_config_path: str | Path | None,
-    doc_types: list[str] | None,
 ) -> list[dict[str, Any]]:
     # UCSB는 키워드 매칭이 끝난 문서만 모니터링 CSV에 넣는다.
-    keyword_dictionary = load_keyword_dictionary(keyword_config_path or DEFAULT_KEYWORD_CONFIG_PATH)
-    selected_doc_types = list(doc_types or DOC_TYPE_URLS.keys())
-    invalid_doc_types = [doc_type for doc_type in selected_doc_types if doc_type not in DOC_TYPE_URLS]
-    if invalid_doc_types:
-        raise ValueError(f"Unsupported doc types: {invalid_doc_types}")
+    # Allow passing either a path or a preloaded keyword dictionary.
+    if isinstance(keyword_config_path, (str, Path)):
+        keyword_dictionary = _load_keyword_dictionary_cached(keyword_config_path)
+    elif isinstance(keyword_config_path, dict):
+        keyword_dictionary = keyword_config_path
+    else:
+        raise ValueError("keyword_config_path must be a path or a keyword dictionary mapping")
+    selected_doc_types = list(DOC_TYPE_URLS.keys())
 
     records: list[dict[str, Any]] = []
 
@@ -290,16 +433,12 @@ def _collect_ucsb_records(
             records.append(
                 {
                     "source": "UCSB",
-                    "category": article.get("category", "UCSB Presidency Project"),
+                    "category": "UCSB",
                     "doc_type": article.get("doc_type", doc_type),
-                    "published_date": article.get("published_date", ""),
-                    "release_date": "",
-                    "title": article.get("title", ""),
+                    "release_date": article.get("published_date", ""),
                     "url": item["url"],
-                    "body": article.get("body", ""),
-                    "matched_keyword_groups": article.get("matched_keyword_groups", ""),
-                    "matched_keywords": article.get("matched_keywords", ""),
-                    "collected_at": datetime.utcnow().isoformat(timespec="seconds"),
+                    "title": article.get("title", ""),
+                    "body": article.get("body", "")
                 }
             )
 
@@ -308,44 +447,110 @@ def _collect_ucsb_records(
     return records
 
 
+def _collect_yahoo_records(target_date: date, ticker: str) -> list[dict[str, Any]]:
+    yahoo_records = scrape_yahoo_news(ticker=ticker.upper(), target_date=target_date.isoformat())
+
+    if not yahoo_records:
+        return []
+
+    records: list[dict[str, Any]] = []
+    for row in yahoo_records:
+        row_ticker = str(row.get("sector", "")).strip().lower()
+        if row_ticker != ticker:
+            continue
+
+        release_date = str(row.get("release_date", ""))
+
+        if _parse_iso_date(release_date) != target_date:
+            continue
+
+        records.append(
+            {
+                "source": "YAHOO",
+                "category": "YAHOO",
+                "doc_type": "news",
+                "release_date": release_date,
+                "url": str(row.get("url", "")),
+                "title": str(row.get("title", "")),
+                "body": str(row.get("body", row.get("full_text", "")))
+            }
+        )
+
+    return records
+
+
+def _collect_sector_records(
+    sector: str,
+    target_date: date,
+    bis_max_pages: int,
+    sleep_sec: float,
+) -> list[dict[str, Any]]:
+    sector_config = SECTOR_MONITOR_CONFIGS.get(sector)
+    if sector_config is None:
+        raise ValueError(f"Unsupported sector: {sector}")
+
+    sector_sources = set(sector_config["sources"])
+    sector_records: list[dict[str, Any]] = []
+
+    if "FOMC" in sector_sources:
+        sector_records.extend(_tag_records(_get_fomc_records_cached(target_date), sector))
+    if "BIS" in sector_sources:
+        sector_records.extend(
+            _tag_records(
+                _collect_bis_records(
+                    target_date,
+                    max_pages=bis_max_pages,
+                    sleep_sec=sleep_sec
+                ),
+                sector,
+            )
+        )
+    if "FRASER" in sector_sources:
+        sector_records.extend(_tag_records(_collect_fraser_records(target_date), sector))
+    if "EIA" in sector_sources:
+        sector_records.extend(_tag_records(_collect_eia_records(target_date), sector))
+    if "YAHOO" in sector_sources:
+        sector_records.extend(_tag_records(_collect_yahoo_records(target_date, sector), sector))
+
+    sector_records.extend(
+        _tag_records(
+            _collect_ucsb_records(
+                target_date,
+                sleep_sec=sleep_sec,
+                keyword_config_path=_sector_keyword_config_path(sector),
+            ),
+            sector,
+        )
+    )
+    return sector_records
+
+
 def collect_policy_updates(
-    bis_max_pages: int = 5,
+    bis_max_pages: int = 1,
     sleep_sec: float = 1.0,
-    keyword_config_path: str | Path | None = None,
-    doc_types: list[str] | None = None,
     target_date: date | None = None,
 ) -> pd.DataFrame:
     # 이전 파일을 읽지 않고, 이번 사이클에서 새로 수집된 레코드만 반환한다.
-    target_date_value = target_date or _target_policy_news_date()
+    target_date = target_date or _get_target_date()
 
     new_records: list[dict[str, Any]] = []
     seen_urls = set()
 
-    print(f"[MONITOR] Starting FOMC crawl for {target_date_value.isoformat()}")
-    for record in _collect_fomc_records(target_date_value):
-        if record["url"] in seen_urls:
-            continue
-        seen_urls.add(record["url"])
-        new_records.append(record)
+    for sector in MONITOR_SECTORS:
+        print(f"[MONITOR] Starting {sector.upper()} crawl for {target_date.isoformat()}")
+        sector_records = _collect_sector_records(
+            sector=sector,
+            target_date=target_date,
+            bis_max_pages=bis_max_pages,
+            sleep_sec=sleep_sec,
+        )
 
-    print(f"[MONITOR] Starting BIS crawl for {target_date_value.isoformat()} (max_pages={bis_max_pages})")
-    for record in _collect_bis_records(target_date_value, max_pages=bis_max_pages, sleep_sec=sleep_sec):
-        if record["url"] in seen_urls:
-            continue
-        seen_urls.add(record["url"])
-        new_records.append(record)
-
-    print(f"[MONITOR] Starting UCSB crawl for {target_date_value.isoformat()}")
-    for record in _collect_ucsb_records(
-        target_date_value,
-        sleep_sec=sleep_sec,
-        keyword_config_path=keyword_config_path,
-        doc_types=doc_types,
-    ):
-        if record["url"] in seen_urls:
-            continue
-        seen_urls.add(record["url"])
-        new_records.append(record)
+        for record in sector_records:
+            record_key = (record.get("sector", ""), record.get("url", ""))
+            if record_key in seen_urls:
+                continue
+            seen_urls.add(record_key)
+            new_records.append(record)
 
     new_df = _normalise_records(new_records)
 
@@ -354,8 +559,10 @@ def collect_policy_updates(
 
 
 def run_postprocessing_pipeline(df: pd.DataFrame) -> pd.DataFrame:
-    """주어진 DataFrame에 통합 후처리를 적용하고 처리된 DataFrame을 반환한다."""
-    print("[MONITOR] Starting unified postprocessing pipeline...")
+    """
+    주어진 DataFrame에 통합 후처리를 적용하고 처리된 DataFrame을 반환한다.
+    """
+    print("[MONITOR] 통합 후처리 파이프라인을 실행 중...")
     try:
         result_df = apply_unified_pipeline(
             df=df,
@@ -364,71 +571,69 @@ def run_postprocessing_pipeline(df: pd.DataFrame) -> pd.DataFrame:
             include_sentiment=True,
             include_embeddings=True,
         )
-        print(f"[MONITOR] Postprocessing pipeline completed: {len(result_df)} rows processed")
+        print(f"[MONITOR] 통합 후처리 파이프라인 완료: {len(result_df)} rows 처리됨")
         return result_df
     except Exception as e:
-        print(f"[MONITOR] ERROR: postprocessing pipeline failed: {e}")
+        print(f"[MONITOR] ERROR: 통합 후처리 파이프라인 실패: {e}")
         raise
 
 
 def run_monitor(
-    output_csv: str = DEFAULT_PROCESSED_OUTPUT_CSV,
+    output_path: str = DEFAULT_OUTPUT_CSV,
     interval_sec: float = DEFAULT_INTERVAL_SEC,
-    bis_max_pages: int = 5,
-    sleep_sec: float = 1.0,
-    keyword_config_path: str | Path | None = None,
-    doc_types: list[str] | None = None,
+    bis_max_pages: int = 1,                                # 거의 업데이트 없음, 기본값 1페이지로 충분
+    sleep_sec: float = 1.0,                                # Rate limit을 피하기 위해 요청 사이에 1초 정도 쉬는 것이 안전
     max_cycles: int | None = None,
 ) -> None:
     cycle = 0
 
     while True:
-        # target_date_value = datetime(2026, 3, 18).date()
-        target_date_value = _target_policy_news_date()
+        target_date = _get_target_date()
         cycle += 1
-        # 각 주기마다 전날 데이터를 한 번만 모은 뒤, 기본값이면 다음 자정까지 쉰다.
-        new_df = collect_policy_updates(
+
+        print(f"[MONITOR] cycle={cycle} target_date={target_date.isoformat()} ")
+
+        # 각 주기마다 전날 데이터를 한 번만 모은 뒤, interval_sec 값이 기본값이면 다음 자정까지 쉰다.
+        news_list = collect_policy_updates(
             bis_max_pages=bis_max_pages,
             sleep_sec=sleep_sec,
-            keyword_config_path=keyword_config_path,
-            doc_types=doc_types,
-            target_date=target_date_value,
+            target_date=target_date,
         )
 
-        new_row_count = len(new_df)
-        if new_row_count > 0:
-            print(f"[MONITOR] Applying unified pipeline to {new_row_count} new rows")
-            processed_new = run_postprocessing_pipeline(df=new_df)
+        news_count = len(news_list)
+        if news_count > 0:
+            print(f"[MONITOR] 수집한 뉴스 개수 : {news_count}개")
+            processed_news = run_postprocessing_pipeline(df=news_list)
+            processed_path = Path(output_path)
 
-            processed_path = Path(output_csv)
+            # 이전에 저장된 csv 파일이 존재하면 읽어서 기존 데이터와 합치고, 중복 제거 후 저장한다.
+            # 없으면 새로 수집한 데이터만 저장한다.
             if processed_path.exists():
                 try:
-                    existing_processed = pd.read_csv(processed_path, encoding="utf-8-sig")
+                    existing_news = pd.read_csv(processed_path, encoding="utf-8-sig")
                 except Exception:
-                    existing_processed = pd.DataFrame()
+                    existing_news = pd.DataFrame()
             else:
-                existing_processed = pd.DataFrame()
+                existing_news = pd.DataFrame()
 
-            if existing_processed.empty:
-                combined_processed = processed_new.copy()
+            if existing_news.empty:
+                existing_news = processed_news.copy()
             else:
-                combined_processed = pd.concat([existing_processed, processed_new], ignore_index=True, sort=False)
+                existing_news = pd.concat([existing_news, processed_news], ignore_index=True, sort=False)
 
-            if not combined_processed.empty and "url" in combined_processed.columns:
-                combined_processed = combined_processed.drop_duplicates(subset=["url"], keep="last")
+            # sector와 url 기준으로 중복 제거 (같은 sector 내에서 url이 같으면 중복으로 판단)
+            if not existing_news.empty and {"sector", "url"}.issubset(existing_news.columns):
+                existing_news = existing_news.drop_duplicates(subset=["sector", "url"], keep="last")
 
-            combined_processed_path = Path(output_csv)
-            combined_processed_path.parent.mkdir(parents=True, exist_ok=True)
-            combined_processed.to_csv(combined_processed_path, index=False, encoding="utf-8-sig")
+            if "sector" in existing_news.columns:
+                ordered_columns = ["sector"] + [column for column in existing_news.columns if column != "sector"]
+                existing_news = existing_news[ordered_columns]
 
-            print(f"[MONITOR] Saved processed output: {combined_processed_path} rows={len(combined_processed)}")
+            existing_news.to_csv(processed_path, index=False, encoding="utf-8-sig")
+
+            print(f"[MONITOR] 모니터링 결과 저장 위치 : {processed_path} / 개수 : {len(existing_news)}")
         else:
-            print("[MONITOR] No new data collected, skipping processing and output save")
-
-        print(
-            f"[MONITOR] cycle={cycle} target_date={target_date_value.isoformat()} "
-            f"new_rows={new_row_count} processed_output={output_csv}"
-        )
+            print("[MONITOR] 수집된 뉴스가 없습니다.")
 
         if max_cycles is not None and cycle >= max_cycles:
             break
@@ -443,33 +648,19 @@ def run_monitor(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Monitor FOMC, BIS, and UCSB policy updates for the previous America/New_York day")
-    parser.add_argument("--output-csv", type=str, default=DEFAULT_PROCESSED_OUTPUT_CSV, help="Processed output CSV path (features)")
-    parser.add_argument(
-        "--interval-sec",
-        type=float,
-        default=DEFAULT_INTERVAL_SEC,
-        help="Seconds between cycles; default schedules the next run at the next America/New_York midnight",
-    )
-    parser.add_argument("--bis-max-pages", type=int, default=1, help="Maximum BIS listing pages to scan per cycle")
-    parser.add_argument("--sleep-sec", type=float, default=1.0, help="Delay between source requests")
-    parser.add_argument("--keyword-config-path", type=str, default=str(DEFAULT_KEYWORD_CONFIG_PATH), help="UCSB keyword config path")
-    parser.add_argument(
-        "--doc-types",
-        nargs="*",
-        default=None,
-        help="Optional UCSB document types to monitor",
-    )
-    parser.add_argument("--max-cycles", type=int, default=None, help="Optional upper bound for repeated monitoring cycles")
+    parser = argparse.ArgumentParser(description="[Monitor] FOMC, BIS, FRASER, EIA, UCSB, YAHOO updates for the previous America/New_York day")
+    parser.add_argument("--output-path", type=str, default=DEFAULT_OUTPUT_CSV, help="수집 결과 CSV 파일 경로")
+    parser.add_argument("--interval-sec", type=float, default=DEFAULT_INTERVAL_SEC, help="모니터링 간격 (초 단위); 기본값은 다음 America/New_York 자정에 스케줄링됩니다")
+    parser.add_argument("--bis-max-pages", type=int, default=1)
+    parser.add_argument("--sleep-sec", type=float, default=1.0, help="Rate limit을 피하기 위해 요청 사이에 쉬는 시간 (초 단위)")
+    parser.add_argument("--max-cycles", type=int, default=None, help="모니터링 주기 반복 횟수 제한; None이면 무한 반복")
     args = parser.parse_args()
 
     run_monitor(
-        output_csv=args.output_csv,
+        output_path=args.output_path,
         interval_sec=args.interval_sec,
         bis_max_pages=args.bis_max_pages,
         sleep_sec=args.sleep_sec,
-        keyword_config_path=args.keyword_config_path,
-        doc_types=args.doc_types,
         max_cycles=args.max_cycles,
     )
 

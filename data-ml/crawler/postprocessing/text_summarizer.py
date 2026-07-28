@@ -1,297 +1,380 @@
-from __future__ import annotations
-
-import json
-import os
+import sys
 import time
-from typing import Any
-from urllib import error as urllib_error
-from urllib import request as urllib_request
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
+import requests
+
+try:
+    from transformers import AutoTokenizer
+except ImportError as exc:
+    raise ImportError(
+        "transformers가 현재 환경에 설치되어 있지 않습니다. "
+        "text_summarizer.py는 tokenizer 기반 청크 분할을 위해 transformers가 필요합니다."
+    ) from exc
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT_STR = str(PROJECT_ROOT)
+
+if PROJECT_ROOT_STR not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT_STR)
+
+from crawler.support_legacy.data_paths import collected_csv_path, summarized_csv_path
+
+INPUT_CSV = collected_csv_path("yahoo_market_news_2026-07-24.csv")                         # 입력 CSV 경로
+OUTPUT_CSV = summarized_csv_path("yahoo_market_news_2026-07-24_summarized.csv")            # 출력 CSV 경로
+
+BODY_COL = "body"
+SUMMARY_COL = "body_summary"
+ORIGINAL_LENGTH_COL = "body_original_length"
+MAX_CHARS = 2000                                                  # 최종 요약 결과의 최대 문자 수 (char)
+SLEEP_BETWEEN_CALLS_SEC = 0.5                                     # Ollama API 호출 간 대기 시간 (초)
+
+# Ollama 설정은 코드에 고정한다.
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_MODEL = "llama3"
+
+# 청크 분할에 사용할 tokenizer와 token 기준 설정도 코드에 고정한다.
+TOKENIZER_NAME = "hf-internal-testing/llama-tokenizer"
+CHUNK_TOKENS = 2000
+CHUNK_OVERLAP_TOKENS = 200
+SLEEP_BETWEEN_CHUNK_CALLS_SEC = 0.5
+
+BASE_DIR = Path(__file__).resolve().parent
+LOG_FILE = BASE_DIR / "ollama_calls.log"
+
+OLLAMA_GENERATE_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
+OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags"
 
 
-DEFAULT_SUMMARY_CHAR_LIMIT = 10_000
-DEFAULT_SUMMARY_OUTPUT_CHAR_LIMIT = int(os.getenv("LLM_SUMMARY_OUTPUT_CHAR_LIMIT", "1200"))
-DEFAULT_TIMEOUT_SEC = float(os.getenv("LLM_TIMEOUT_SEC", "25"))
-DEFAULT_RETRY_COUNT = int(os.getenv("LLM_RETRY_COUNT", "2"))
+def _log(msg: str) -> None:
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 
-def llm_summarize(text: str, limit_chars: int = DEFAULT_SUMMARY_CHAR_LIMIT) -> str:
+def _check_ollama() -> None:
+    """Ollama 서버 연결 및 지정된 모델 존재 여부를 확인한다."""
+    try:
+        resp = requests.get(OLLAMA_TAGS_URL, timeout=10)
+        resp.raise_for_status()  # 200 OK가 아니면 HTTPError 발생
+        
+        _log(f"[OLLAMA] /api/tags status={resp.status_code}")
+        
+        data = resp.json()
+        models = data.get("models", []) if isinstance(data, dict) else []
+        
+        # 보유 중인 모델명 목록 추출 (예: 'llama3:latest', 'llama3:8b')
+        model_names = [m.get("name") for m in models if isinstance(m, dict)]
+        _log(f"[OLLAMA] 발견한 모델={len(model_names)}: {model_names}")
+        
+        # OLLAMA_MODEL이 서버에 설치되어 있는지 확인
+        # (태그가 명시되지 않은 경우 'llama3'와 'llama3:latest' 모두 유연하게 체크)
+        target_model = OLLAMA_MODEL
+        model_exists = any(
+            target_model == name or name.startswith(f"{target_model}:")
+            for name in model_names
+        )
+        
+        if not model_exists:
+            msg = (
+                f"[OLLAMA][ERROR] '{target_model}' 모델을 찾을 수 없습니다. "
+                f"(설치된 모델: {model_names})"
+            )
+            _log(msg)
+            raise RuntimeError(msg)
+
+    except requests.exceptions.ConnectionError as e:
+        _log(f"[OLLAMA] Ollama 서버에 연결할 수 없습니다. (서버 실행 여부 확인 필요): {e}")
+        raise
+    except Exception as e:
+        _log(f"[OLLAMA] Ollama 상태 확인 실패: {e}")
+        raise
+
+
+def _ollama_generate(payload: Dict[str, Any], timeout_sec: int = 180) -> str:
+    model = payload.get("model", "")
+    prompt = payload.get("prompt", "")
+    _log(f"[OLLAMA] generate start model={model} prompt_len={len(prompt)} timeout={timeout_sec}s")
+
+    resp = requests.post(
+        OLLAMA_GENERATE_URL,
+        json=payload,
+        timeout=timeout_sec,
+    )
+    _log(f"[OLLAMA] generate http_status={resp.status_code} resp_text_len={len(resp.text or '')}")
+    resp.raise_for_status()
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        preview = (resp.text or "")[:500]
+        _log(f"[OLLAMA] json_parse_failed: {e} resp_preview={preview!r}")
+        raise
+
+    response_text = (data.get("response") or "").strip()
+    _log(f"[OLLAMA] 생성 응답 길이 : {len(response_text)}")
+
+    return response_text
+
+
+def _build_tokenizer() -> AutoTokenizer:
+    """청크 분할에 사용할 tokenizer를 준비한다."""
+    return AutoTokenizer.from_pretrained(TOKENIZER_NAME)
+
+
+_TOKENIZER: Optional[AutoTokenizer] = None
+
+def _get_tokenizer() -> AutoTokenizer:
+    """필요할 때 tokenizer를 초기화해 import 시점 실패를 줄인다."""
+    global _TOKENIZER
+    if _TOKENIZER is None:
+        _TOKENIZER = _build_tokenizer()
+        _TOKENIZER.model_max_length = 10**9
+    return _TOKENIZER
+
+
+def _encode_text(text: str) -> List[int]:
+    """텍스트를 special token 없이 token ID 목록으로 인코딩한다."""
+    return _get_tokenizer().encode(text or "", add_special_tokens=False)
+
+
+def _decode_tokens(token_ids: List[int]) -> str:
+    """token ID 목록을 다시 텍스트로 복원한다."""
+    return _get_tokenizer().decode(token_ids, skip_special_tokens=True).strip()
+
+
+def _chunk_text(text: str, chunk_tokens: int, overlap_tokens: int) -> List[str]:
     """
-    공급자 중립 공개 함수.
-    내부적으로 선택된 LLM 공급자를 호출해 요약 문자열을 생성한다.
+    문자 수가 아니라 tokenizer 기준 token 수로 텍스트를 chunk로 나눈다.
+    chunk 경계에서 문맥 손실이 줄어들도록 overlap을 유지한다.
     """
-    source_text = (text or "").strip()
-    if not source_text:
+    if chunk_tokens <= 0:
+        raise ValueError("chunk_tokens must be greater than 0.")
+    if overlap_tokens < 0:
+        raise ValueError("overlap_tokens cannot be negative.")
+    if overlap_tokens >= chunk_tokens:
+        raise ValueError("overlap_tokens must be less than chunk_tokens.")
+
+    text = text or ""
+    token_ids = _encode_text(text)
+    n_tokens = len(token_ids)
+    if n_tokens <= chunk_tokens:
+        return [text]
+
+    chunks: List[str] = []
+    step = chunk_tokens - overlap_tokens
+    start_idx = 0
+    while start_idx < n_tokens:
+        end_idx = min(n_tokens, start_idx + chunk_tokens)
+        chunk_text = _decode_tokens(token_ids[start_idx:end_idx])
+        if chunk_text:
+            chunks.append(chunk_text)
+        if end_idx >= n_tokens:
+            break
+        start_idx += step
+
+    return chunks
+
+
+def summarize_to_under_limit(text: str, limit_chars: int = MAX_CHARS) -> str:
+    """
+    입력 텍스트를 요약해 최종 결과가 문자 수 제한을 넘지 않도록 만든다.
+    긴 입력은 먼저 tokenizer 기준 token 수로 나눈 뒤 단계적으로 요약한다.
+    """
+    text = text or ""
+    if not text.strip():
         return ""
 
-    if len(source_text) <= limit_chars:
-        return source_text
+    input_tokens = len(_encode_text(text))
+    if input_tokens <= CHUNK_TOKENS:
+        prompt = (
+            "You are a careful summarization assistant.\n\n"
 
-    output_limit = max(200, min(int(limit_chars), int(DEFAULT_SUMMARY_OUTPUT_CHAR_LIMIT)))
+            "Summarize the following document in English.\n"
+            f"Maximum length: {limit_chars} characters (strict limit).\n\n"
 
-    payload = {
-        "instruction": (
-            "You are a careful summarization assistant.\n"
-            "Summarize the document in Korean using only explicitly stated facts.\n"
-            "Write the final summary in Korean, even if the source text is in another language.\n"
-            "Avoid certainty, fear language, and investment advice.\n"
-            "Output only summary text."
-        ),
-        "input": source_text,
-        "maxChars": int(limit_chars),
-    }
-    # Deprecated for callers that only want summary string: delegate to new helper
-    summary, meta = llm_summarize_with_meta(text, limit_chars=limit_chars)
-    return summary
+            "Requirements:\n"
+            "- Preserve only information that is explicitly stated in the document\n"
+            "- Start with the main action, decision, or claim in the document\n"
+            "- Include important names, actions, dates, and numbers if they are clearly stated\n"
+            "- Keep the summary fact-based and neutral\n\n"
 
+            "Rules:\n"
+            "- Do not add interpretation, classification, or commentary\n"
+            "- Do not infer policy stance, sentiment, intent, or implications unless explicitly stated\n"
+            "- Do not include phrases such as 'Here is the summary', 'Here is the final summary', "
+            "'Here is the combined summary', 'Note:', or any other meta commentary\n"
+            "- Do not mention that you are summarizing or combining text\n"
+            "- No bullet points\n"
+            "- No headings\n"
+            "- No quotation marks around the whole summary\n\n"
 
-def llm_summarize_with_meta(text: str, limit_chars: int = DEFAULT_SUMMARY_CHAR_LIMIT) -> tuple[str, dict]:
-    """Return (summary, meta) where meta contains status ('ok'|'fallback') and optional 'error'."""
-    source_text = (text or "").strip()
-    if not source_text:
-        return "", {"status": "empty"}
+            "Output only the summary text.\n\n"
 
-    if len(source_text) <= limit_chars:
-        return source_text, {"status": "short"}
+            "Document:\n"
+            f"{text}"
+        )
+        summary = _ollama_generate(
+            {
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+            }
+        )
+        _log(f"[OLLAMA] single_call input_len={len(text)} input_tokens={input_tokens} output_len={len(summary)}")
+        return summary[:limit_chars].rstrip()
 
-    payload = {
-        "instruction": (
-            "You are a careful summarization assistant.\n"
-            "Summarize the document in Korean using only explicitly stated facts.\n"
-            "Write the final summary in Korean, even if the source text is in another language.\n"
-            "Avoid certainty, fear language, and investment advice.\n"
-            "Output only summary text."
-        ),
-        "input": source_text,
-        "maxChars": int(limit_chars),
-    }
-
-    output_limit = max(200, min(int(limit_chars), int(DEFAULT_SUMMARY_OUTPUT_CHAR_LIMIT)))
-
-    try:
-        result = _call_selected_llm(payload)
-        summary = _extract_summary_text(result)
-        if summary:
-            return summary[:output_limit].rstrip(), {"status": "ok"}
-        # fall through to fallback
-    except Exception as e:
-        err = str(e)
-        # continue to fallback but include error in meta
-        fallback = _fallback_summary_text(source_text, output_limit=output_limit)
-        return fallback, {"status": "fallback", "error": err}
-
-    # No exception but empty result
-    fallback = _fallback_summary_text(source_text, output_limit=output_limit)
-    return fallback, {"status": "fallback", "error": "empty_response"}
-
-
-def generate_article_insight(article: dict[str, Any]) -> dict[str, Any]:
-    """
-    공급자 중립 공개 함수.
-    정책 기사 기반 JSON 인사이트를 생성한다.
-    """
-    article_payload = article or {}
-    body_text = str(article_payload.get("body") or article_payload.get("bodySummary") or "").strip()
-    if not body_text:
-        return {
-            "summary": "",
-            "keywords": [],
-            "assetImpacts": [],
-            "tone": "neutral",
-        }
-
-    prompt = {
-        "instruction": (
-            "Return a single valid JSON object only.\n"
-            "No markdown code fence.\n"
-            "Write summary, reason, and tone fields in Korean.\n"
-            "Avoid certainty, fear language, and investment advice.\n"
-            "Use analytical tone such as '분석됩니다', '주목됩니다'.\n"
-            "Schema: {summary:string, keywords:string[], assetImpacts:[{asset:string,direction:string,confidence:number,reason:string}], tone:string}"
-        ),
-        "article": article_payload,
-    }
-    result = _call_selected_llm(prompt)
-    normalized = result if isinstance(result, dict) else {}
-    return {
-        "summary": str(normalized.get("summary") or "").strip(),
-        "keywords": list(normalized.get("keywords") or []),
-        "assetImpacts": list(normalized.get("assetImpacts") or []),
-        "tone": str(normalized.get("tone") or "neutral").strip() or "neutral",
-    }
-
-
-def summarize_to_under_limit(text: str, limit_chars: int = DEFAULT_SUMMARY_CHAR_LIMIT) -> str:
-    """
-    하위 호환 래퍼.
-    기존 호출부 영향 없이 새 공개 함수로 위임한다.
-    """
-    return llm_summarize(text, limit_chars=limit_chars)
-
-
-def _call_selected_llm(payload: dict[str, Any]) -> dict[str, Any] | str:
-    provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
-    retry_count = max(0, DEFAULT_RETRY_COUNT)
-
-    last_error: Exception | None = None
-    for attempt in range(retry_count + 1):
-        try:
-            if provider == "anthropic":
-                return _call_claude_api(payload)
-            return _call_gemini_api(payload)
-        except Exception as error:  # pragma: no cover - network path
-            last_error = error
-            if attempt < retry_count:
-                time.sleep(min(2.0, 0.4 * (attempt + 1)))
-                continue
-            raise RuntimeError(f"LLM provider call failed: {error}") from error
-
-    if last_error is not None:
-        raise RuntimeError(f"LLM provider call failed: {last_error}")
-    raise RuntimeError("LLM provider call failed")
-
-
-def _call_gemini_api(payload: dict[str, Any]) -> dict[str, Any] | str:
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is required")
-
-    body = {
-        "systemInstruction": {"parts": [{"text": str(payload.get("instruction") or "").strip()}]},
-        "contents": [{"role": "user", "parts": [{"text": json.dumps(payload, ensure_ascii=False)}]}],
-        "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json",
-        },
-    }
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    try:
-        response = _post_json(url, {"Content-Type": "application/json"}, body)
-    except Exception as error:
-        error_text = str(error)
-        fallback_models = ["gemini-2.0-flash", "gemini-1.5-flash-002", "gemini-1.5-pro"]
-        if model not in fallback_models:
-            fallback_models.insert(0, model)
-
-        if "404" in error_text or "NOT_FOUND" in error_text or "not found" in error_text.lower():
-            last_error = error
-            for fallback_model in fallback_models:
-                if fallback_model == model:
-                    continue
-                fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/{fallback_model}:generateContent?key={api_key}"
-                try:
-                    response = _post_json(fallback_url, {"Content-Type": "application/json"}, body)
-                    model = fallback_model
-                    break
-                except Exception as fallback_error:
-                    last_error = fallback_error
-                    continue
-            else:
-                raise RuntimeError(f"LLM provider call failed: {last_error}") from last_error
-        else:
-            raise RuntimeError(f"LLM provider call failed: {error}") from error
-
-    candidates = response.get("candidates") or []
-    if not candidates:
-        raise RuntimeError("Gemini returned no candidates")
-    parts = (candidates[0].get("content") or {}).get("parts") or []
-    text = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict)).strip()
-    return _parse_json_or_text(text)
-
-
-def _call_claude_api(payload: dict[str, Any]) -> dict[str, Any] | str:
-    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
-    model = os.getenv("ANTHROPIC_MODEL", "claude-3.5-haiku-20241022").strip()
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY is required")
-
-    body = {
-        "model": model,
-        "max_tokens": 1024,
-        "temperature": 0.2,
-        "system": str(payload.get("instruction") or "").strip(),
-        "messages": [{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
-    }
-    response = _post_json(
-        "https://api.anthropic.com/v1/messages",
-        {
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-        },
-        body,
+    chunks = _chunk_text(text, chunk_tokens=CHUNK_TOKENS, overlap_tokens=CHUNK_OVERLAP_TOKENS)
+    num_chunks = max(1, len(chunks))
+    _log(
+        f"[OLLAMA] chunked input_len={len(text)} input_tokens={input_tokens} "
+        f"num_chunks={num_chunks} chunk_tokens={CHUNK_TOKENS} overlap_tokens={CHUNK_OVERLAP_TOKENS}"
     )
 
-    content = response.get("content") or []
-    text = "".join(str(part.get("text", "")) for part in content if isinstance(part, dict)).strip()
-    return _parse_json_or_text(text)
+    chunk_summary_target = int((limit_chars / num_chunks) * 1.2)
+    chunk_summary_target = max(300, chunk_summary_target)
+    chunk_summary_target = min(chunk_summary_target, 1000)
+
+    chunk_summaries: List[str] = []
+    for idx, chunk in enumerate(chunks, start=1):
+        prompt = (
+            "You are a careful summarization assistant.\n\n"
+
+            "Summarize the following text chunk in English.\n"
+            f"Maximum length: {chunk_summary_target} characters (strict limit).\n\n"
+
+            "This chunk is part of a larger source document.\n"
+            "Keep only information that is explicitly stated in this chunk and is important for the full document.\n\n"
+
+            "Requirements:\n"
+            "- Capture the key action, decision, claim, or event in this chunk\n"
+            "- Include important names, actions, dates, and numbers if clearly stated\n"
+            "- Keep the summary factual and neutral\n\n"
+
+            "Rules:\n"
+            "- Do not add interpretation, classification, commentary, or implications\n"
+            "- Do not infer policy stance, sentiment, or intent\n"
+            "- Do not include phrases such as 'Here is the summary', 'Here is the final summary', "
+            "'Here is the combined summary', 'Note:', or any meta explanation\n"
+            "- Do not mention that this is a chunk\n"
+            "- No repetition\n"
+            "- No bullet points\n"
+            "- No headings\n\n"
+
+            "Output only the summary text.\n\n"
+
+            f"Text:\n{chunk}"
+        )
+        summary = _ollama_generate(
+            {
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+            }
+        )
+        chunk_summaries.append(summary[:chunk_summary_target].rstrip())
+        _log(
+            f"[OLLAMA] chunk {idx}/{num_chunks} chunk_len={len(chunk)} "
+            f"chunk_tokens={len(_encode_text(chunk))} chunk_summary_len={len(summary)} "
+            f"target={chunk_summary_target}"
+        )
+        if idx < num_chunks:
+            time.sleep(SLEEP_BETWEEN_CHUNK_CALLS_SEC)
+
+    combined = "\n\n".join(chunk_summaries).strip()
+
+    final_prompt = (
+        "You are a careful summarization assistant.\n\n"
+
+        "The following text consists of partial summaries from one source document.\n"
+        "Write one final English summary of the source document.\n"
+        f"Maximum length: {limit_chars} characters (strict limit).\n\n"
+
+        "Requirements:\n"
+        "- Preserve only information supported by the partial summaries\n"
+        "- Start with the document's main action, decision, claim, or event\n"
+        "- Include important names, actions, dates, and numbers if clearly present\n"
+        "- Keep the summary factual, neutral, and concise\n"
+        "- Merge overlapping points without adding new interpretation\n\n"
+
+        "Rules:\n"
+        "- Do not add interpretation, classification, commentary, or implications\n"
+        "- Do not infer policy stance, sentiment, or intent\n"
+        "- Do not include phrases such as 'Here is the summary', 'Here is the final summary', "
+        "'Here is the combined summary', 'Note:', or any meta explanation\n"
+        "- Do not mention chunks, combining, or summarization process\n"
+        "- No bullet points\n"
+        "- No headings\n"
+        "- Output only the final summary text\n\n"
+
+        "Partial summaries:\n"
+        f"{combined}"
+    )
+
+    final_summary = _ollama_generate(
+        {
+            "model": OLLAMA_MODEL,
+            "prompt": final_prompt,
+            "stream": False,
+        }
+    )
+    final_summary = final_summary[:limit_chars].rstrip()
+    _log(f"[OLLAMA] final_combined output_len={len(final_summary)} limit={limit_chars}")
+    return final_summary
 
 
-def _post_json(url: str, headers: dict[str, str], body: dict[str, Any]) -> dict[str, Any]:
-    request_body = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    request_obj = urllib_request.Request(url, data=request_body, headers=headers, method="POST")
-    try:
-        with urllib_request.urlopen(request_obj, timeout=DEFAULT_TIMEOUT_SEC) as response:
-            response_text = response.read().decode("utf-8", errors="replace")
-    except urllib_error.HTTPError as error:  # pragma: no cover - network path
-        detail = error.read().decode("utf-8", errors="replace") if error.fp else str(error)
-        raise RuntimeError(f"HTTP {error.code}: {detail}") from error
-    except Exception as error:  # pragma: no cover - network path
-        raise RuntimeError(f"HTTP request failed: {error}") from error
+def main() -> None:
+    _check_ollama()
+    input_path = INPUT_CSV
+    output_path = OUTPUT_CSV
 
-    try:
-        return json.loads(response_text)
-    except Exception as error:
-        raise RuntimeError("LLM response JSON parsing failed") from error
+    df = pd.read_csv(input_path, encoding="utf-8-sig")
 
+    if BODY_COL not in df.columns:
+        raise ValueError(f"Column '{BODY_COL}' not found. Available columns: {list(df.columns)}")
 
-def _parse_json_or_text(text: str) -> dict[str, Any] | str:
-    cleaned = (text or "").strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.replace("```json", "").replace("```", "").strip()
-    if not cleaned:
-        return ""
-    try:
-        return json.loads(cleaned)
-    except Exception:
-        return cleaned
+    # 본문 전처리 및 길이 저장
+    df[BODY_COL] = df[BODY_COL].fillna("").astype(str)
+    lengths = df[BODY_COL].str.len()
+    df[ORIGINAL_LENGTH_COL] = lengths
 
+    indices = df.index.tolist()
+    print(f"[MAIN] Total {len(df)} rows to summarize (processing all rows regardless of length)")
 
-def _extract_summary_text(result: dict[str, Any] | str) -> str:
-    if isinstance(result, str):
-        return result.strip()
-    if isinstance(result, dict):
-        for key in ("summary", "text", "result"):
-            value = result.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return ""
-
-
-def _fallback_summary_text(source_text: str, output_limit: int) -> str:
-    """LLM 실패 시 원문 전체 대신 짧은 추출 요약을 반환한다."""
-    compact = " ".join((source_text or "").split())
-    if not compact:
-        return ""
-
-    sentences = compact.replace("\n", " ").split(". ")
-    picked: list[str] = []
-    current_len = 0
-    for sentence in sentences:
-        candidate = sentence.strip()
-        if not candidate:
+    for i, idx in enumerate(indices, start=1):
+        text = df.at[idx, BODY_COL]
+        
+        # 본문이 비어있는 경우 LLM 호출 없이 빈 문자열 처리
+        if not text.strip():
+            _log(f"[MAIN] skipping document {i}/{len(indices)} row={idx} (empty body)")
             continue
-        if not candidate.endswith("."):
-            candidate += "."
-        next_len = current_len + len(candidate) + (1 if picked else 0)
-        if next_len > output_limit:
-            break
-        picked.append(candidate)
-        current_len = next_len
-        if len(picked) >= 4:
-            break
 
-    if picked:
-        return " ".join(picked).strip()
+        _log(f"[MAIN] processing document {i}/{len(indices)} row={idx} body_len={len(text)}")
 
-    return compact[:output_limit].rstrip()
+        try:
+            summary = summarize_to_under_limit(text, limit_chars=MAX_CHARS)
+        except Exception as e:
+            print(f"[WARN] summarize failed row={idx}: {e} -> truncating to {MAX_CHARS} chars")
+            summary = text[:MAX_CHARS].rstrip()
+
+        df.at[idx, BODY_COL] = summary
+
+        # 마지막 요청이 아니면 간격 유지
+        if i < len(indices):
+            time.sleep(SLEEP_BETWEEN_CALLS_SEC)
+
+    df.rename(columns={BODY_COL: SUMMARY_COL}, inplace=True)
+    df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"[DONE] saved: {output_path}")
+
+
+if __name__ == "__main__":
+    main()

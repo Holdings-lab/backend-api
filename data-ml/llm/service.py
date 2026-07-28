@@ -109,13 +109,14 @@ class ArticleInsightGenerationService:
 
             article_payload = {
                 "documentId": document_id,
-                "date": row.get("date"),
+                "date": row.get("date") or row.get("release_date"),
                 "source": row.get("source"),
                 "category": row.get("category"),
                 "docType": row.get("doc_type"),
+                "sector": row.get("sector"),
                 "title": row.get("title"),
-                "body": row.get("body"),
-                "bodySummary": row.get("body_summary"),
+                "body": row.get("body_summary") or row.get("body"),
+                "bodySummary": row.get("body_summary") or row.get("body"),
                 "matchedKeywordGroups": row.get("matched_keyword_groups"),
                 "matchedKeywords": row.get("matched_keywords"),
             }

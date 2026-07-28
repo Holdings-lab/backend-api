@@ -36,15 +36,26 @@ def run_crawl_now(
     run_type: str = "crawler_service",
 ) -> dict:
     """
-    정책 뉴스 수집 + 후처리.
+    정책/시장 뉴스 수집 + 후처리.
 
-    기본 경로(/ml/pipelines/run 용):
+    collectors/postprocessing 을 사용한다.
+    레거시 keyword_config_path / doc_types 인자는 호환용으로만 받고 무시한다.
+
+    후처리 산출 스키마 (body 컬럼 없음):
+      sector, source, category, doc_type, release_date, url, title?,
+      body_summary, body_original_length, category_*, sentiment, embeddings
+
+    기본 경로:
       - raw: data/crawler/collected/policy_updates_monitor.csv
-      - processed: data/crawler/features/policy_updates_features.csv
-
-    /ml/signal 은 raw_csv_path / processed_csv_path 로
-    /opt/riseai/data/features/qqq/... 쪽 경로를 넘긴다.
+      - processed: data/crawler/features/policy_updates_features.csv (누적 append)
     """
+    if keyword_config_path is not None or doc_types is not None:
+        logger.info(
+            "[crawl] ignoring legacy kwargs keyword_config_path=%s doc_types=%s",
+            keyword_config_path,
+            doc_types,
+        )
+
     init_db()
     raw_csv = str(raw_csv_path) if raw_csv_path else collected_csv_path("policy_updates_monitor.csv")
     processed_csv = (
@@ -54,18 +65,17 @@ def run_crawl_now(
     raw_df = collect_policy_updates(
         bis_max_pages=bis_max_pages,
         sleep_sec=sleep_sec,
-        keyword_config_path=keyword_config_path,
-        doc_types=doc_types,
         target_date=target_date,
     )
 
-    if raw_df.empty:
+    if raw_df is None or raw_df.empty:
         persist_result = persist_policy_pipeline_outputs(
-            raw_df=raw_df,
+            raw_df=raw_df if raw_df is not None else pd.DataFrame(),
             processed_df=pd.DataFrame(),
             raw_csv_path=raw_csv,
             processed_csv_path=processed_csv,
             run_type=run_type,
+            append_processed=True,
         )
         return {
             "status": "success",
@@ -75,6 +85,7 @@ def run_crawl_now(
             **persist_result,
         }
 
+    # 후처리: body → body_summary rename (원문 body 컬럼 삭제)
     processed_df = run_postprocessing_pipeline(raw_df)
 
     persist_result = persist_policy_pipeline_outputs(
@@ -83,6 +94,7 @@ def run_crawl_now(
         raw_csv_path=raw_csv,
         processed_csv_path=processed_csv,
         run_type=run_type,
+        append_processed=True,
     )
 
     return {
