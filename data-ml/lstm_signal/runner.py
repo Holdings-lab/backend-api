@@ -209,9 +209,6 @@ def prepare_features_existing() -> dict[str, Any]:
         market_features_path,
     )
     return {
-        "status": "success",
-        "source": "existing",
-        "message": "기존 feature CSV를 사용합니다.",
         "news_features_path": str(news_features_path),
         "market_features_path": str(market_features_path),
     }
@@ -272,11 +269,8 @@ def prepare_features_from_crawl(
         )
 
     return {
-        **crawl_result,
-        "source": "crawl",
         "news_features_path": str(news_features_path),
         "market_features_path": str(market_features_path),
-        "raw_csv_path": str(raw_csv_path),
     }
 
 
@@ -384,14 +378,12 @@ def run_signal(
             details={
                 "stdout_tail": _tail(error.stdout or ""),
                 "stderr_tail": _tail(error.stderr or ""),
-                "features": feature_prep,
             },
         ) from error
     except OSError as error:
         raise SignalRunnerError(
             f"시그널 프로세스를 실행하지 못했습니다: {error}",
             code="ML_SIGNAL_EXEC_FAILED",
-            details={"features": feature_prep},
         ) from error
 
     if completed.returncode != 0:
@@ -403,22 +395,11 @@ def run_signal(
                 "stdout_tail": _tail(completed.stdout),
                 "stderr_tail": _tail(completed.stderr),
                 "command": command,
-                "features": feature_prep,
             },
         )
 
     signal = _read_signal_json(output_path)
     signal.setdefault("ticker", normalized_ticker)
-    signal["features"] = {
-        "source": feature_prep.get("source", "existing"),
-        "status": feature_prep.get("status"),
-        "message": feature_prep.get("message"),
-        "news_features_path": str(news_features_path),
-        "market_features_path": str(market_features_path),
-        "raw_count": feature_prep.get("raw_count"),
-        "processed_count": feature_prep.get("processed_count"),
-        "raw_csv_path": feature_prep.get("raw_csv_path"),
-    }
     return signal
 
 
