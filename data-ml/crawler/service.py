@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
+from typing import Any, Callable, TypeVar
 
 import pandas as pd
 
@@ -22,6 +25,56 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BIS_MAX_PAGES = int(os.getenv("BIS_MAX_PAGES", "5"))
 DEFAULT_SLEEP_SEC = float(os.getenv("CRAWL_SLEEP_SEC", "1"))
+
+T = TypeVar("T")
+
+
+def _apply_runtime_env_overrides() -> None:
+    """
+    crawler 패키지 파일은 원본과 동일하게 유지하고,
+    Docker/운영 환경 값만 service 계층에서 주입한다.
+    """
+    ollama_base = (os.getenv("OLLAMA_BASE_URL") or "").strip()
+    ollama_model = (os.getenv("OLLAMA_MODEL") or "").strip()
+    if not ollama_base and not ollama_model:
+        return
+
+    try:
+        import crawler.postprocessing.text_summarizer as text_summarizer
+    except Exception as error:
+        logger.warning("[crawl] failed to import text_summarizer for OLLAMA override: %s", error)
+        return
+
+    if ollama_base:
+        base = ollama_base.rstrip("/")
+        text_summarizer.OLLAMA_BASE_URL = base
+        text_summarizer.OLLAMA_GENERATE_URL = f"{base}/api/generate"
+        text_summarizer.OLLAMA_TAGS_URL = f"{base}/api/tags"
+        logger.info("[crawl] OLLAMA_BASE_URL override applied: %s", base)
+
+    if ollama_model:
+        text_summarizer.OLLAMA_MODEL = ollama_model
+        logger.info("[crawl] OLLAMA_MODEL override applied: %s", ollama_model)
+
+
+def _run_in_isolated_thread(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    """
+    Playwright Sync API 는 running asyncio loop 가 있는 스레드에서 호출되면 실패한다.
+    FastAPI/uvicorn/APScheduler 경로와 무관하게 수집은 항상 별도 스레드에서 실행한다.
+    """
+
+    def _call() -> T:
+        # 격리 스레드에 실수로 loop 가 붙어 있지 않은지 방어
+        try:
+            asyncio.get_running_loop()
+            raise RuntimeError("isolated crawl thread unexpectedly has a running event loop")
+        except RuntimeError as error:
+            if "unexpectedly has a running event loop" in str(error):
+                raise
+        return fn(*args, **kwargs)
+
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="crawl-isolated") as pool:
+        return pool.submit(_call).result()
 
 
 def run_crawl_now(
@@ -56,13 +109,16 @@ def run_crawl_now(
             doc_types,
         )
 
+    _apply_runtime_env_overrides()
     init_db()
     raw_csv = str(raw_csv_path) if raw_csv_path else collected_csv_path("policy_updates_monitor.csv")
     processed_csv = (
         str(processed_csv_path) if processed_csv_path else feature_csv_path("policy_updates_features.csv")
     )
 
-    raw_df = collect_policy_updates(
+    # EIA(Playwright sync) 포함 수집은 asyncio loop 밖 스레드에서 실행
+    raw_df = _run_in_isolated_thread(
+        collect_policy_updates,
         bis_max_pages=bis_max_pages,
         sleep_sec=sleep_sec,
         target_date=target_date,
