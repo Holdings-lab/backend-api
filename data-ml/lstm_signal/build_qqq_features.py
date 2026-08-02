@@ -26,6 +26,17 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ML_WORKER_ROOT = Path("/opt/riseai/apps/ml-worker")
 DEFAULT_START_DATE = "2017-01-12"
+# LSTM/XGB QQQ 번들이 요구하는 보충 티커 (qqq_growth_tech 프리셋과 동일)
+QQQ_SIGNAL_MACRO_TICKERS: tuple[str, ...] = (
+    "SPY",
+    "^VIX",
+    "TLT",
+    "HYG",
+    "UUP",
+    "XLK",
+    "SOXX",
+    "IWM",
+)
 
 
 class FeatureBuildError(Exception):
@@ -168,12 +179,14 @@ def build_qqq_feature_csvs(
     start_date = _market_start_date()
     end_date = _market_end_date(target_date)
     normalized_ticker = (ticker or "QQQ").strip().upper() or "QQQ"
+    macro_tickers = QQQ_SIGNAL_MACRO_TICKERS
 
     config = _run_step(
         "build market config",
         lambda: replace(
             MarketNewsTrainingConfig(),
             target_ticker=normalized_ticker,
+            macro_tickers=macro_tickers,
             start_date=start_date,
             end_date=end_date,
             news_input_path=policy_path,
@@ -181,8 +194,9 @@ def build_qqq_feature_csvs(
     )
 
     logger.info(
-        "[SignalFeatures] downloading market data ticker=%s start=%s end=%s shared=%s",
+        "[SignalFeatures] downloading market data ticker=%s macros=%s start=%s end=%s shared=%s",
         normalized_ticker,
+        ",".join(macro_tickers),
         start_date,
         end_date,
         shared_root,
@@ -193,7 +207,7 @@ def build_qqq_feature_csvs(
         lambda: build_market_feature_frame(
             raw_market,
             config.target_ticker,
-            supplementary_tickers=config.macro_tickers,
+            supplementary_tickers=macro_tickers,
         ),
     )
 
