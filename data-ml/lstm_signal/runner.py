@@ -522,15 +522,22 @@ def run_signal(
         ) from error
 
     if completed.returncode != 0:
+        details = {
+            "exit_code": completed.returncode,
+            "stdout_tail": _tail(completed.stdout),
+            "stderr_tail": _tail(completed.stderr),
+            "command": command,
+        }
+        logger.error(
+            "[Signal] predict_signal failed exit=%s stderr_tail=%s stdout_tail=%s",
+            completed.returncode,
+            _tail(completed.stderr, 2000),
+            _tail(completed.stdout, 1000),
+        )
         raise SignalRunnerError(
             "시그널 예측 실행에 실패했습니다.",
             code="ML_SIGNAL_FAILED",
-            details={
-                "exit_code": completed.returncode,
-                "stdout_tail": _tail(completed.stdout),
-                "stderr_tail": _tail(completed.stderr),
-                "command": command,
-            },
+            details=details,
         )
 
     signal = _read_signal_json(output_path)
