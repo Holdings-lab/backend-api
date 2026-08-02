@@ -97,8 +97,6 @@ services:
         condition: service_healthy
       api-server:
         condition: service_started
-      ollama:
-        condition: service_started
     env_file:
       - .env.docker
     environment:
@@ -121,8 +119,13 @@ services:
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-flash}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3.5-haiku-20241022}
+      # 요약 시에만 ollama 사용
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+      OLLAMA_AUTO_MANAGE: ${OLLAMA_AUTO_MANAGE:-true}
+      OLLAMA_AUTO_STOP: ${OLLAMA_AUTO_STOP:-true}
+      OLLAMA_MEMORY_LIMIT: ${OLLAMA_MEMORY_LIMIT:-2g}
+      OLLAMA_CONTAINER_NAME: ${OLLAMA_CONTAINER_NAME:-ollama}
       PYTHON_DOTENV_DISABLED: "1"
       ML_WORKER_ROOT: ${ML_WORKER_ROOT:-/opt/riseai/apps/ml-worker}
       # Docker 안에서는 호스트 venv 대신 컨테이너 python 사용
@@ -141,6 +144,7 @@ services:
       - /opt/riseai/models:/opt/riseai/models:ro
       - /opt/riseai/data/predictions:/opt/riseai/data/predictions
       - /opt/riseai/data/features:/opt/riseai/data/features
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test:
         - CMD
@@ -159,15 +163,16 @@ services:
     networks:
       - app-network
 
+  # 평소 미기동. data-ml 이 요약 직전에 docker.sock 으로 start/stop.
   ollama:
+    profiles: ["ollama"]
     image: ollama/ollama:latest
     container_name: ollama
-    restart: always
+    restart: "no"
     environment:
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
     volumes:
       - ollama-data:/root/.ollama
-    # 디버깅용 포트 노출
     ports:
       - ${OLLAMA_PORT:-11434}:11434
     healthcheck:
@@ -179,14 +184,14 @@ services:
     deploy:
       resources:
         limits:
-          # llama3 기준 여유. 인스턴스 RAM이 부족하면 OLLAMA_MODEL 을 작은 모델로 
           cpus: ${OLLAMA_CPUS:-1.0}
-          memory: ${OLLAMA_MEMORY_LIMIT:-4G}
+          # 기본 2G + llama3.2:3b
+          memory: ${OLLAMA_MEMORY_LIMIT:-2G}
     networks:
       - app-network
 
-  # 최초/재기동 시 모델 pull (완료 후 종료)
   ollama-pull:
+    profiles: ["ollama"]
     image: ollama/ollama:latest
     container_name: ollama-pull
     depends_on:
@@ -194,7 +199,7 @@ services:
         condition: service_started
     environment:
       OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |

@@ -22,3 +22,4 @@ certifi
 urllib3
 anthropic
 playwright
+docker

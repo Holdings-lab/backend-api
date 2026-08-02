@@ -141,8 +141,11 @@ def run_crawl_now(
             **persist_result,
         }
 
-    # 후처리: body → body_summary rename (원문 body 컬럼 삭제)
-    processed_df = run_postprocessing_pipeline(raw_df)
+    # 요약(Ollama)이 필요한 후처리 구간에만 컨테이너 자동 기동/종료
+    from ollama_lifecycle import ollama_session
+
+    with ollama_session():
+        processed_df = run_postprocessing_pipeline(raw_df)
 
     persist_result = persist_policy_pipeline_outputs(
         raw_df=raw_df,
