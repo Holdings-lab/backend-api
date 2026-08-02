@@ -173,15 +173,17 @@ def _success_response(result=None, message="요청에 성공했습니다.", code
     )
 
 
-def _error_response(message="요청에 실패했습니다.", code="FAIL-001", status_code=500):
+def _error_response(message="요청에 실패했습니다.", code="FAIL-001", status_code=500, details=None):
     data = {
         "isSuccess": False,
         "code": code,
         "message": message,
     }
+    if details:
+        data["details"] = details
     return Response(
         status_code=status_code,
-        content=json.dumps(data, ensure_ascii=False, indent=2),
+        content=json.dumps(data, ensure_ascii=False, indent=2, default=str),
         media_type="application/json",
     )
 
@@ -1071,12 +1073,18 @@ async def run_signal_endpoint(request: Request, date: str | None = None):
                 "ML_SIGNAL_FAILED",
                 "ML_SIGNAL_RESULT_INVALID",
                 "ML_SIGNAL_CRAWL_FAILED",
+                "ML_SIGNAL_FEATURES_BUILD_FAILED",
             }:
                 status_code = 500
             message = error.message
             if error.details.get("stderr_tail"):
                 message = f"{message} ({_tail_text(error.details.get('stderr_tail'))})"
-            return _error_response(message=message, code=error.code, status_code=status_code)
+            return _error_response(
+                message=message,
+                code=error.code,
+                status_code=status_code,
+                details=error.details or None,
+            )
     finally:
         run_lock.release()
 
