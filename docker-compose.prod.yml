@@ -133,17 +133,22 @@ services:
       SIGNAL_OUTPUT_PATH: ${SIGNAL_OUTPUT_PATH:-/opt/riseai/data/predictions/qqq_latest_signal.json}
       SIGNAL_NEWS_FEATURES_PATH: ${SIGNAL_NEWS_FEATURES_PATH:-/opt/riseai/data/features/qqq/news_event_features.csv}
       SIGNAL_MARKET_FEATURES_PATH: ${SIGNAL_MARKET_FEATURES_PATH:-/opt/riseai/data/features/qqq/market_long_features.csv}
+      SIGNAL_CRAWL_OUTPUT_PATH: ${SIGNAL_CRAWL_OUTPUT_PATH:-/opt/riseai/data/crawler/policy_updates_features.csv}
+      CRAWLER_APP_ROOT: ${CRAWLER_APP_ROOT:-/opt/riseai/apps/crawler}
       SIGNAL_TIMEOUT_SEC: ${SIGNAL_TIMEOUT_SEC:-120}
-      SIGNAL_REFRESH_FEATURES: ${SIGNAL_REFRESH_FEATURES:-false}
+      SIGNAL_CRAWL_TIMEOUT_SEC: ${SIGNAL_CRAWL_TIMEOUT_SEC:-1800}
+      SIGNAL_REFRESH_FEATURES: ${SIGNAL_REFRESH_FEATURES:-true}
     ports:
       - ${ML_API_PORT:-9000}:9000
     volumes:
       - ./data-ml/data:/app/data
       - ./data-ml/training:/app/training
       - /opt/riseai/apps/ml-worker:/opt/riseai/apps/ml-worker:ro
+      - /opt/riseai/apps/crawler:/opt/riseai/apps/crawler:ro
       - /opt/riseai/models:/opt/riseai/models:ro
       - /opt/riseai/data/predictions:/opt/riseai/data/predictions
       - /opt/riseai/data/features:/opt/riseai/data/features
+      - /opt/riseai/data/crawler:/opt/riseai/data/crawler
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test:
