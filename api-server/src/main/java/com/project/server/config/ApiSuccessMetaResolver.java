@@ -34,6 +34,10 @@ public class ApiSuccessMetaResolver {
                         new ApiSuccessMetaRule(HttpMethod.GET, "/api/users/*/home", "HOME-GET-200", "홈 정보 조회에 성공했습니다."),
                         new ApiSuccessMetaRule(HttpMethod.GET, "/api/users/*/home/briefing", "HOME-BRIEFING-200",
                                         "홈 브리핑 조회에 성공했습니다."),
+                        new ApiSuccessMetaRule(HttpMethod.GET, "/api/users/*/newsroom", "NEWSROOM-TAB-200",
+                                        "뉴스룸 탭 조회에 성공했습니다."),
+                        new ApiSuccessMetaRule(HttpMethod.GET, "/api/users/*/newsroom/*", "NEWSROOM-DETAIL-200",
+                                        "뉴스룸 상세 브리핑 조회에 성공했습니다."),
                         new ApiSuccessMetaRule(HttpMethod.GET, "/api/health", "HEALTH-GET-200", "헬스체크에 성공했습니다."),
 
                         new ApiSuccessMetaRule(HttpMethod.GET, "/api/users/*/events", "EVENTS-GET-200", "이벤트 목록 조회에 성공했습니다."),
