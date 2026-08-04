@@ -4,12 +4,14 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.server.domain.BrokerAccountEntity;
+import com.project.server.domain.broker.SupportedBroker;
 import com.project.server.dto.BrokerAccountDto;
 import com.project.server.exception.ApiException;
 import com.project.server.repository.AccountBalanceRepository;
 import com.project.server.repository.AssetPositionRepository;
 import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.service.integration.HyphenApiClient;
+import com.project.server.service.onboarding.OnboardingService;
 import com.project.server.service.security.CryptoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +35,7 @@ public class BrokerAccountService {
   private final HyphenApiClient hyphenApiClient;
   private final CryptoService cryptoService;
   private final ObjectMapper objectMapper;
+  private final OnboardingService onboardingService;
 
   /**
    * 증권사 계좌 연동.
@@ -137,6 +140,7 @@ public class BrokerAccountService {
       }
     }
 
+    onboardingService.markAccountLinked(userId);
     return linkedAccounts;
   }
 
@@ -292,6 +296,15 @@ public class BrokerAccountService {
     }
     if (request.getBrokerNames() == null || request.getBrokerNames().isEmpty()) {
       throw ApiException.badRequest("연동할 증권사 목록이 필요합니다.", "MISSING_BROKERS");
+    }
+    for (String brokerName : request.getBrokerNames()) {
+      SupportedBroker broker = SupportedBroker.fromCode(brokerName)
+          .orElseThrow(() -> ApiException.badRequest(
+              "지원하지 않는 증권사입니다: " + brokerName, "UNSUPPORTED_BROKER"));
+      if (!broker.available()) {
+        throw ApiException.badRequest(
+            broker.displayName() + " 연동 준비 중입니다.", "BROKER_NOT_AVAILABLE");
+      }
     }
   }
 

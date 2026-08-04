@@ -87,7 +87,16 @@ public class ApiSuccessMetaResolver {
                                         "ADMIN-NOTIFICATION-SEND-200",
                                         "알림이 성공적으로 전송되었습니다."),
                         new ApiSuccessMetaRule(HttpMethod.PUT, "/admin/accounts/*", "ADMIN-ACCOUNT-DETAILS-200",
-                                        "계좌 상세 정보가 업데이트되었습니다."));
+                                        "계좌 상세 정보가 업데이트되었습니다."),
+
+                        new ApiSuccessMetaRule(HttpMethod.PATCH, "/api/users/*/onboarding/profile",
+                                        "ONBOARDING-PROFILE-200", "온보딩 프로필이 저장되었습니다."),
+                        new ApiSuccessMetaRule(HttpMethod.GET, "/api/users/*/onboarding/status",
+                                        "ONBOARDING-STATUS-200", "온보딩 진척도 조회에 성공했습니다."),
+                        new ApiSuccessMetaRule(HttpMethod.POST, "/api/users/*/onboarding/account/skip",
+                                        "ONBOARDING-ACCOUNT-SKIP-200", "계좌 연결을 나중에 진행하도록 저장했습니다."),
+                        new ApiSuccessMetaRule(HttpMethod.GET, "/api/brokers",
+                                        "BROKERS-GET-200", "증권사 목록 조회에 성공했습니다."));
 
         public ApiSuccessMeta resolve(HttpMethod method, String path) {
                 for (ApiSuccessMetaRule rule : RULES) {

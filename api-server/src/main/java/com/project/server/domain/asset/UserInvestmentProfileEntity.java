@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "user_investment_profiles")
@@ -19,11 +21,22 @@ public class UserInvestmentProfileEntity {
     private Long userId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "investment_horizon", nullable = false, length = 30)
+    @Column(name = "investment_horizon", length = 30)
     private InvestmentHorizon investmentHorizon;
 
-    @Column(name = "max_drawdown_tolerance", nullable = false)
+    @Column(name = "max_drawdown_tolerance")
     private Integer maxDrawdownTolerance;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "investment_style", length = 30)
+    private InvestmentStyle investmentStyle;
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "user_interest_sectors", joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "sector", nullable = false, length = 40)
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    private Set<InterestSector> interests = new LinkedHashSet<>();
 
     @Column(name = "onboarded_at", nullable = false)
     private LocalDateTime onboardedAt;
@@ -40,11 +53,8 @@ public class UserInvestmentProfileEntity {
         if (updatedAt == null) {
             updatedAt = now;
         }
-        if (investmentHorizon == null) {
-            investmentHorizon = InvestmentHorizon.ONE_TO_THREE_YEARS;
-        }
-        if (maxDrawdownTolerance == null) {
-            maxDrawdownTolerance = 10;
+        if (interests == null) {
+            interests = new LinkedHashSet<>();
         }
     }
 

@@ -42,6 +42,7 @@ public class AuthService {
     private final SettingsService settingsService;
     private final com.project.server.service.security.JwtTokenProvider jwtTokenProvider;
     private final RefreshTokenService refreshTokenService;
+    private final com.project.server.service.onboarding.OnboardingService onboardingService;
 
     @Value("${auth.email.from}")
     private String authMailFrom;
@@ -166,7 +167,7 @@ public class AuthService {
                 .refreshToken(refreshToken)
                 .tokenType("Bearer")
                 .accessTokenExpiresIn(jwtTokenProvider.getAccessTokenExpirationSeconds())
-                .onboardingCompleted(false)
+                .onboardingCompleted(onboardingService.isOnboardingCompleted(user.getId()))
                 .build();
     }
 
@@ -470,7 +471,7 @@ public class AuthService {
                 .refreshToken(refreshToken)
                 .tokenType("Bearer")
                 .accessTokenExpiresIn(jwtTokenProvider.getAccessTokenExpirationSeconds())
-                .onboardingCompleted(false)
+                .onboardingCompleted(onboardingService.isOnboardingCompleted(user.getId()))
                 .newUser(isNewUser)
                 .build();
     }

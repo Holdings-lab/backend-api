@@ -3,7 +3,10 @@ package com.project.server.domain.asset;
 import java.util.Arrays;
 
 public enum FinancialGoal {
-    RETIREMENT("은퇴 자금 목표");
+    RETIREMENT("은퇴 자금 마련"),
+    SEED_MONEY("목돈(종잣돈) 모으기"),
+    SPARE_FUND("여유자금 굴리기"),
+    HOUSE("내 집 마련");
 
     private final String label;
 

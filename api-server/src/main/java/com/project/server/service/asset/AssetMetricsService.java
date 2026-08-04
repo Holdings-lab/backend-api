@@ -44,7 +44,12 @@ public class AssetMetricsService {
         BigDecimal drawdownPct = calculateDrawdownPct(userId, assetTotal);
 
         UserInvestmentProfileEntity profile = getOrDefaultProfile(userId);
-        int maxDrawdownTolerance = profile.getMaxDrawdownTolerance();
+        int maxDrawdownTolerance = profile.getMaxDrawdownTolerance() != null
+                ? profile.getMaxDrawdownTolerance()
+                : 10;
+        InvestmentHorizon horizon = profile.getInvestmentHorizon() != null
+                ? profile.getInvestmentHorizon()
+                : InvestmentHorizon.Y1_3;
         BigDecimal ratio = calculateRatio(drawdownPct, maxDrawdownTolerance);
         Status status = resolveStatus(ratio);
 
@@ -55,7 +60,7 @@ public class AssetMetricsService {
                 .maxDrawdownTolerance(maxDrawdownTolerance)
                 .ratio(ratio)
                 .status(status)
-                .investmentHorizon(profile.getInvestmentHorizon())
+                .investmentHorizon(horizon)
                 .build();
     }
 
@@ -129,7 +134,7 @@ public class AssetMetricsService {
         return userInvestmentProfileRepository.findById(userId)
                 .orElse(UserInvestmentProfileEntity.builder()
                         .userId(userId)
-                        .investmentHorizon(InvestmentHorizon.ONE_TO_THREE_YEARS)
+                        .investmentHorizon(InvestmentHorizon.Y1_3)
                         .maxDrawdownTolerance(10)
                         .build());
     }

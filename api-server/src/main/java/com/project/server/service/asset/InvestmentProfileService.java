@@ -30,7 +30,7 @@ public class InvestmentProfileService {
         UserInvestmentProfileEntity profile = getOrCreate(userId);
         if (request.getInvestmentHorizon() != null && !request.getInvestmentHorizon().isBlank()) {
             try {
-                profile.setInvestmentHorizon(InvestmentHorizon.valueOf(request.getInvestmentHorizon()));
+                profile.setInvestmentHorizon(InvestmentHorizon.fromString(request.getInvestmentHorizon()));
             } catch (IllegalArgumentException e) {
                 throw ApiException.badRequest("유효하지 않은 investmentHorizon입니다.", "INVALID_INVESTMENT_HORIZON");
             }
@@ -47,20 +47,21 @@ public class InvestmentProfileService {
 
     private UserInvestmentProfileEntity getOrCreate(Long userId) {
         return profileRepository.findById(userId)
-                .orElseGet(() -> {
-                    UserInvestmentProfileEntity created = UserInvestmentProfileEntity.builder()
-                            .userId(userId)
-                            .investmentHorizon(InvestmentHorizon.ONE_TO_THREE_YEARS)
-                            .maxDrawdownTolerance(10)
-                            .build();
-                    return profileRepository.save(created);
-                });
+                .orElseGet(() -> UserInvestmentProfileEntity.builder()
+                        .userId(userId)
+                        .build());
     }
 
     private UserAssetDto.InvestmentProfileResponse toResponse(UserInvestmentProfileEntity profile) {
+        InvestmentHorizon horizon = profile.getInvestmentHorizon() != null
+                ? profile.getInvestmentHorizon()
+                : InvestmentHorizon.Y1_3;
+        Integer tolerance = profile.getMaxDrawdownTolerance() != null
+                ? profile.getMaxDrawdownTolerance()
+                : 10;
         return UserAssetDto.InvestmentProfileResponse.builder()
-                .investmentHorizon(profile.getInvestmentHorizon().name())
-                .maxDrawdownTolerance(profile.getMaxDrawdownTolerance())
+                .investmentHorizon(horizon.name())
+                .maxDrawdownTolerance(tolerance)
                 .build();
     }
 

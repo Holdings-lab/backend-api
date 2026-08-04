@@ -106,7 +106,7 @@ public class GoalService {
 
         InvestmentHorizon horizon = profileRepository.findById(userId)
                 .map(UserInvestmentProfileEntity::getInvestmentHorizon)
-                .orElse(InvestmentHorizon.ONE_TO_THREE_YEARS);
+                .orElse(InvestmentHorizon.Y1_3);
 
         BigDecimal totalNeeded = goal.getTargetAmount().subtract(goal.getGoalStartAmount());
         if (totalNeeded.compareTo(BigDecimal.ZERO) <= 0) {
