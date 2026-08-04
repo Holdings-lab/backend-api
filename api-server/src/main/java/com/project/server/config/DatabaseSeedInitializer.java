@@ -63,8 +63,7 @@ public class DatabaseSeedInitializer implements CommandLineRunner {
         }
 
         userJpaRepository.saveAll(List.of(
-                UserEntity.builder().email("jiyoung@example.com").nickname("지웅").password("password123").build(),
-                UserEntity.builder().email("demo_user@example.com").nickname("데모").password("demo1234").build()
+                UserEntity.builder().email("user@example.com").nickname("user").password("user").build()
         ));
     }
 
