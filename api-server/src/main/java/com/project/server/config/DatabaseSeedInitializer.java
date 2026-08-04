@@ -73,8 +73,7 @@ public class DatabaseSeedInitializer implements CommandLineRunner {
         }
 
         userProfileRepository.saveAll(List.of(
-                UserProfileEntity.builder().userId(1L).avatarText("JY").weeklyLearningCount(6).quizAccuracyPercent(82).weakTopic("환율").build(),
-                UserProfileEntity.builder().userId(2L).avatarText("DM").weeklyLearningCount(3).quizAccuracyPercent(71).weakTopic("고용").build()
+                UserProfileEntity.builder().userId(1L).avatarText("JY").weeklyLearningCount(6).quizAccuracyPercent(82).weakTopic("환율").build()
         ));
     }
 
@@ -84,8 +83,8 @@ public class DatabaseSeedInitializer implements CommandLineRunner {
         }
 
         userNotificationSettingRepository.saveAll(List.of(
-                UserNotificationSettingEntity.builder().userId(1L).before30m(true).importantEventBriefing(false).learningReminder(true).build(),
-                UserNotificationSettingEntity.builder().userId(2L).before30m(true).importantEventBriefing(false).learningReminder(true).build()
+                UserNotificationSettingEntity.builder().userId(1L).before30m(true).importantEventBriefing(true)
+                        .learningReminder(true).policyChangeAlert(true).briefingTime("09:00").build()
         ));
     }
 
@@ -97,10 +96,7 @@ public class DatabaseSeedInitializer implements CommandLineRunner {
         userWatchAssetRepository.saveAll(List.of(
                 UserWatchAssetEntity.builder().userId(1L).assetName("장기채 ETF").changePercent(-1.2).signalText("하락확률 70%").displayOrder(1).build(),
                 UserWatchAssetEntity.builder().userId(1L).assetName("나스닥 성장주 ETF").changePercent(-0.8).signalText("하락확률 70%").displayOrder(2).build(),
-                UserWatchAssetEntity.builder().userId(1L).assetName("달러 인덱스 ETF").changePercent(0.6).signalText("상승확률 60%").displayOrder(3).build(),
-                UserWatchAssetEntity.builder().userId(2L).assetName("장기채 ETF").changePercent(-0.3).signalText("하락확률 58%").displayOrder(1).build(),
-                UserWatchAssetEntity.builder().userId(2L).assetName("코스피 ETF").changePercent(-0.5).signalText("하락확률 58%").displayOrder(2).build(),
-                UserWatchAssetEntity.builder().userId(2L).assetName("금 ETF").changePercent(1.5).signalText("상승확률 72%").displayOrder(3).build()
+                UserWatchAssetEntity.builder().userId(1L).assetName("달러 인덱스 ETF").changePercent(0.6).signalText("상승확률 60%").displayOrder(3).build()
         ));
     }
 

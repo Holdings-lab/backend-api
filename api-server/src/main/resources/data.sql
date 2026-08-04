@@ -1,8 +1,7 @@
 MERGE INTO users (id, email, nickname, password, fcm_token)
 KEY (id)
 VALUES
-(1, 'jiyoung@example.com', '지웅', 'password123', NULL),
-(2, 'demo_user@example.com', '데모', 'demo1234', NULL);
+(1, 'user@example.com', 'user', 'user', NULL);
 
 MERGE INTO policy_events (id, title, keyword, impact_score, analysis_summary, created_at)
 KEY (id)
@@ -14,8 +13,7 @@ VALUES
 MERGE INTO user_notification_settings (id, user_id, before_30m, important_event_briefing, learning_reminder, updated_at)
 KEY (id)
 VALUES
-(1, 1, TRUE, FALSE, TRUE, CURRENT_TIMESTAMP()),
-(2, 2, TRUE, FALSE, TRUE, CURRENT_TIMESTAMP());
+(1, 1, TRUE, FALSE, TRUE, CURRENT_TIMESTAMP());
 
 MERGE INTO user_event_alerts (id, user_id, event_id, enabled, updated_at)
 KEY (id)
@@ -25,13 +23,11 @@ VALUES
 MERGE INTO user_profiles (id, user_id, avatar_text, weekly_learning_count, quiz_accuracy_percent, weak_topic)
 KEY (id)
 VALUES
-(1, 1, 'JY', 6, 82, '환율'),
-(2, 2, 'DM', 3, 71, '고용');
+(1, 1, 'JY', 6, 82, '환율');
 
 MERGE INTO user_watch_assets (id, user_id, asset_name, change_percent, signal_text, display_order)
 KEY (id)
 VALUES
 (1, 1, '장기채 ETF', -1.2, '변동성↑ 74%', 1),
 (2, 1, '나스닥 성장주 ETF', -0.8, '하락확률 62%', 2),
-(3, 1, '달러 인덱스 ETF', 0.6, '상승확률 68%', 3),
-(4, 2, '장기채 ETF', -0.3, '보합권 50%', 1);
+(3, 1, '달러 인덱스 ETF', 0.6, '상승확률 68%', 3);
