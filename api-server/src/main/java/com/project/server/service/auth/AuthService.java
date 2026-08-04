@@ -319,9 +319,10 @@ public class AuthService {
                 AuthDto.SettingMenuItem.builder()
                         .key("notification")
                         .title("알림 설정")
-                        .before30m(notif != null && notif.isBefore30m())
-                        .importantEventBriefing(notif != null && notif.isImportantEventBriefing())
-                        .learningReminder(notif != null && notif.isLearningReminder())
+                        .policyChangeAlert(notif != null && notif.isPolicyChangeAlert())
+                        .briefingTime(notif != null && notif.getBriefingTime() != null
+                                ? notif.getBriefingTime()
+                                : "09:00")
                         .build());
 
         return AuthDto.MeResponse.builder()

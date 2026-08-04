@@ -16,4 +16,8 @@ public interface BrokerAccountRepository extends JpaRepository<BrokerAccountEnti
     Optional<BrokerAccountEntity> findByUserIdAndIsPrimary(Long userId, Boolean isPrimary);
 
     List<BrokerAccountEntity> findByHyphenStatusIn(List<BrokerAccountEntity.HyphenStatus> statuses);
+
+    long countByUserId(Long userId);
+
+    long countByUserIdAndHyphenStatus(Long userId, BrokerAccountEntity.HyphenStatus hyphenStatus);
 }

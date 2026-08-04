@@ -53,18 +53,25 @@ public class UserPreferenceController {
     }
 
     @GetMapping("/{userId}/settings")
-    public ResponseEntity<java.util.List<AuthDto.SettingMenuItem>> getSettings(
+    public ResponseEntity<UserPreferenceDto.SettingsHomeResponse> getSettings(
             @PathVariable("userId") Long userId
     ) {
-        return ResponseEntity.ok(authService.getMeSettings(userId));
+        return ResponseEntity.ok(userPreferenceService.getSettingsHome(userId));
     }
 
-    @PatchMapping("/{userId}/settings")
-    public ResponseEntity<java.util.List<AuthDto.SettingMenuItem>> updateSettings(
+    @PatchMapping("/{userId}/settings/notifications")
+    public ResponseEntity<UserPreferenceDto.NotificationSettingsResponse> updateNotificationSettings(
             @PathVariable("userId") Long userId,
-            @RequestBody UserPreferenceDto.UpdateSettingsRequest request
+            @RequestBody UserPreferenceDto.UpdateNotificationSettingsRequest request
     ) {
-        return ResponseEntity.ok(userPreferenceService.updateSettings(userId, request));
+        return ResponseEntity.ok(userPreferenceService.updateNotificationSettings(userId, request));
+    }
+
+    @PostMapping("/{userId}/notifications/test")
+    public ResponseEntity<UserPreferenceDto.TestNotificationResponse> sendTestNotification(
+            @PathVariable("userId") Long userId
+    ) {
+        return ResponseEntity.ok(userPreferenceService.sendTestNotification(userId));
     }
 
     @GetMapping("/watch-assets/options")

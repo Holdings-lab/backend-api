@@ -36,6 +36,14 @@ public class UserNotificationSettingEntity {
     @Column(name = "learning_reminder", nullable = false)
     private boolean learningReminder;
 
+    @Column(name = "policy_change_alert", nullable = false)
+    @Builder.Default
+    private boolean policyChangeAlert = true;
+
+    @Column(name = "briefing_time", nullable = false, length = 5)
+    @Builder.Default
+    private String briefingTime = "09:00";
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -43,5 +51,8 @@ public class UserNotificationSettingEntity {
     @PreUpdate
     public void touch() {
         this.updatedAt = LocalDateTime.now();
+        if (this.briefingTime == null || this.briefingTime.isBlank()) {
+            this.briefingTime = "09:00";
+        }
     }
 }
