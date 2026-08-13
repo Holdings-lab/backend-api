@@ -2,10 +2,10 @@ package com.project.server.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.project.server.dto.ActionDto;
+import com.project.server.security.CurrentUserId;
 import com.project.server.service.integration.MlPipelineTriggerService;
 import com.project.server.service.integration.MlSignalProxyService;
 import com.project.server.service.integration.RegressionTrainingService;
-import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -22,9 +22,9 @@ public class MlPipelineController {
     private final RegressionTrainingService regressionTrainingService;
     private final MlSignalProxyService mlSignalProxyService;
 
-    @PostMapping("/users/{userId}/sync")
+    @PostMapping("/sync")
     public ResponseEntity<ActionDto.ActionResponse> triggerMl(
-            @PathVariable @Positive Long userId
+            @CurrentUserId Long userId
     ) {
         return ResponseEntity.ok(mlPipelineTriggerService.triggerAndUpdateFeatured(userId));
     }

@@ -190,12 +190,12 @@ public class NewsroomService {
             summary = firstNonBlank(primary.getBodySummary(), primary.getBodyExcerpt(), headline);
             dailyChangePct = resolveDailyChangePct(primary);
             totalAssetImpactPct = resolveTotalAssetImpactPct(dailyChangePct, holding.weightPct());
-            detailPath = detailPath(userId, holding.ticker());
+            detailPath = detailPath(holding.ticker());
         } else if (type == NewsroomDto.BriefingType.Compact) {
             PolicyFeedDto.Card primary = matched.get(0);
             headline = firstNonBlank(primary.getBodySummary(), primary.getTitle(), holding.name() + " 관련 소식");
             summary = null;
-            detailPath = detailPath(userId, holding.ticker());
+            detailPath = detailPath(holding.ticker());
         } else {
             int quietDays = quietDaysFor(holding.ticker());
             headline = quietDays + "일째 특이사항 없음";
@@ -398,8 +398,8 @@ public class NewsroomService {
         return findings;
     }
 
-    private String detailPath(Long userId, String ticker) {
-        return "/api/users/" + userId + "/newsroom/" + ticker;
+    private String detailPath(String ticker) {
+        return "/api/newsroom/" + ticker;
     }
 
     private int quietDaysFor(String ticker) {

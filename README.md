@@ -47,11 +47,23 @@ api-server는 Spring Boot 기반의 메인 API 백엔드.
 	 - `crawler/`가 원천 데이터를 수집하고, `training/`이 피처링과 모델 학습/예측 실험을 담당.
 	 - 현재는 `data-ml/merged_finbert.csv`에서 원천 데이터 수집
 
+## 인증 / 인가
+
+- 로그인·회원가입·OAuth·refresh: `POST /api/auth/**` (공개). access JWT + opaque refresh 발급.
+- 사용자 데이터 API — `Authorization: Bearer <accessToken>` 필수.
+  - 계정/설정: `/api/me/**`
+  - 도메인: `/api/home`, `/api/events`, `/api/accounts`, `/api/portfolio`, `/api/holdings`, `/api/newsroom`, `/api/onboarding`, `/api/ml/**` 등
+  - path의 `{userId}`는 사용하지 않음. 서버가 JWT `sub`에서 userId를 추출(`@CurrentUserId`).
+- 관리자 API: `/admin/**` — `X-Admin-Key: <ADMIN_API_KEY>` 필수. path `{userId}`는 운영 대상으로 유지.
+- Webhook: `/api/internal/webhooks/**` — 기존 `X-Webhook-Secret` 유지.
+
+환경 변수: `JWT_SECRET`, `ADMIN_API_KEY` (`ADMIN_API_KEY` 미설정 시 `/admin`은 전부 401).
+
 ## 핵심 실행 흐름
 
-1. 클라이언트가 API 요청을 전송.
-2. 컨트롤러가 DTO로 요청을 받고 서비스에 위임.
-3. 서비스가 도메인 규칙을 적용하고 필요 시 외부 API(CODEF/ML/Firebase) 호출.
+1. 클라이언트가 API 요청을 전송(보호 API는 Bearer 또는 Admin Key 포함).
+2. 필터가 JWT/Admin Key를 검증한 뒤 컨트롤러가 DTO로 요청을 받고 서비스에 위임.
+3. 서비스가 도메인 규칙을 적용하고 필요 시 외부 API(Hyphen/ML/Firebase) 호출.
 4. 리포지토리가 DB를 조회/저장.
 5. 공통 응답 포맷(`ApiResponse`)으로 결과 반환.
 6. 예외 발생 시 전역 핸들러(`GlobalExceptionHandler`)에서 일관된 에러 응답 반환.

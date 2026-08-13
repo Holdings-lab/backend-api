@@ -2,6 +2,7 @@ package com.project.server.controller;
 
 import com.project.server.dto.ApiResponse;
 import com.project.server.dto.NewsroomDto;
+import com.project.server.security.CurrentUserId;
 import com.project.server.service.newsroom.NewsroomService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -14,16 +15,16 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/users")
+@RequestMapping("/api/newsroom")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class NewsroomController {
 
     private final NewsroomService newsroomService;
 
-    @GetMapping("/{userId}/newsroom")
+    @GetMapping
     public ResponseEntity<?> getNewsroom(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @RequestParam(required = false) String briefingDate
     ) {
         try {
@@ -34,9 +35,9 @@ public class NewsroomController {
         }
     }
 
-    @GetMapping("/{userId}/newsroom/{ticker}")
+    @GetMapping("/{ticker}")
     public ResponseEntity<NewsroomDto.DetailResponse> getNewsroomDetail(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @PathVariable String ticker,
             @RequestParam(required = false) String briefingDate
     ) {

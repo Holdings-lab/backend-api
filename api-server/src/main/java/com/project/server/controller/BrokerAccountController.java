@@ -1,6 +1,7 @@
 package com.project.server.controller;
 
 import com.project.server.dto.BrokerAccountDto;
+import com.project.server.security.CurrentUserId;
 import com.project.server.service.broker.AssetSyncService;
 import com.project.server.service.broker.BrokerAccountService;
 import com.project.server.service.broker.PortfolioAggregationService;
@@ -12,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/users")
+@RequestMapping("/api")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class BrokerAccountController {
@@ -23,132 +24,109 @@ public class BrokerAccountController {
 
     /**
      * 증권사 계좌 연동.
-     * path userId = 앱 사용자 ID, body hyphenUserId/hyphenUserPw = 증권사 로그인 자격증명.
+     * 인증 토큰의 userId = 앱 사용자 ID, body hyphenUserId/hyphenUserPw = 증권사 로그인 자격증명.
      */
-    @PostMapping("/{userId}/accounts")
+    @PostMapping("/accounts")
     public ResponseEntity<List<BrokerAccountDto.BrokerAccountResponse>> linkAccount(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @RequestBody BrokerAccountDto.LinkRequest request) {
         return ResponseEntity.ok(brokerAccountService.linkAccounts(userId, request));
     }
 
-    /**
-     * 사용자의 모든 연동 계좌 조회
-     */
-    @GetMapping("/{userId}/accounts")
+    /** 사용자 계좌 목록 조회 */
+    @GetMapping("/accounts")
     public ResponseEntity<List<BrokerAccountDto.BrokerAccountResponse>> getUserAccounts(
-            @PathVariable Long userId) {
+            @CurrentUserId Long userId) {
         List<BrokerAccountDto.BrokerAccountResponse> response = brokerAccountService.getUserAccounts(userId);
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 특정 계좌 상세 정보 조회
-     */
-    @GetMapping("/{userId}/accounts/{accountId}")
+    /** 계좌 상세 조회 */
+    @GetMapping("/accounts/{accountId}")
     public ResponseEntity<BrokerAccountDto.BrokerAccountDetailResponse> getAccount(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @PathVariable Long accountId) {
         BrokerAccountDto.BrokerAccountDetailResponse response = brokerAccountService.getAccount(userId, accountId);
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 계좌 연동 해제
-     */
-    @DeleteMapping("/{userId}/accounts/{accountId}")
+    /** 계좌 연동 해제 */
+    @DeleteMapping("/accounts/{accountId}")
     public ResponseEntity<BrokerAccountDto.UnlinkAccountResponse> unlinkAccount(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @PathVariable Long accountId) {
         BrokerAccountDto.UnlinkAccountResponse response = brokerAccountService.unlinkAccount(userId, accountId);
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Primary 계좌 설정
-     */
-    @PutMapping("/{userId}/accounts/{accountId}/primary")
+    /** 기본 계좌 설정 */
+    @PutMapping("/accounts/{accountId}/primary")
     public ResponseEntity<BrokerAccountDto.SetPrimaryAccountResponse> setPrimaryAccount(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @PathVariable Long accountId) {
         BrokerAccountDto.SetPrimaryAccountResponse response = brokerAccountService.setPrimaryAccount(userId, accountId);
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 계좌 동기화 요청
-     */
-    @PostMapping("/{userId}/accounts/{accountId}/sync")
+    /** 계좌 동기화 요청 */
+    @PostMapping("/accounts/{accountId}/sync")
     public ResponseEntity<BrokerAccountDto.SyncResponse> requestSync(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @PathVariable Long accountId) {
         BrokerAccountDto.SyncResponse response = assetSyncService.requestSync(userId, accountId);
-        // 비동기 처리의 경우 accepted(202)가 맞으나, 현재 동기 처리 방식이므로 ok(200) 반환
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 동기화 상태 조회
-     */
-    @GetMapping("/{userId}/accounts/{accountId}/sync/{syncId}")
+    /** 계좌 동기화 상태 조회 */
+    @GetMapping("/accounts/{accountId}/sync/{syncId}")
     public ResponseEntity<BrokerAccountDto.SyncStatusResponse> getSyncStatus(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @PathVariable Long accountId,
             @PathVariable Long syncId) {
         BrokerAccountDto.SyncStatusResponse response = assetSyncService.getSyncStatus(userId, accountId, syncId);
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 동기화 이력 조회
-     */
-    @GetMapping("/{userId}/accounts/{accountId}/sync-history")
+    /** 계좌 동기화 이력 조회 */
+    @GetMapping("/accounts/{accountId}/sync-history")
     public ResponseEntity<List<BrokerAccountDto.SyncHistoryResponse>> getSyncHistory(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @PathVariable Long accountId) {
         List<BrokerAccountDto.SyncHistoryResponse> response = assetSyncService.getSyncHistory(userId, accountId);
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 사용자 통합 포트폴리오 조회
-     */
-    @GetMapping("/{userId}/portfolio")
+    /** 포트폴리오 조회 */
+    @GetMapping("/portfolio")
     public ResponseEntity<BrokerAccountDto.CombinedPortfolioResponse> getCombinedPortfolio(
-            @PathVariable Long userId) {
+            @CurrentUserId Long userId) {
         BrokerAccountDto.CombinedPortfolioResponse response = portfolioAggregationService
                 .getUserCombinedPortfolio(userId);
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 특정 계좌 포트폴리오 조회
-     */
-    @GetMapping("/{userId}/accounts/{accountId}/portfolio")
+    /** 계좌별 포트폴리오 조회 */
+    @GetMapping("/accounts/{accountId}/portfolio")
     public ResponseEntity<BrokerAccountDto.AccountPortfolioDto> getAccountPortfolio(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @PathVariable Long accountId) {
         BrokerAccountDto.AccountPortfolioDto response = portfolioAggregationService.getAccountPortfolio(userId,
                 accountId);
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 자산 배분 분석
-     */
-    @GetMapping("/{userId}/portfolio/allocation")
+    /** 자산 배분 분석 */
+    @GetMapping("/portfolio/allocation")
     public ResponseEntity<Map<String, Object>> analyzeAssetAllocation(
-            @PathVariable Long userId) {
+            @CurrentUserId Long userId) {
         Map<String, Object> response = portfolioAggregationService.analyzeAssetAllocation(userId);
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * 포트폴리오 성과 분석
-     */
-    @GetMapping("/{userId}/portfolio/performance")
+    /** 성과 분석 */
+    @GetMapping("/portfolio/performance")
     public ResponseEntity<Map<String, Object>> analyzePerformance(
-            @PathVariable Long userId) {
+            @CurrentUserId Long userId) {
         Map<String, Object> response = portfolioAggregationService.analyzePerformance(userId);
         return ResponseEntity.ok(response);
     }

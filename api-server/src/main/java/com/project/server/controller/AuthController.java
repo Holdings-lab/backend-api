@@ -33,8 +33,8 @@ public class AuthController {
     }
 
     @PostMapping("/signup")
-    public ResponseEntity<AuthDto.AuthResponse> register(@Valid @RequestBody AuthDto.RegisterRequest request) {
-        AuthDto.AuthResponse response = authService.register(request);
+    public ResponseEntity<AuthDto.LoginResult> register(@Valid @RequestBody AuthDto.RegisterRequest request) {
+        AuthDto.LoginResult response = authService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 

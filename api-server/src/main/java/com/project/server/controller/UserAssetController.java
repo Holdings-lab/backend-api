@@ -1,6 +1,7 @@
 package com.project.server.controller;
 
 import com.project.server.dto.UserAssetDto;
+import com.project.server.security.CurrentUserId;
 import com.project.server.service.asset.DailyBriefingService;
 import com.project.server.service.asset.GoalService;
 import com.project.server.service.asset.HoldingsService;
@@ -12,7 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/users")
+@RequestMapping("/api")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class UserAssetController {
@@ -23,33 +24,33 @@ public class UserAssetController {
     private final UserSessionService userSessionService;
     private final InvestmentProfileService investmentProfileService;
 
-    @GetMapping("/{userId}/daily-briefing")
+    @GetMapping("/daily-briefing")
     public ResponseEntity<UserAssetDto.DailyBriefingResponse> getDailyBriefing(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @RequestParam(defaultValue = "false") boolean refresh) {
         return ResponseEntity.ok(dailyBriefingService.getDailyBriefing(userId, refresh));
     }
 
-    @GetMapping("/{userId}/holdings")
-    public ResponseEntity<UserAssetDto.HoldingsResponse> getHoldings(@PathVariable Long userId) {
+    @GetMapping("/holdings")
+    public ResponseEntity<UserAssetDto.HoldingsResponse> getHoldings(@CurrentUserId Long userId) {
         return ResponseEntity.ok(holdingsService.getHoldings(userId));
     }
 
-    @PatchMapping("/{userId}/goal")
+    @PatchMapping("/goal")
     public ResponseEntity<UserAssetDto.GoalResponse> updateGoal(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @RequestBody UserAssetDto.UpdateGoalRequest request) {
         return ResponseEntity.ok(goalService.updateGoal(userId, request));
     }
 
-    @GetMapping("/{userId}/goal-progress")
-    public ResponseEntity<UserAssetDto.GoalProgressResponse> getGoalProgress(@PathVariable Long userId) {
+    @GetMapping("/goal-progress")
+    public ResponseEntity<UserAssetDto.GoalProgressResponse> getGoalProgress(@CurrentUserId Long userId) {
         return ResponseEntity.ok(goalService.getGoalProgress(userId));
     }
 
-    @PostMapping("/{userId}/session/heartbeat")
+    @PostMapping("/session/heartbeat")
     public ResponseEntity<UserAssetDto.SessionHeartbeatResponse> heartbeat(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @RequestBody(required = false) UserAssetDto.SessionHeartbeatRequest request,
             @RequestParam(defaultValue = "false") boolean appOpen) {
         String deviceId = request != null ? request.getDeviceId() : null;
@@ -62,20 +63,20 @@ public class UserAssetController {
                 .build());
     }
 
-    @PostMapping("/{userId}/session/terminate")
-    public ResponseEntity<Void> terminateSession(@PathVariable Long userId) {
+    @PostMapping("/session/terminate")
+    public ResponseEntity<Void> terminateSession(@CurrentUserId Long userId) {
         userSessionService.terminate(userId);
         return ResponseEntity.ok().build();
     }
 
-    @GetMapping("/{userId}/investment-profile")
-    public ResponseEntity<UserAssetDto.InvestmentProfileResponse> getInvestmentProfile(@PathVariable Long userId) {
+    @GetMapping("/investment-profile")
+    public ResponseEntity<UserAssetDto.InvestmentProfileResponse> getInvestmentProfile(@CurrentUserId Long userId) {
         return ResponseEntity.ok(investmentProfileService.getProfile(userId));
     }
 
-    @PatchMapping("/{userId}/investment-profile")
+    @PatchMapping("/investment-profile")
     public ResponseEntity<UserAssetDto.InvestmentProfileResponse> updateInvestmentProfile(
-            @PathVariable Long userId,
+            @CurrentUserId Long userId,
             @RequestBody UserAssetDto.UpdateInvestmentProfileRequest request) {
         return ResponseEntity.ok(investmentProfileService.updateProfile(userId, request));
     }

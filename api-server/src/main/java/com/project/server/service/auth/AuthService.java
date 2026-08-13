@@ -93,7 +93,7 @@ public class AuthService {
     }
 
     @Transactional
-    public AuthDto.AuthResponse register(AuthDto.RegisterRequest request) {
+    public AuthDto.LoginResult register(AuthDto.RegisterRequest request) {
         String normalizedEmail = request.getEmail().trim().toLowerCase();
         String normalizedNickname = request.getNickname().trim();
 
@@ -126,10 +126,18 @@ public class AuthService {
 
         log.info("새 사용자 등록: {}", normalizedEmail);
 
-        return AuthDto.AuthResponse.builder()
+        String accessToken = jwtTokenProvider.generateAccessToken(saved.getId(), saved.getEmail());
+        String refreshToken = refreshTokenService.issue(saved.getId());
+
+        return AuthDto.LoginResult.builder()
                 .userId(saved.getId())
                 .email(saved.getEmail())
                 .nickname(saved.getNickname())
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .tokenType("Bearer")
+                .accessTokenExpiresIn(jwtTokenProvider.getAccessTokenExpirationSeconds())
+                .onboardingCompleted(onboardingService.isOnboardingCompleted(saved.getId()))
                 .build();
     }
 
