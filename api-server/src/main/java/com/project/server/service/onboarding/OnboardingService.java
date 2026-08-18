@@ -11,6 +11,7 @@ import com.project.server.repository.asset.UserInvestmentGoalRepository;
 import com.project.server.repository.asset.UserInvestmentProfileRepository;
 import com.project.server.repository.asset.UserOnboardingProgressRepository;
 import com.project.server.service.asset.AssetMetricsService;
+import com.project.server.service.asset.InterestSectorService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,9 +21,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Arrays;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -41,6 +40,7 @@ public class OnboardingService {
     private final UserOnboardingProgressRepository progressRepository;
     private final BrokerAccountRepository brokerAccountRepository;
     private final AssetMetricsService assetMetricsService;
+    private final InterestSectorService interestSectorService;
 
     public OnboardingDto.ProfileData updateProfile(Long userId, OnboardingDto.UpdateProfileRequest request) {
         validateUserId(userId);
@@ -233,24 +233,7 @@ public class OnboardingService {
         }
 
         if (request.getInterests() != null) {
-            if (request.getInterests().isEmpty() || request.getInterests().size() > 5) {
-                throw ApiException.badRequest("interests는 1개 이상 5개 이하여야 합니다.", "INVALID_INTERESTS_SIZE");
-            }
-            Set<InterestSector> sectors = new LinkedHashSet<>();
-            for (String raw : request.getInterests()) {
-                if (raw == null || raw.isBlank()) {
-                    throw ApiException.badRequest("interests에 빈 값이 포함될 수 없습니다.", "INVALID_INTEREST");
-                }
-                try {
-                    sectors.add(InterestSector.fromString(raw.trim()));
-                } catch (IllegalArgumentException e) {
-                    throw ApiException.badRequest("유효하지 않은 interest입니다: " + raw, "INVALID_INTEREST");
-                }
-            }
-            if (sectors.size() != request.getInterests().size()) {
-                throw ApiException.badRequest("interests에 중복 값이 있습니다.", "DUPLICATE_INTEREST");
-            }
-            profile.setInterests(sectors);
+            profile.setInterests(interestSectorService.parseInterests(request.getInterests()));
         }
 
         profileRepository.save(profile);

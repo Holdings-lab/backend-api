@@ -43,6 +43,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/newsroom",
             "/api/onboarding",
             "/api/watch-assets",
+            "/api/interest-sectors",
             "/api/ml"
     );
 

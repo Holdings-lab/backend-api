@@ -5,6 +5,7 @@ import com.project.server.dto.AuthDto;
 import com.project.server.dto.ActionDto;
 import com.project.server.dto.WatchAssetDto;
 import com.project.server.security.CurrentUserId;
+import com.project.server.service.asset.InterestSectorService;
 import com.project.server.service.auth.WatchAssetSelectionService;
 
 import jakarta.validation.Valid;
@@ -24,6 +25,7 @@ public class UserPreferenceController {
     private final UserPreferenceService userPreferenceService;
     private final AuthService authService;
     private final WatchAssetSelectionService watchAssetSelectionService;
+    private final InterestSectorService interestSectorService;
 
     @GetMapping
     public ResponseEntity<AuthDto.MeResponse> getMe(@CurrentUserId Long userId) {
@@ -56,6 +58,19 @@ public class UserPreferenceController {
             @RequestBody UserPreferenceDto.UpdateNotificationSettingsRequest request
     ) {
         return ResponseEntity.ok(userPreferenceService.updateNotificationSettings(userId, request));
+    }
+
+    @GetMapping("/settings/interests")
+    public ResponseEntity<UserPreferenceDto.InterestsResponse> getInterests(@CurrentUserId Long userId) {
+        return ResponseEntity.ok(interestSectorService.getUserInterests(userId));
+    }
+
+    @PatchMapping("/settings/interests")
+    public ResponseEntity<UserPreferenceDto.InterestsResponse> updateInterests(
+            @CurrentUserId Long userId,
+            @RequestBody UserPreferenceDto.UpdateInterestsRequest request
+    ) {
+        return ResponseEntity.ok(interestSectorService.updateUserInterests(userId, request));
     }
 
     @PostMapping("/notifications/test")

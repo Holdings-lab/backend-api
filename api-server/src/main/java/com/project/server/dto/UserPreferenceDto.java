@@ -64,6 +64,31 @@ public class UserPreferenceDto {
 
     @Data
     @Builder
+    public static class InterestItem {
+        private String code;
+        private String label;
+    }
+
+    @Data
+    @Builder
+    public static class InterestsResponse {
+        private java.util.List<InterestItem> interests;
+        private int count;
+    }
+
+    @Data
+    public static class UpdateInterestsRequest {
+        private java.util.List<String> interests;
+    }
+
+    @Data
+    @Builder
+    public static class InterestOptionsResponse {
+        private java.util.List<InterestItem> options;
+    }
+
+    @Data
+    @Builder
     public static class TestNotificationResponse {
         private String status;
         private String message;
