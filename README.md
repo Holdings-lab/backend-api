@@ -14,7 +14,7 @@ backend-api는 Holdings-lab의 백엔드 API와 ML 연동 구성을 통합 관�
 	- Holdings-lab의 data-ml 레포지토리
 	- Python 기반 크롤링, 전처리, 피처링, 모델 학습/재학습, 예측 실험을 수행하는 배치/실험 엔진
 	- api-server에서 트리거하는 ML 파이프라인과 연동되어 데이터 수집부터 예측 결과 생성까지 이어지는 흐름을 담당
-- 데모/보조 구성: pwa-client, postgresql, postman, scripts
+- 데모/보조 구성: postgresql, postman, scripts
 	- 기능 검증, 테스트 데이터 준비, 로컬 실험/시연용 구성
 
 ## API Server
@@ -232,12 +232,8 @@ curl http://<server-address>:8080/api/health
 - Holdings-lab의 data-ml 레포지토리.
 - api-server의 Trigger API와 연결되어 Python 기반 수집/예측 파이프라인을 담당.
 
-### 2. pwa-client
-- API 연동 검증용 프론트엔드 테스트베드(Vite 기반 PWA).
-- 인증/조회/설정 API를 실제 화면 흐름에서 확인할 때 사용.
-
-### 3. postgresql
+### 2. postgresql
 - 로컬/테스트 DB 구성을 위한 PostgreSQL 설정 모음.
 
-### 4. postman
+### 3. postman
 - API 수동 테스트를 위한 Postman 컬렉션 보관.
