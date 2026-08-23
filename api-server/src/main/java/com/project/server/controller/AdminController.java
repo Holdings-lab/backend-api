@@ -112,6 +112,22 @@ public class AdminController {
 
         // ==================== 상태 확인 ====================
 
+        /**
+         * 인증 헤더 토큰 판별.
+         * GET /admin/token
+         *
+         * Authorization: Bearer accessJwt 또는 adminApiKey
+         * 또는 X-Admin-Key: adminApiKey
+         *
+         * tokenType: NONE | USER | ADMIN
+         */
+        @GetMapping("/token")
+        public ResponseEntity<AdminDto.TokenInspectResponse> inspectToken(
+                        @RequestHeader(value = "Authorization", required = false) String authorization,
+                        @RequestHeader(value = "X-Admin-Key", required = false) String adminKey) {
+                return ResponseEntity.ok(adminService.inspectToken(authorization, adminKey));
+        }
+
         // ==================== 테스트 및 모의 데이터 ====================
 
         /**

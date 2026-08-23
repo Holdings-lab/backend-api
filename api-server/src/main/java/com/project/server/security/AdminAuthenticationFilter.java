@@ -32,7 +32,11 @@ public class AdminAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return path == null || !path.startsWith("/admin");
+        if (path == null || !path.startsWith("/admin")) {
+            return true;
+        }
+        // 토큰 판별 엔드포인트는 X-Admin-Key 없이 Authorization 만으로도 호출 가능
+        return path.equals("/admin/token") || path.startsWith("/admin/token/");
     }
 
     @Override

@@ -111,6 +111,30 @@ public class AdminDto {
         private List<UserDetailResponse> users;
     }
 
+    /**
+     * 인증 헤더 토큰 판별 결과.
+     * NONE: 유효하지 않거나 없음 / USER: 사용자 access JWT / ADMIN: 관리자 API 키
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TokenInspectResponse {
+        private String tokenType;
+        private TokenAccount account;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TokenAccount {
+        private Long id;
+        private String email;
+        private String nickname;
+        private String oauthProvider;
+    }
+
     @Data
     @Builder
     @NoArgsConstructor

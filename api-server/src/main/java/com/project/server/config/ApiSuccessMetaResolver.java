@@ -91,6 +91,8 @@ public class ApiSuccessMetaResolver {
                                         "알림이 성공적으로 전송되었습니다."),
                         new ApiSuccessMetaRule(HttpMethod.PUT, "/admin/accounts/*", "ADMIN-ACCOUNT-DETAILS-200",
                                         "계좌 상세 정보가 업데이트되었습니다."),
+                        new ApiSuccessMetaRule(HttpMethod.GET, "/admin/token", "ADMIN-TOKEN-INSPECT-200",
+                                        "토큰 판별에 성공했습니다."),
 
                         new ApiSuccessMetaRule(HttpMethod.PATCH, "/api/onboarding/profile",
                                         "ONBOARDING-PROFILE-200", "온보딩 프로필이 저장되었습니다."),

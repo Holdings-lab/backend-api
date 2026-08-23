@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.Notification;
+import com.project.server.config.AdminProperties;
 import com.project.server.domain.NotificationHistoryEntity;
 import com.project.server.domain.UserEntity;
 import com.project.server.domain.UserProfileEntity;
@@ -21,12 +22,15 @@ import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.repository.AccountBalanceRepository;
 import com.project.server.repository.AssetPositionRepository;
 import com.project.server.service.broker.BrokerAccountService;
+import com.project.server.service.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.util.List;
@@ -47,6 +51,8 @@ public class AdminService {
     private final BrokerAccountService brokerAccountService;
     private final PasswordEncoder passwordEncoder;
     private final ObjectMapper objectMapper;
+    private final JwtTokenProvider jwtTokenProvider;
+    private final AdminProperties adminProperties;
 
     @Transactional
     public AdminDto.CreateUserResponse createUser(AdminDto.CreateUserRequest request) {
@@ -405,5 +411,68 @@ public class AdminService {
             log.error("Failed to update account details for accountId={}", accountId, e);
             throw ApiException.internalServerError("계좌 정보 업데이트 실패", "ACCOUNT_DETAILS_UPDATE_ERROR");
         }
+    }
+
+    /**
+     * Authorization / X-Admin-Key 로 전달된 토큰이 무엇인지 판별
+     * NONE: 없거나 무효 / USER: 사용자 access JWT / ADMIN: 관리자 API 키
+     */
+    @Transactional(readOnly = true)
+    public AdminDto.TokenInspectResponse inspectToken(String authorizationHeader, String adminKeyHeader) {
+        if (isAdminCredential(adminKeyHeader) || isAdminCredential(extractBearerToken(authorizationHeader))) {
+            return AdminDto.TokenInspectResponse.builder()
+                    .tokenType("ADMIN")
+                    .account(null)
+                    .build();
+        }
+
+        String bearer = extractBearerToken(authorizationHeader);
+        if (bearer != null) {
+            try {
+                Long userId = jwtTokenProvider.validateAndGetUserId(bearer);
+                return userJpaRepository.findById(userId)
+                        .map(user -> AdminDto.TokenInspectResponse.builder()
+                                .tokenType("USER")
+                                .account(AdminDto.TokenAccount.builder()
+                                        .id(user.getId())
+                                        .email(user.getEmail())
+                                        .nickname(user.getNickname())
+                                        .oauthProvider(user.getOauthProvider())
+                                        .build())
+                                .build())
+                        .orElseGet(() -> AdminDto.TokenInspectResponse.builder()
+                                .tokenType("NONE")
+                                .account(null)
+                                .build());
+            } catch (ApiException ignored) {
+                // fall through to NONE
+            }
+        }
+
+        return AdminDto.TokenInspectResponse.builder()
+                .tokenType("NONE")
+                .account(null)
+                .build();
+    }
+
+    private boolean isAdminCredential(String provided) {
+        return adminProperties.hasApiKey()
+                && provided != null
+                && !provided.isBlank()
+                && MessageDigest.isEqual(
+                        adminProperties.getApiKey().getBytes(StandardCharsets.UTF_8),
+                        provided.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String extractBearerToken(String authorizationHeader) {
+        if (authorizationHeader == null || authorizationHeader.isBlank()) {
+            return null;
+        }
+        String trimmed = authorizationHeader.trim();
+        if (trimmed.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            String token = trimmed.substring(7).trim();
+            return token.isEmpty() ? null : token;
+        }
+        return null;
     }
 }

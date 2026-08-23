@@ -63,8 +63,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Long userId = jwtTokenProvider.validateAndGetUserId(token);
                 request.setAttribute(AUTH_USER_ID_ATTRIBUTE, userId);
             } catch (ApiException ex) {
-                writeError(response, ex);
-                return;
+                // /admin/token 은 admin 키·무효 토큰도 컨트롤러에서 판별
+                if (!isTokenInspectPath(path)) {
+                    writeError(response, ex);
+                    return;
+                }
             }
         } else if (authRequired) {
             writeError(response, ApiException.unauthorized(
@@ -73,6 +76,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private static boolean isTokenInspectPath(String path) {
+        return path != null && (path.equals("/admin/token") || path.startsWith("/admin/token/"));
     }
 
     private static boolean requiresAuthentication(String path) {
