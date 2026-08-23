@@ -24,11 +24,13 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -38,8 +40,7 @@ public class NewsroomService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter ISO_OFFSET = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
-    private static final BigDecimal HERO_WEIGHT_THRESHOLD = BigDecimal.TEN;
-    private static final BigDecimal COMPACT_WEIGHT_THRESHOLD = BigDecimal.valueOf(3);
+    private static final int HERO_TOP_N = 2;
     private static final String HEADER_TITLE = "뉴스룸";
     private static final String SECTION_TITLE = "내 보유 종목";
     private static final String SUCCESS_SUBTITLE = "다음 업데이트는 내일 아침이에요";
@@ -78,9 +79,11 @@ public class NewsroomService {
 
         stockLogoService.preloadLogos(holdings.stream().map(HoldingPosition::ticker).toList());
 
+        Set<String> heroTickers = resolveHeroTickers(holdings, cards);
+
         List<NewsroomDto.HoldingBriefing> briefings = new ArrayList<>();
         for (HoldingPosition holding : holdings) {
-            briefings.add(buildHoldingBriefing(userId, holding, cards));
+            briefings.add(buildHoldingBriefing(holding, cards, heroTickers));
         }
 
         return NewsroomDto.TabResponse.builder()
@@ -129,8 +132,7 @@ public class NewsroomService {
         }
 
         List<PolicyFeedDto.Card> matched = findCardsForTicker(normalizedTicker, cards);
-        NewsroomDto.BriefingType type = resolveBriefingType(holding.weightPct(), !matched.isEmpty());
-        if (type == NewsroomDto.BriefingType.Quiet) {
+        if (matched.isEmpty()) {
             throw ApiException.notFound(
                     "해당 종목의 상세 브리핑이 없습니다.", "NEWSROOM_DETAIL_NOT_FOUND");
         }
@@ -178,12 +180,14 @@ public class NewsroomService {
     }
 
     private NewsroomDto.HoldingBriefing buildHoldingBriefing(
-            Long userId,
             HoldingPosition holding,
-            List<PolicyFeedDto.Card> cards
+            List<PolicyFeedDto.Card> cards,
+            Set<String> heroTickers
     ) {
         List<PolicyFeedDto.Card> matched = findCardsForTicker(holding.ticker(), cards);
-        NewsroomDto.BriefingType type = resolveBriefingType(holding.weightPct(), !matched.isEmpty());
+        boolean hasNews = !matched.isEmpty();
+        NewsroomDto.BriefingType type = resolveBriefingType(
+                hasNews, heroTickers.contains(holding.ticker()));
 
         String headline;
         String summary;
@@ -221,6 +225,23 @@ public class NewsroomService {
                 .summary(summary)
                 .detailPath(detailPath)
                 .build();
+    }
+
+    /**
+     * 뉴스가 있는 보유 종목 중 비중 상위 {@link #HERO_TOP_N}개 티커를 Hero로 선정한다.
+     * holdings는 이미 비중 내림차순이므로 순서대로 스캔한다.
+     */
+    private Set<String> resolveHeroTickers(List<HoldingPosition> holdings, List<PolicyFeedDto.Card> cards) {
+        Set<String> heroTickers = new HashSet<>();
+        for (HoldingPosition holding : holdings) {
+            if (heroTickers.size() >= HERO_TOP_N) {
+                break;
+            }
+            if (!findCardsForTicker(holding.ticker(), cards).isEmpty()) {
+                heroTickers.add(holding.ticker());
+            }
+        }
+        return heroTickers;
     }
 
     private NewsroomDto.TabResponse emptyTabResponse(String asOfAt) {
@@ -338,17 +359,11 @@ public class NewsroomService {
         return haystack.contains(tickerUpper);
     }
 
-    private NewsroomDto.BriefingType resolveBriefingType(BigDecimal weightPct, boolean hasNews) {
+    private NewsroomDto.BriefingType resolveBriefingType(boolean hasNews, boolean isHero) {
         if (!hasNews) {
             return NewsroomDto.BriefingType.Quiet;
         }
-        if (weightPct.compareTo(HERO_WEIGHT_THRESHOLD) >= 0) {
-            return NewsroomDto.BriefingType.Hero;
-        }
-        if (weightPct.compareTo(COMPACT_WEIGHT_THRESHOLD) >= 0) {
-            return NewsroomDto.BriefingType.Compact;
-        }
-        return NewsroomDto.BriefingType.Quiet;
+        return isHero ? NewsroomDto.BriefingType.Hero : NewsroomDto.BriefingType.Compact;
     }
 
     private BigDecimal resolveDailyChangePct(PolicyFeedDto.Card card) {
