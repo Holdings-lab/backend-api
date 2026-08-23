@@ -67,7 +67,8 @@ CANONICAL_COLUMNS = [
     "release_date",
     "url",
     "title",
-    "body"
+    "body",
+    "thumbnail_url",
 ]
 
 HEADERS = {
@@ -472,7 +473,8 @@ def _collect_yahoo_records(target_date: date, ticker: str) -> list[dict[str, Any
                 "release_date": release_date,
                 "url": str(row.get("url", "")),
                 "title": str(row.get("title", "")),
-                "body": str(row.get("body", row.get("full_text", "")))
+                "body": str(row.get("body", row.get("full_text", ""))),
+                "thumbnail_url": str(row.get("thumbnail_url") or ""),
             }
         )
 
