@@ -748,6 +748,7 @@ def _build_policy_feed(payload: dict) -> dict:
                 "sector": _safe_str(row.get("sector")),
                 "title": _safe_str(row.get("title")),
                 "bodySummary": _safe_str(row.get("body_summary"), _safe_str(row.get("body"))),
+                "thumbnailUrl": _safe_str(row.get("thumbnail_url"), _safe_str(row.get("image_url"))),
                 "link": _safe_str(row.get("url"), _safe_str(row.get("link"))),
                 "matchedKeywordGroups": row_keywords,
                 "matchedKeywords": row_keyword_terms,

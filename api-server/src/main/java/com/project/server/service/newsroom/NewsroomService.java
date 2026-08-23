@@ -9,6 +9,7 @@ import com.project.server.repository.AssetPositionRepository;
 import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.service.asset.AssetMetricsService;
 import com.project.server.service.integration.PolicyFeedProxyService;
+import com.project.server.service.integration.StockLogoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -53,6 +54,7 @@ public class NewsroomService {
     private final AssetPositionRepository assetPositionRepository;
     private final AssetMetricsService assetMetricsService;
     private final PolicyFeedProxyService policyFeedProxyService;
+    private final StockLogoService stockLogoService;
 
     public NewsroomDto.TabResponse getNewsroom(Long userId, String briefingDate) {
         validateUserId(userId);
@@ -73,6 +75,8 @@ public class NewsroomService {
                     "뉴스 소스 조회 중 오류가 발생했습니다.",
                     unavailableTabResponse(asOfAt));
         }
+
+        stockLogoService.preloadLogos(holdings.stream().map(HoldingPosition::ticker).toList());
 
         List<NewsroomDto.HoldingBriefing> briefings = new ArrayList<>();
         for (HoldingPosition holding : holdings) {
@@ -147,16 +151,19 @@ public class NewsroomService {
                 headline);
         List<String> findings = buildFindings(matched);
 
+        String thumbnailUrl = resolveNewsThumbnail(matched);
+
         return NewsroomDto.DetailResponse.builder()
                 .stock(NewsroomDto.StockMeta.builder()
                         .ticker(holding.ticker())
                         .name(holding.name())
+                        .logoUrl(stockLogoService.getLogoUrl(holding.ticker()))
                         .dailyChangePct(dailyChangePct)
                         .weightPct(holding.weightPct())
                         .totalAssetImpactPct(totalAssetImpactPct)
                         .build())
                 .headline(headline)
-                .imageUrl(null)
+                .imageUrl(thumbnailUrl)
                 .aiJudgement(HARDCODED_AI_JUDGEMENT)
                 .summary(NewsroomDto.DetailSummary.builder()
                         .body(summaryBody)
@@ -205,6 +212,7 @@ public class NewsroomService {
         return NewsroomDto.HoldingBriefing.builder()
                 .ticker(holding.ticker())
                 .name(holding.name())
+                .logoUrl(stockLogoService.getLogoUrl(holding.ticker()))
                 .weightPct(holding.weightPct())
                 .briefingType(type)
                 .dailyChangePct(dailyChangePct)
@@ -377,6 +385,7 @@ public class NewsroomService {
                 .title(firstNonBlank(card.getTitle(), "원문 기사"))
                 .publisher(firstNonBlank(card.getSource(), "Unknown"))
                 .publishedAt(publishedAt)
+                .thumbnailUrl(card.getThumbnailUrl())
                 .url(card.getLink())
                 .build();
     }
@@ -396,6 +405,15 @@ public class NewsroomService {
             findings.add("관련 보도가 확인되었어요");
         }
         return findings;
+    }
+
+    private String resolveNewsThumbnail(List<PolicyFeedDto.Card> matched) {
+        for (PolicyFeedDto.Card card : matched) {
+            if (card.getThumbnailUrl() != null && !card.getThumbnailUrl().isBlank()) {
+                return card.getThumbnailUrl();
+            }
+        }
+        return null;
     }
 
     private String detailPath(String ticker) {

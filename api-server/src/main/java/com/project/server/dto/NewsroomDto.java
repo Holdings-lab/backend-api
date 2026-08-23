@@ -55,6 +55,7 @@ public class NewsroomDto {
     public static class HoldingBriefing {
         private String ticker;
         private String name;
+        private String logoUrl;
         private BigDecimal weightPct;
         private BriefingType briefingType;
         private BigDecimal dailyChangePct;
@@ -114,6 +115,7 @@ public class NewsroomDto {
     public static class StockMeta {
         private String ticker;
         private String name;
+        private String logoUrl;
         private BigDecimal dailyChangePct;
         private BigDecimal weightPct;
         private BigDecimal totalAssetImpactPct;
@@ -137,6 +139,7 @@ public class NewsroomDto {
         private String title;
         private String publisher;
         private String publishedAt;
+        private String thumbnailUrl;
         private String url;
     }
 

@@ -65,6 +65,8 @@ integration:
   ml:
     # data-ml Flask API 베이스 URL
     base-url: ${ML_API_BASE_URL:http://localhost:9000}
+  finnhub:
+    api-token: ${FINNHUB_API_TOKEN:}
 
 insight:
   heatmap:
