@@ -99,22 +99,22 @@ jwt:
   access-token-expiration-minutes: ${JWT_ACCESS_TOKEN_EXPIRATION_MINUTES:30}
   refresh-token-expiration-days: ${JWT_REFRESH_TOKEN_EXPIRATION_DAYS:14}
 
-# Hyphen API 설정 (개인계좌 증권사 조회)
-hyphen:
-  user-id: ${HYPHEN_USER_ID:}
-  hkey: ${HYPHEN_HKEY:}
-  oauth:
-    enabled: ${HYPHEN_OAUTH_ENABLED:true}
+# 한국투자증권 Open API
+kis:
+  mock:
+    app-key: ${KIS_MOCK_APP_KEY:}
+    app-secret: ${KIS_MOCK_APP_SECRET:}
+    cano: ${KIS_MOCK_CANO:}
+    acnt-prdt-cd: ${KIS_MOCK_ACNT_PRDT_CD:01}
   api:
-    mode: ${HYPHEN_API_MODE:live}  # live | stub
-    base-url: ${HYPHEN_API_BASE_URL:https://api.hyphen.im}
-    timeout-seconds: ${HYPHEN_API_TIMEOUT:12}
-    max-retries: ${HYPHEN_MAX_RETRIES:3}
-    gustation-enabled: ${HYPHEN_GUSTATION_ENABLED:false}
+    mode: ${KIS_MOCK_API_MODE:stub}  # real | paper | stub
+    real-base-url: ${KIS_MOCK_REAL_BASE_URL:https://openapi.koreainvestment.com:9443}
+    paper-base-url: ${KIS_MOCK_PAPER_BASE_URL:https://openapivts.koreainvestment.com:29443}
+    timeout-seconds: ${KIS_MOCK_API_TIMEOUT:12}
+    max-retries: ${KIS_MOCK_MAX_RETRIES:3}
   sync:
-    schedule-cron: ${HYPHEN_SYNC_CRON:0 0 12,18 * * *}  # 매일 정오, 18시
-    global-schedule-enabled: ${HYPHEN_SYNC_GLOBAL_SCHEDULE_ENABLED:false}
-    batch-size: ${HYPHEN_SYNC_BATCH_SIZE:10}
+    schedule-cron: ${KIS_MOCK_SYNC_CRON:0 0 12,18 * * *}  # 매일 정오, 18시
+    global-schedule-enabled: ${KIS_MOCK_SYNC_GLOBAL_SCHEDULE_ENABLED:false}
 
 asset:
   session:
@@ -129,7 +129,7 @@ asset:
     previous-day-snapshot-cron: ${ASSET_PREVIOUS_DAY_SNAPSHOT_CRON:0 30 8 * * *}
     all-time-high-scan-cron: ${ASSET_ATH_SCAN_CRON:0 30 6 * * 2-6}
 
-# AES-256 암호화 설정 (하이픈 로그인 정보 및 민감 정보 저장)
+# AES-256 암호화 설정 (한투 appkey/appsecret 및 민감 정보 저장)
 crypto:
   aes:
     # 256-bit Base64-encoded AES key

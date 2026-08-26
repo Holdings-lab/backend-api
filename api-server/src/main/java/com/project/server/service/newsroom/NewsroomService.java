@@ -285,7 +285,7 @@ public class NewsroomService {
 
     private List<HoldingPosition> loadHoldings(Long userId) {
         List<BrokerAccountEntity> connectedAccounts = brokerAccountRepository.findByUserId(userId).stream()
-                .filter(account -> account.getHyphenStatus() == BrokerAccountEntity.HyphenStatus.CONNECTED)
+                .filter(account -> account.getConnectionStatus() == BrokerAccountEntity.ConnectionStatus.CONNECTED)
                 .toList();
         if (connectedAccounts.isEmpty()) {
             return List.of();

@@ -38,20 +38,20 @@ public class BrokerAccountEntity {
     private String accountNickname;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "hyphen_status")
-    private HyphenStatus hyphenStatus;
-    
-    /** AES 암호화된 하이픈 증권사 로그인 사용자 ID */
-    @Column(name = "hyphen_user_id", length = 255)
-    private String hyphenUserId;
-    
-    /** AES 암호화된 하이픈 증권사 로그인 비밀번호 */
-    @Column(name = "hyphen_user_password", length = 500)
-    private String hyphenUserPassword;
+    @Column(name = "connection_status")
+    private ConnectionStatus connectionStatus;
 
-    /** AES 암호화된 증권사 계좌 비밀번호 (일부 증권사 조회 시 필요) */
-    @Column(name = "hyphen_account_password", length = 255)
-    private String hyphenAccountPassword;
+    /** AES 암호화된 한투 appkey. ENV(KIS_MOCK_*) 사용 시 null */
+    @Column(name = "app_key", length = 500)
+    private String appKey;
+
+    /** AES 암호화된 한투 appsecret. ENV 사용 시 null */
+    @Column(name = "app_secret", length = 500)
+    private String appSecret;
+
+    /** 한투 계좌상품코드 ACNT_PRDT_CD */
+    @Column(name = "account_product_code", length = 10)
+    private String accountProductCode;
 
     @Column(name = "account_owner_name", length = 100)
     private String accountOwnerName;
@@ -59,9 +59,13 @@ public class BrokerAccountEntity {
     @Column(name = "account_type", length = 20)
     private String accountType;
 
-    /** 하이픈 전계좌조회(0534) 계좌 1건 JSON */
-    @Column(name = "hyphen_account_details", columnDefinition = "TEXT")
-    private String hyphenAccountDetails;
+    /** 계좌 스냅샷 JSON */
+    @Column(name = "account_details", columnDefinition = "TEXT")
+    private String accountDetails;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "credential_source", length = 20)
+    private CredentialSource credentialSource;
 
     @Column(name = "is_primary")
     private Boolean isPrimary;
@@ -89,8 +93,11 @@ public class BrokerAccountEntity {
         if (syncCount == null) {
             syncCount = 0;
         }
-        if (hyphenStatus == null) {
-            hyphenStatus = HyphenStatus.PENDING;
+        if (connectionStatus == null) {
+            connectionStatus = ConnectionStatus.PENDING;
+        }
+        if (credentialSource == null) {
+            credentialSource = CredentialSource.ENV;
         }
     }
 
@@ -99,11 +106,16 @@ public class BrokerAccountEntity {
         updatedAt = LocalDateTime.now();
     }
 
-    public enum HyphenStatus {
-        CONNECTED,      // 정상 연동됨
-        PENDING,        // 연동 대기 중
-        EXPIRED,        // 토큰 만료
-        DISCONNECTED,   // 연동 해제
-        ERROR           // 에러 발생
+    public enum ConnectionStatus {
+        CONNECTED,
+        PENDING,
+        EXPIRED,
+        DISCONNECTED,
+        ERROR
+    }
+
+    public enum CredentialSource {
+        ENV,
+        USER
     }
 }

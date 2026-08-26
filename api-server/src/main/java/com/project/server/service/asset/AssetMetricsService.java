@@ -141,7 +141,7 @@ public class AssetMetricsService {
 
     private List<BrokerAccountEntity> getConnectedAccounts(Long userId) {
         return brokerAccountRepository.findByUserId(userId).stream()
-                .filter(account -> account.getHyphenStatus() == BrokerAccountEntity.HyphenStatus.CONNECTED)
+                .filter(account -> account.getConnectionStatus() == BrokerAccountEntity.ConnectionStatus.CONNECTED)
                 .toList();
     }
 

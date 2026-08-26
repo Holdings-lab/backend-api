@@ -6,7 +6,7 @@ import java.util.Optional;
 
 /**
  * 온보딩/연동에서 노출하는 증권사 목록.
- * code는 HyphenApiClient.BROKER_BANK_CODES 키와 동일해야 한다.
+ * code는 브로커 코드(KIS 등)와 동일해야 한다.
  */
 public enum SupportedBroker {
     KIS("한국투자증권", true),

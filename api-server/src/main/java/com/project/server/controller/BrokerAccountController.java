@@ -23,14 +23,23 @@ public class BrokerAccountController {
     private final PortfolioAggregationService portfolioAggregationService;
 
     /**
-     * 증권사 계좌 연동.
-     * 인증 토큰의 userId = 앱 사용자 ID, body hyphenUserId/hyphenUserPw = 증권사 로그인 자격증명.
+     * 한투 계좌 연동.
+     * body의 appKey/appSecret이 없으면 KIS_MOCK_* env 계좌를 현재 사용자에게 바인딩한다.
      */
     @PostMapping("/accounts")
     public ResponseEntity<List<BrokerAccountDto.BrokerAccountResponse>> linkAccount(
             @CurrentUserId Long userId,
-            @RequestBody BrokerAccountDto.LinkRequest request) {
+            @RequestBody(required = false) BrokerAccountDto.LinkRequest request) {
         return ResponseEntity.ok(brokerAccountService.linkAccounts(userId, request));
+    }
+
+    /** 한투 appkey/appsecret 교체. 비우면 ENV(KIS_MOCK_*) 폴백 */
+    @PatchMapping("/accounts/{accountId}/credentials")
+    public ResponseEntity<BrokerAccountDto.BrokerAccountResponse> updateCredentials(
+            @CurrentUserId Long userId,
+            @PathVariable Long accountId,
+            @RequestBody(required = false) BrokerAccountDto.CredentialsUpdateRequest request) {
+        return ResponseEntity.ok(brokerAccountService.updateCredentials(userId, accountId, request));
     }
 
     /** 사용자 계좌 목록 조회 */

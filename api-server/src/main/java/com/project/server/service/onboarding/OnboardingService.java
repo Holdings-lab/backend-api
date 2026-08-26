@@ -318,7 +318,7 @@ public class OnboardingService {
 
     private boolean hasLinkedAccount(Long userId) {
         return brokerAccountRepository.findByUserId(userId).stream()
-                .anyMatch(account -> account.getHyphenStatus() == BrokerAccountEntity.HyphenStatus.CONNECTED);
+                .anyMatch(account -> account.getConnectionStatus() == BrokerAccountEntity.ConnectionStatus.CONNECTED);
     }
 
     private UserOnboardingProgressEntity getOrCreateProgress(Long userId) {

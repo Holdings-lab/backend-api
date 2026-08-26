@@ -14,7 +14,7 @@ import java.util.Base64;
 
 /**
  * AES 256-bit 대칭 암호화/복호화 서비스
- * 하이픈 로그인 정보 및 민감 정보 보안 저장용
+ * 한투 appkey/appsecret 및 민감 정보 보안 저장용
  */
 @Service
 @Slf4j

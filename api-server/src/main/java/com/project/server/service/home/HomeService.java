@@ -537,7 +537,7 @@ public class HomeService {
                 if (assetMetricsService.hasConnectedAccounts(userId)) {
                         BigDecimal totalAsset = assetMetricsService.getAssetTotal(userId);
                         List<AssetPositionEntity> positions = brokerAccountRepository.findByUserId(userId).stream()
-                                        .filter(account -> account.getHyphenStatus() == BrokerAccountEntity.HyphenStatus.CONNECTED)
+                                        .filter(account -> account.getConnectionStatus() == BrokerAccountEntity.ConnectionStatus.CONNECTED)
                                         .flatMap(account -> assetPositionRepository.findByAccountId(account.getId()).stream())
                                         .toList();
 
@@ -735,7 +735,7 @@ public class HomeService {
                         return watchAssetCount;
                 }
                 long positionCount = brokerAccountRepository.findByUserId(userId).stream()
-                                .filter(account -> account.getHyphenStatus() == BrokerAccountEntity.HyphenStatus.CONNECTED)
+                                .filter(account -> account.getConnectionStatus() == BrokerAccountEntity.ConnectionStatus.CONNECTED)
                                 .flatMap(account -> assetPositionRepository.findByAccountId(account.getId()).stream())
                                 .map(position -> position.getSymbol() != null ? position.getSymbol() : position.getItemCode())
                                 .filter(symbol -> symbol != null && !symbol.isBlank())

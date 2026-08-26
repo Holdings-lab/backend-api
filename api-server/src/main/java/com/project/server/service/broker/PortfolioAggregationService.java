@@ -79,7 +79,7 @@ public class PortfolioAggregationService {
 
             List<BrokerAccountDto.AssetPositionDto> positionDtos = assetPositionRepository
                     .findByAccountId(account.getId()).stream()
-                    .map(HyphenFieldMapper::toPositionDto)
+                    .map(BrokerFieldMapper::toPositionDto)
                     .collect(Collectors.toList());
 
             byBroker.put(account.getBrokerName() + "_" + account.getAccountNumber(),
@@ -104,7 +104,7 @@ public class PortfolioAggregationService {
 
         List<BrokerAccountDto.AssetPositionDto> allPositions = accounts.stream()
                 .flatMap(account -> assetPositionRepository.findByAccountId(account.getId()).stream())
-                .map(HyphenFieldMapper::toPositionDto)
+                .map(BrokerFieldMapper::toPositionDto)
                 .collect(Collectors.toList());
 
         return BrokerAccountDto.CombinedPortfolioResponse.builder()
@@ -128,7 +128,7 @@ public class PortfolioAggregationService {
                 .orElse(null);
 
         List<BrokerAccountDto.AssetPositionDto> positionDtos = assetPositionRepository.findByAccountId(accountId).stream()
-                .map(HyphenFieldMapper::toPositionDto)
+                .map(BrokerFieldMapper::toPositionDto)
                 .collect(Collectors.toList());
 
         return BrokerAccountDto.AccountPortfolioDto.builder()

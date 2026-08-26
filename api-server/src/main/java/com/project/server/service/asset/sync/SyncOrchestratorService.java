@@ -76,7 +76,7 @@ public class SyncOrchestratorService {
     private void updateSyncState(Long userId) {
         UserSyncStateEntity state = syncStateRepository.findById(userId)
                 .orElse(UserSyncStateEntity.builder().userId(userId).build());
-        state.setLastHyphenSyncAt(LocalDateTime.now());
+        state.setLastBrokerSyncAt(LocalDateTime.now());
         state.setSessionStatus(sessionStore.isSessionActive(userId)
                 ? UserSyncStateEntity.SessionStatus.ACTIVE
                 : UserSyncStateEntity.SessionStatus.EXPIRED);

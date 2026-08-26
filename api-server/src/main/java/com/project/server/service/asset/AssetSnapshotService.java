@@ -33,8 +33,8 @@ public class AssetSnapshotService {
 
     public void capturePreviousDaySnapshots() {
         LocalDate snapshotDate = LocalDate.now(KST).minusDays(1);
-        List<Long> userIds = brokerAccountRepository.findByHyphenStatusIn(
-                        List.of(BrokerAccountEntity.HyphenStatus.CONNECTED)).stream()
+        List<Long> userIds = brokerAccountRepository.findByConnectionStatusIn(
+                        List.of(BrokerAccountEntity.ConnectionStatus.CONNECTED)).stream()
                 .map(BrokerAccountEntity::getUserId)
                 .distinct()
                 .toList();
@@ -49,8 +49,8 @@ public class AssetSnapshotService {
     }
 
     public void scanAllTimeHighs() {
-        List<Long> userIds = brokerAccountRepository.findByHyphenStatusIn(
-                        List.of(BrokerAccountEntity.HyphenStatus.CONNECTED)).stream()
+        List<Long> userIds = brokerAccountRepository.findByConnectionStatusIn(
+                        List.of(BrokerAccountEntity.ConnectionStatus.CONNECTED)).stream()
                 .map(BrokerAccountEntity::getUserId)
                 .distinct()
                 .toList();

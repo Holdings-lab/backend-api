@@ -23,8 +23,8 @@ public class UserSyncStateEntity {
     @Column(name = "user_id")
     private Long userId;
 
-    @Column(name = "last_hyphen_sync_at")
-    private LocalDateTime lastHyphenSyncAt;
+    @Column(name = "last_broker_sync_at")
+    private LocalDateTime lastBrokerSyncAt;
 
     @Column(name = "last_client_heartbeat_at")
     private LocalDateTime lastClientHeartbeatAt;

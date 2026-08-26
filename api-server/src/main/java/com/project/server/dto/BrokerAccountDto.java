@@ -18,35 +18,43 @@ public class BrokerAccountDto {
     @NoArgsConstructor
     @AllArgsConstructor
     /**
-     * 증권사 계좌 연동 요청.
-     * path의 userId는 앱 사용자 ID, body의 hyphenUserId는 증권사 로그인 ID.
+     * 한투 계좌 연동 요청.
+     * appKey/appSecret이 없으면 KIS_MOCK_* env를 사용.
      */
     public static class LinkRequest {
-        private String hyphenUserId;
-        private String hyphenUserPw;
-        private String hyphenLoginMethod; // ID, CERT
-        private String hyphenLoginRequired; // Y, N
-        private String hyphenAccountPassword;
+        private String brokerName;
         private List<String> brokerNames;
+        private String appKey;
+        private String appSecret;
+        private String accountNumber;
+        private String accountProductCode;
     }
 
-    /** 하이픈 in0104000534 전계좌조회 계좌 1건 */
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class HyphenAccountSnapshot {
+    public static class CredentialsUpdateRequest {
+        private String appKey;
+        private String appSecret;
+        private String accountNumber;
+        private String accountProductCode;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AccountSnapshot {
         private String accountDisplay;
         private String accountName;
         private String accountNick;
-        private String openDate;
-        private String endDate;
-        private String lastTradeDate;
         private String balance;
         private String currencyCode;
-        private String dormantYn;
         private String availableBalance;
         private String accountHolder;
+        private String accountProductCode;
+        private String cano;
     }
 
     @Data
@@ -63,7 +71,9 @@ public class BrokerAccountDto {
         private String accountType;
         private String status;
         private Boolean isPrimary;
-        private HyphenAccountSnapshot hyphenAccount;
+        private AccountSnapshot accountSnapshot;
+        private String credentialSource;
+        private Boolean hasCredentials;
         private LocalDateTime lastSyncedAt;
         private Integer syncCount;
         private LocalDateTime createdAt;
@@ -83,7 +93,9 @@ public class BrokerAccountDto {
         private String accountType;
         private String status;
         private Boolean isPrimary;
-        private HyphenAccountSnapshot hyphenAccount;
+        private AccountSnapshot accountSnapshot;
+        private String credentialSource;
+        private Boolean hasCredentials;
         private AccountBalanceDto latestBalance;
         private List<AssetPositionDto> positions;
         private LocalDateTime lastSyncedAt;
@@ -124,7 +136,6 @@ public class BrokerAccountDto {
         private SimpleAccountInfo previousPrimaryAccount;
     }
 
-    /** 하이픈 in0104000539 계좌 요약 + in0104000536 curBal */
     @Data
     @Builder
     @NoArgsConstructor
@@ -141,7 +152,6 @@ public class BrokerAccountDto {
         private LocalDateTime lastSyncedAt;
     }
 
-    /** 하이픈 in0104000539 itemDetail */
     @Data
     @Builder
     @NoArgsConstructor

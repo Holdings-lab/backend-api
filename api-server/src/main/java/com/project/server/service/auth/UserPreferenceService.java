@@ -45,8 +45,8 @@ public class UserPreferenceService {
                 .orElseGet(() -> deriveAvatarInitials(nickname));
 
         long accountCount = brokerAccountRepository.countByUserId(userId);
-        long expiredCount = brokerAccountRepository.countByUserIdAndHyphenStatus(
-                userId, BrokerAccountEntity.HyphenStatus.EXPIRED);
+        long expiredCount = brokerAccountRepository.countByUserIdAndConnectionStatus(
+                userId, BrokerAccountEntity.ConnectionStatus.EXPIRED);
 
         UserPreferenceDto.SettingsGoal goal = goalRepository.findById(userId)
                 .map(this::toGoalSummary)

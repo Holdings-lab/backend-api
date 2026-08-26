@@ -63,7 +63,7 @@ api-server는 Spring Boot 기반의 메인 API 백엔드.
 
 1. 클라이언트가 API 요청을 전송(보호 API는 Bearer 또는 Admin Key 포함).
 2. 필터가 JWT/Admin Key를 검증한 뒤 컨트롤러가 DTO로 요청을 받고 서비스에 위임.
-3. 서비스가 도메인 규칙을 적용하고 필요 시 외부 API(Hyphen/ML/Firebase) 호출.
+3. 서비스가 도메인 규칙을 적용하고 필요 시 외부 API(한국투자증권 Open API/ML/Firebase) 호출.
 4. 리포지토리가 DB를 조회/저장.
 5. 공통 응답 포맷(`ApiResponse`)으로 결과 반환.
 6. 예외 발생 시 전역 핸들러(`GlobalExceptionHandler`)에서 일관된 에러 응답 반환.

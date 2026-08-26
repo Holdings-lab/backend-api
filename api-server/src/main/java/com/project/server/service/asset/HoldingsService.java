@@ -34,7 +34,7 @@ public class HoldingsService {
         validateUserId(userId);
 
         List<BrokerAccountEntity> connectedAccounts = brokerAccountRepository.findByUserId(userId).stream()
-                .filter(account -> account.getHyphenStatus() == BrokerAccountEntity.HyphenStatus.CONNECTED)
+                .filter(account -> account.getConnectionStatus() == BrokerAccountEntity.ConnectionStatus.CONNECTED)
                 .toList();
 
         if (connectedAccounts.isEmpty()) {

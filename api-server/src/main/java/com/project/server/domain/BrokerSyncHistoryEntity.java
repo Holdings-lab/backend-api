@@ -10,15 +10,15 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "hyphen_sync_history", indexes = {
-    @Index(name = "idx_hyphen_sync_history_user_account_status", columnList = "user_id,account_id,status")
+@Table(name = "broker_sync_history", indexes = {
+    @Index(name = "idx_broker_sync_history_user_account_status", columnList = "user_id,account_id,status")
 })
 @Getter
 @Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class HyphenSyncHistoryEntity {
+public class BrokerSyncHistoryEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
