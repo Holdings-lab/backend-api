@@ -10,12 +10,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
-import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 
 /**
  * /admin/* 요청에 X-Admin-Key 헤더를 검증한다.
@@ -49,19 +46,13 @@ public class AdminAuthenticationFilter extends OncePerRequestFilter {
         }
 
         String provided = request.getHeader(ADMIN_KEY_HEADER);
-        if (!StringUtils.hasText(provided) || !constantTimeEquals(adminProperties.getApiKey(), provided)) {
+        if (!adminProperties.matches(provided)) {
             writeError(response, ApiException.unauthorized(
                     "유효한 관리자 API 키가 필요합니다.", "ADMIN_UNAUTHORIZED"));
             return;
         }
 
         filterChain.doFilter(request, response);
-    }
-
-    private static boolean constantTimeEquals(String expected, String actual) {
-        byte[] a = expected.getBytes(StandardCharsets.UTF_8);
-        byte[] b = actual.getBytes(StandardCharsets.UTF_8);
-        return MessageDigest.isEqual(a, b);
     }
 
     private void writeError(HttpServletResponse response, ApiException ex) throws IOException {

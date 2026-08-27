@@ -1,6 +1,7 @@
 package com.project.server.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.project.server.repository.UserJpaRepository;
 import com.project.server.security.AdminAuthenticationFilter;
 import com.project.server.security.CurrentUserIdArgumentResolver;
 import com.project.server.security.JwtAuthenticationFilter;
@@ -21,6 +22,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final AdminProperties adminProperties;
+    private final UserJpaRepository userJpaRepository;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -31,7 +33,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Bean
     public FilterRegistrationBean<JwtAuthenticationFilter> jwtAuthenticationFilter() {
         FilterRegistrationBean<JwtAuthenticationFilter> registration = new FilterRegistrationBean<>(
-                new JwtAuthenticationFilter(jwtTokenProvider, objectMapper));
+                new JwtAuthenticationFilter(jwtTokenProvider, adminProperties, userJpaRepository, objectMapper));
         registration.addUrlPatterns("/*");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
         registration.setName("jwtAuthenticationFilter");

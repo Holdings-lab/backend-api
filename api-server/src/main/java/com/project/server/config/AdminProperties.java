@@ -8,6 +8,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+
 @Slf4j
 @Getter
 @Setter
@@ -29,5 +32,18 @@ public class AdminProperties {
 
     public boolean hasApiKey() {
         return StringUtils.hasText(apiKey);
+    }
+
+    /**
+     * 전달된 값이 설정된 관리자 API 키와 일치하는지 비교한다.
+     * 키가 미설정이거나 값이 비어 있으면 false.
+     */
+    public boolean matches(String provided) {
+        if (!hasApiKey() || !StringUtils.hasText(provided)) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                apiKey.getBytes(StandardCharsets.UTF_8),
+                provided.getBytes(StandardCharsets.UTF_8));
     }
 }

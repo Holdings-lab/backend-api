@@ -29,8 +29,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.util.List;
@@ -455,12 +453,7 @@ public class AdminService {
     }
 
     private boolean isAdminCredential(String provided) {
-        return adminProperties.hasApiKey()
-                && provided != null
-                && !provided.isBlank()
-                && MessageDigest.isEqual(
-                        adminProperties.getApiKey().getBytes(StandardCharsets.UTF_8),
-                        provided.getBytes(StandardCharsets.UTF_8));
+        return adminProperties.matches(provided);
     }
 
     private static String extractBearerToken(String authorizationHeader) {
