@@ -8,9 +8,8 @@ import ast
 import hashlib
 import uuid
 from threading import Lock, Thread
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from pathlib import Path
-from zoneinfo import ZoneInfo
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
@@ -61,7 +60,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 ML_PREFIX = "/ml"
 BASE_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
+_POLICY_MONITOR_OUTPUT = (os.getenv("POLICY_MONITOR_OUTPUT_PATH") or "").strip()
 POLICY_FEED_CANDIDATES = [
+    *([Path(_POLICY_MONITOR_OUTPUT)] if _POLICY_MONITOR_OUTPUT else []),
     feature_csv_path("policy_updates_features.csv"),
     feature_csv_path("daily_news_features.csv"),
 ]
@@ -874,6 +875,7 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
             bis_max_pages=bis_max_pages or PIPELINE_BIS_MAX_PAGES,
             sleep_sec=sleep_sec or PIPELINE_SLEEP_SEC,
             target_date=parsed_target_date,
+            run_type="policy_monitor",
         )
 
         raw_count = int(crawl_result.get("raw_count") or 0)
@@ -953,20 +955,11 @@ def on_startup():
         logger.warning("[Startup] data-ml schema initialization failed: %s", error)
 
     def _scheduled_job():
-        # schedule runs at US/Eastern midnight; pipeline should process the previous day
-        try:
-            us_tz = ZoneInfo("America/New_York")
-            now_us = datetime.now(us_tz)
-            target_dt = (now_us.date() - timedelta(days=1))
-            target_date_str = target_dt.isoformat()
-        except Exception:
-            target_date_str = None
-
+        logger.info("[Scheduler] US Eastern midnight job start")
         result = run_pipeline(
             trigger="scheduler",
             bis_max_pages=PIPELINE_BIS_MAX_PAGES,
             sleep_sec=PIPELINE_SLEEP_SEC,
-            target_date=target_date_str,
         )
         if result.get("status") != "success":
             logger.warning("scheduled pipeline result: %s", result)

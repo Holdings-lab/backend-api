@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable, TypeVar
 
 import pandas as pd
 
@@ -16,7 +13,7 @@ PROJECT_ROOT_STR = str(PROJECT_ROOT)
 if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
-from crawler.collectors.policy_monitor import collect_policy_updates, run_postprocessing_pipeline
+from crawler.external import ExternalCrawlerError, run_apps_crawler_policy_monitor
 from crawler.support_legacy.data_paths import collected_csv_path, feature_csv_path
 from db.db import init_db, persist_policy_pipeline_outputs
 
@@ -26,55 +23,48 @@ logger = logging.getLogger(__name__)
 DEFAULT_BIS_MAX_PAGES = int(os.getenv("BIS_MAX_PAGES", "5"))
 DEFAULT_SLEEP_SEC = float(os.getenv("CRAWL_SLEEP_SEC", "1"))
 
-T = TypeVar("T")
 
-
-def _apply_runtime_env_overrides() -> None:
-    """
-    crawler 패키지 파일은 원본과 동일하게 유지하고,
-    Docker/운영 환경 값만 service 계층에서 주입한다.
-    """
-    ollama_base = (os.getenv("OLLAMA_BASE_URL") or "").strip()
-    ollama_model = (os.getenv("OLLAMA_MODEL") or "").strip()
-    if not ollama_base and not ollama_model:
-        return
-
+def _read_csv_or_empty(path: Path) -> pd.DataFrame:
+    if not path.exists() or path.stat().st_size == 0:
+        return pd.DataFrame()
     try:
-        import crawler.postprocessing.text_summarizer as text_summarizer
+        return pd.read_csv(path, encoding="utf-8-sig")
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
     except Exception as error:
-        logger.warning("[crawl] failed to import text_summarizer for OLLAMA override: %s", error)
-        return
-
-    if ollama_base:
-        base = ollama_base.rstrip("/")
-        text_summarizer.OLLAMA_BASE_URL = base
-        text_summarizer.OLLAMA_GENERATE_URL = f"{base}/api/generate"
-        text_summarizer.OLLAMA_TAGS_URL = f"{base}/api/tags"
-        logger.info("[crawl] OLLAMA_BASE_URL override applied: %s", base)
-
-    if ollama_model:
-        text_summarizer.OLLAMA_MODEL = ollama_model
-        logger.info("[crawl] OLLAMA_MODEL override applied: %s", ollama_model)
+        logger.warning("[crawl] failed to read csv %s: %s", path, error)
+        return pd.DataFrame()
 
 
-def _run_in_isolated_thread(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-    """
-    Playwright Sync API 는 running asyncio loop 가 있는 스레드에서 호출되면 실패한다.
-    FastAPI/uvicorn/APScheduler 경로와 무관하게 수집은 항상 별도 스레드에서 실행한다.
-    """
+def _policy_row_keys(frame: pd.DataFrame) -> set[tuple[str, str]]:
+    if frame is None or frame.empty:
+        return set()
+    if {"sector", "url"}.issubset(frame.columns):
+        return {
+            (str(sector), str(url))
+            for sector, url in zip(frame["sector"].tolist(), frame["url"].tolist())
+        }
+    if "url" in frame.columns:
+        return {("", str(url)) for url in frame["url"].tolist()}
+    return set()
 
-    def _call() -> T:
-        # 격리 스레드에 실수로 loop 가 붙어 있지 않은지 방어
-        try:
-            asyncio.get_running_loop()
-            raise RuntimeError("isolated crawl thread unexpectedly has a running event loop")
-        except RuntimeError as error:
-            if "unexpectedly has a running event loop" in str(error):
-                raise
-        return fn(*args, **kwargs)
 
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="crawl-isolated") as pool:
-        return pool.submit(_call).result()
+def _rows_not_in_keys(frame: pd.DataFrame, existing_keys: set[tuple[str, str]]) -> pd.DataFrame:
+    if frame is None or frame.empty:
+        return pd.DataFrame()
+    if not existing_keys:
+        return frame.copy()
+
+    if {"sector", "url"}.issubset(frame.columns):
+        mask = [
+            (str(sector), str(url)) not in existing_keys
+            for sector, url in zip(frame["sector"].tolist(), frame["url"].tolist())
+        ]
+        return frame.loc[mask].copy()
+    if "url" in frame.columns:
+        mask = [("", str(url)) not in existing_keys for url in frame["url"].tolist()]
+        return frame.loc[mask].copy()
+    return frame.copy()
 
 
 def run_crawl_now(
@@ -91,14 +81,11 @@ def run_crawl_now(
     """
     정책/시장 뉴스 수집 + 후처리.
 
-    collectors/postprocessing 을 사용한다.
-    레거시 keyword_config_path / doc_types 인자는 호환용으로만 받고 무시한다.
+    env 의 policy_monitor.py 를 한 사이클 실행한 뒤
+    신규 행만 data-ml CSV/DB 에 반영한다.
 
-    후처리 산출 스키마 (body 컬럼 없음):
-      sector, source, category, doc_type, release_date, url, title?,
-      body_summary, body_original_length, category_*, sentiment, embeddings
-
-    기본 경로:
+    경로:
+      - POLICY_MONITOR_PATH, POLICY_MONITOR_OUTPUT_PATH, CRAWLER_APP_ROOT
       - raw: data/crawler/collected/policy_updates_monitor.csv
       - processed: data/crawler/features/policy_updates_features.csv (누적 append)
     """
@@ -109,47 +96,54 @@ def run_crawl_now(
             doc_types,
         )
 
-    _apply_runtime_env_overrides()
     init_db()
     raw_csv = str(raw_csv_path) if raw_csv_path else collected_csv_path("policy_updates_monitor.csv")
     processed_csv = (
         str(processed_csv_path) if processed_csv_path else feature_csv_path("policy_updates_features.csv")
     )
+    existing_keys = _policy_row_keys(_read_csv_or_empty(Path(processed_csv)))
 
-    # EIA(Playwright sync) 포함 수집은 asyncio loop 밖 스레드에서 실행
-    raw_df = _run_in_isolated_thread(
-        collect_policy_updates,
-        bis_max_pages=bis_max_pages,
-        sleep_sec=sleep_sec,
-        target_date=target_date,
-    )
+    try:
+        crawl = run_apps_crawler_policy_monitor(
+            target_date=target_date,
+            bis_max_pages_override=bis_max_pages,
+            sleep_sec=sleep_sec,
+        )
+    except ExternalCrawlerError as error:
+        logger.warning("[crawl] apps/crawler policy_monitor failed: %s", error.message)
+        return {
+            "status": "failed",
+            "raw_count": 0,
+            "processed_count": 0,
+            "message": error.message,
+            "code": error.code,
+            "details": error.details,
+            "raw_csv_path": raw_csv,
+            "processed_csv_path": processed_csv,
+        }
 
-    if raw_df is None or raw_df.empty:
-        persist_result = persist_policy_pipeline_outputs(
-            raw_df=raw_df if raw_df is not None else pd.DataFrame(),
-            processed_df=pd.DataFrame(),
-            raw_csv_path=raw_csv,
-            processed_csv_path=processed_csv,
-            run_type=run_type,
-            append_processed=True,
+    processed_df = _read_csv_or_empty(Path(crawl["output_path"]))
+    new_rows = _rows_not_in_keys(processed_df, existing_keys)
+
+    if new_rows.empty:
+        logger.info(
+            "[crawl] apps/crawler finished with no new policy rows (output=%s)",
+            crawl["output_path"],
         )
         return {
             "status": "success",
             "raw_count": 0,
             "processed_count": 0,
+            "cycle_processed_count": 0,
             "message": "수집된 정책 뉴스가 없습니다.",
-            **persist_result,
+            "policy_features_path": crawl["output_path"],
+            "raw_csv_path": raw_csv,
+            "processed_csv_path": processed_csv,
         }
 
-    # 요약(Ollama)이 필요한 후처리 구간에만 컨테이너 자동 기동/종료
-    from ollama_lifecycle import ollama_session
-
-    with ollama_session():
-        processed_df = run_postprocessing_pipeline(raw_df)
-
     persist_result = persist_policy_pipeline_outputs(
-        raw_df=raw_df,
-        processed_df=processed_df,
+        raw_df=new_rows,
+        processed_df=new_rows,
         raw_csv_path=raw_csv,
         processed_csv_path=processed_csv,
         run_type=run_type,
@@ -159,5 +153,8 @@ def run_crawl_now(
     return {
         "status": "success",
         "message": "정책 뉴스 수집과 후처리를 완료했습니다.",
+        "policy_features_path": crawl["output_path"],
         **persist_result,
+        "raw_count": int(len(new_rows)),
+        "processed_count": int(len(new_rows)),
     }

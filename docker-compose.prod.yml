@@ -134,8 +134,9 @@ services:
       SIGNAL_OUTPUT_PATH: ${SIGNAL_OUTPUT_PATH:-/opt/riseai/data/predictions/qqq_latest_signal.json}
       SIGNAL_NEWS_FEATURES_PATH: ${SIGNAL_NEWS_FEATURES_PATH:-/opt/riseai/data/features/qqq/news_event_features.csv}
       SIGNAL_MARKET_FEATURES_PATH: ${SIGNAL_MARKET_FEATURES_PATH:-/opt/riseai/data/features/qqq/market_long_features.csv}
-      SIGNAL_CRAWL_OUTPUT_PATH: ${SIGNAL_CRAWL_OUTPUT_PATH:-/opt/riseai/data/crawler/policy_updates_features.csv}
       CRAWLER_APP_ROOT: ${CRAWLER_APP_ROOT:-/opt/riseai/apps/crawler}
+      POLICY_MONITOR_PATH: ${POLICY_MONITOR_PATH:-/opt/riseai/apps/crawler/crawler/collectors/policy_monitor.py}
+      POLICY_MONITOR_OUTPUT_PATH: ${POLICY_MONITOR_OUTPUT_PATH:-/opt/riseai/data/crawler/policy_updates_features.csv}
       SIGNAL_TIMEOUT_SEC: ${SIGNAL_TIMEOUT_SEC:-120}
       SIGNAL_CRAWL_TIMEOUT_SEC: ${SIGNAL_CRAWL_TIMEOUT_SEC:-1800}
       SIGNAL_REFRESH_FEATURES: ${SIGNAL_REFRESH_FEATURES:-true}

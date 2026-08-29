@@ -8,7 +8,8 @@ from apscheduler.triggers.cron import CronTrigger
 def build_scheduler(job_func) -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="America/New_York")
 
-    # 기본: 미국 동부 시간대에서 매일 자정(00:00)에 1회 실행
+    # 기본: America/New_York 매일 00:00. SCHEDULE_MODE=off 이면 비활성
+    # policy_monitor.py 실행
     if os.getenv("SCHEDULE_MODE", "daily").lower() == "off":
         return scheduler
 

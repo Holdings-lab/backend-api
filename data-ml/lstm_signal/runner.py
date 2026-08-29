@@ -13,13 +13,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 DEFAULT_ML_WORKER_ROOT = Path("/opt/riseai/apps/ml-worker")
-DEFAULT_CRAWLER_APP_ROOT = Path("/opt/riseai/apps/crawler")
 DEFAULT_PREDICTIONS_DIR = Path("/opt/riseai/data/predictions")
 DEFAULT_NEWS_FEATURES_PATH = Path("/opt/riseai/data/features/qqq/news_event_features.csv")
 DEFAULT_MARKET_FEATURES_PATH = Path("/opt/riseai/data/features/qqq/market_long_features.csv")
-DEFAULT_CRAWL_OUTPUT_PATH = Path("/opt/riseai/data/crawler/policy_updates_features.csv")
 DEFAULT_TIMEOUT_SEC = 120
-DEFAULT_CRAWL_TIMEOUT_SEC = 1800
 
 
 class SignalRunnerError(Exception):
@@ -93,68 +90,12 @@ def _market_features_path() -> Path:
     return Path(os.getenv("SIGNAL_MARKET_FEATURES_PATH", str(DEFAULT_MARKET_FEATURES_PATH)))
 
 
-def _crawler_app_root() -> Path:
-    return Path(os.getenv("CRAWLER_APP_ROOT", str(DEFAULT_CRAWLER_APP_ROOT)))
-
-
-def _crawl_output_path() -> Path:
-    return Path(os.getenv("SIGNAL_CRAWL_OUTPUT_PATH", str(DEFAULT_CRAWL_OUTPUT_PATH)))
-
-
-def _crawler_python(crawler_root: Path) -> str:
-    """Docker 안에서는 컨테이너 python + 마운트된 소스. 호스트에서는 crawler venv 우선."""
-    configured = (os.getenv("CRAWLER_PYTHON") or "").strip()
-    if _in_docker():
-        if configured and ".venv" in configured.replace("\\", "/"):
-            logger.warning(
-                "[Signal] Ignoring host crawler venv inside Docker (%s); using container python",
-                configured,
-            )
-        return sys.executable
-
-    if configured:
-        return configured
-
-    venv_python = crawler_root / ".venv" / "bin" / "python"
-    if venv_python.exists():
-        return str(venv_python)
-    return sys.executable
-
-
-def _crawl_timeout_sec() -> int:
-    raw = os.getenv("SIGNAL_CRAWL_TIMEOUT_SEC", str(DEFAULT_CRAWL_TIMEOUT_SEC))
-    try:
-        return max(60, int(raw))
-    except ValueError:
-        return DEFAULT_CRAWL_TIMEOUT_SEC
-
-
 def _timeout_sec() -> int:
     raw = os.getenv("SIGNAL_TIMEOUT_SEC", str(DEFAULT_TIMEOUT_SEC))
     try:
         return max(1, int(raw))
     except ValueError:
         return DEFAULT_TIMEOUT_SEC
-
-
-def _bis_max_pages(override: int | None = None) -> int:
-    if override is not None:
-        return max(1, int(override))
-    raw = os.getenv("BIS_MAX_PAGES", "5")
-    try:
-        return max(1, int(raw))
-    except ValueError:
-        return 5
-
-
-def _crawl_sleep_sec(override: float | None = None) -> float:
-    if override is not None:
-        return max(0.0, float(override))
-    raw = os.getenv("CRAWL_SLEEP_SEC", "1")
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        return 1.0
 
 
 def _tail(text: str, limit: int = 4000) -> str:
@@ -254,129 +195,29 @@ def prepare_features_from_crawl(
     ticker: str = "QQQ",
 ) -> dict[str, Any]:
     """
-    1) /opt/riseai/apps/crawler policy_monitor → policy_updates_features.csv
+    1) env 의 policy_monitor.py → POLICY_MONITOR_OUTPUT_PATH
     2) policy CSV → news_event_features.csv + market_long_features.csv
     3) 두 feature 경로를 predict_signal 입력으로 반환
     """
+    from crawler.external import ExternalCrawlerError, run_apps_crawler_policy_monitor
     from lstm_signal.build_qqq_features import FeatureBuildError, build_qqq_feature_csvs
 
     parsed_target_date = target_date if isinstance(target_date, date) else _parse_target_date(target_date)
-    crawler_root = _crawler_app_root()
-    crawl_output_path = _crawl_output_path()
     news_features_path = _news_features_path()
     market_features_path = _market_features_path()
-    wrapper_script = Path(__file__).resolve().parent / "external_policy_monitor.py"
-    python_bin = _crawler_python(crawler_root)
-
-    if not crawler_root.exists():
-        raise SignalRunnerError(
-            f"외부 crawler 루트가 없습니다: {crawler_root}",
-            code="ML_SIGNAL_CONFIG_ERROR",
-        )
-    policy_monitor = crawler_root / "crawler" / "collectors" / "policy_monitor.py"
-    if not policy_monitor.exists():
-        raise SignalRunnerError(
-            f"policy_monitor.py 를 찾을 수 없습니다: {policy_monitor}",
-            code="ML_SIGNAL_CONFIG_ERROR",
-        )
-    if not wrapper_script.exists():
-        raise SignalRunnerError(
-            f"external_policy_monitor.py 를 찾을 수 없습니다: {wrapper_script}",
-            code="ML_SIGNAL_CONFIG_ERROR",
-        )
-
-    crawl_output_path.parent.mkdir(parents=True, exist_ok=True)
     news_features_path.parent.mkdir(parents=True, exist_ok=True)
     market_features_path.parent.mkdir(parents=True, exist_ok=True)
 
-    command = [
-        python_bin,
-        "-B",
-        str(wrapper_script),
-        "--crawler-root",
-        str(crawler_root),
-        "--output-path",
-        str(crawl_output_path),
-        "--bis-max-pages",
-        str(_bis_max_pages(bis_max_pages)),
-        "--sleep-sec",
-        str(_crawl_sleep_sec(sleep_sec)),
-    ]
-    if parsed_target_date is not None:
-        command.extend(["--target-date", parsed_target_date.isoformat()])
-
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(crawler_root)
-    # 외부 crawler 가 localhost Ollama 를 쓰지 않도록
-    if not (env.get("OLLAMA_BASE_URL") or "").strip():
-        env["OLLAMA_BASE_URL"] = "http://ollama:11434"
-
-    logger.info(
-        "[Signal] preparing features via apps/crawler "
-        "(root=%s, output=%s, target_date=%s, cmd=%s)",
-        crawler_root,
-        crawl_output_path,
-        parsed_target_date,
-        " ".join(command),
-    )
-
     try:
-        from ollama_lifecycle import ollama_session
-
-        with ollama_session():
-            completed = subprocess.run(
-                command,
-                cwd=str(crawler_root),
-                env=env,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=_crawl_timeout_sec(),
-                check=False,
-            )
-    except SignalRunnerError:
-        raise
-    except subprocess.TimeoutExpired as error:
-        raise SignalRunnerError(
-            f"외부 크롤링이 {_crawl_timeout_sec()}초를 초과했습니다.",
-            code="ML_SIGNAL_CRAWL_FAILED",
-            details={
-                "stdout_tail": _tail(error.stdout or ""),
-                "stderr_tail": _tail(error.stderr or ""),
-            },
-        ) from error
-    except Exception as error:
-        raise SignalRunnerError(
-            f"크롤링/feature 추출에 실패했습니다: {error}",
-            code="ML_SIGNAL_CRAWL_FAILED",
-            details={"error": str(error)},
-        ) from error
-
-    if completed.returncode != 0:
-        raise SignalRunnerError(
-            "외부 policy_monitor 실행에 실패했습니다.",
-            code="ML_SIGNAL_CRAWL_FAILED",
-            details={
-                "exit_code": completed.returncode,
-                "stdout_tail": _tail(completed.stdout),
-                "stderr_tail": _tail(completed.stderr),
-                "command": command,
-            },
+        crawl = run_apps_crawler_policy_monitor(
+            target_date=parsed_target_date,
+            bis_max_pages_override=bis_max_pages,
+            sleep_sec=sleep_sec,
         )
+    except ExternalCrawlerError as error:
+        raise SignalRunnerError(error.message, code=error.code, details=error.details) from error
 
-    if not crawl_output_path.exists():
-        raise SignalRunnerError(
-            f"크롤 출력 CSV 가 없습니다: {crawl_output_path}",
-            code="ML_SIGNAL_CRAWL_FAILED",
-            details={"stdout_tail": _tail(completed.stdout)},
-        )
-
-    logger.info(
-        "[Signal] external crawl finished output=%s stdout_tail=%s",
-        crawl_output_path,
-        _tail(completed.stdout, 800),
-    )
+    crawl_output_path = Path(crawl["output_path"])
 
     try:
         built = build_qqq_feature_csvs(
