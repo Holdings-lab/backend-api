@@ -20,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -33,6 +34,7 @@ public class BrokerAccountService {
   private final BrokerAccountRepository brokerAccountRepository;
   private final AccountBalanceRepository accountBalanceRepository;
   private final AssetPositionRepository assetPositionRepository;
+  private final AssetSyncService assetSyncService;
   private final KisApiClient kisApiClient;
   private final KisCredentialResolver kisCredentialResolver;
   private final KisTokenService kisTokenService;
@@ -87,6 +89,7 @@ public class BrokerAccountService {
         .build();
 
     brokerAccountRepository.save(account);
+    persistHoldings(account, snapshot);
     onboardingService.markAccountLinked(userId);
     log.info("Linked KIS account: userId={}, accountNumber={}, source={}",
         userId, storedAccountNumber, source);
@@ -100,7 +103,7 @@ public class BrokerAccountService {
     BrokerAccountEntity account = validateAccountAccess(userId, accountId);
     String previousAppKey = decryptOptional(account.getAppKey());
     KisApiClient.KisCredential credential = kisCredentialResolver.fromCredentialUpdate(account, request);
-    kisApiClient.fetchBalance(credential);
+    KisApiClient.KisBalanceSnapshot snapshot = kisApiClient.fetchBalance(credential);
 
     if (previousAppKey != null) {
       kisTokenService.invalidate(previousAppKey);
@@ -125,6 +128,7 @@ public class BrokerAccountService {
       account.setAppSecret(null);
     }
     brokerAccountRepository.save(account);
+    persistHoldings(account, snapshot);
     log.info("Updated KIS credentials: userId={}, accountId={}, source={}", userId, accountId, source);
     return toResponse(account);
   }
@@ -277,6 +281,14 @@ public class BrokerAccountService {
       log.warn("Failed to parse account details JSON for accountId={}", entity.getId(), e);
       return null;
     }
+  }
+
+  private void persistHoldings(BrokerAccountEntity account, KisApiClient.KisBalanceSnapshot snapshot) {
+    assetSyncService.persistSnapshot(account, snapshot);
+    account.setAccountDetails(writeDetails(snapshot));
+    account.setLastSyncedAt(LocalDateTime.now());
+    account.setSyncCount((account.getSyncCount() != null ? account.getSyncCount() : 0) + 1);
+    brokerAccountRepository.save(account);
   }
 
   private String writeDetails(KisApiClient.KisBalanceSnapshot snapshot) {

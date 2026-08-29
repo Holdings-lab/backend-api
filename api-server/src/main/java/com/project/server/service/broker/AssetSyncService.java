@@ -143,11 +143,15 @@ public class AssetSyncService {
         log.info("Scheduled broker sync completed");
     }
 
+    public int persistSnapshot(BrokerAccountEntity account, KisApiClient.KisBalanceSnapshot snapshot) {
+        saveBalance(account, snapshot);
+        return savePositions(account, snapshot);
+    }
+
     private int performSync(BrokerAccountEntity account) {
         KisApiClient.KisCredential credential = kisCredentialResolver.resolve(account);
         KisApiClient.KisBalanceSnapshot snapshot = kisApiClient.fetchBalance(credential);
-        saveBalance(account, snapshot);
-        return savePositions(account, snapshot);
+        return persistSnapshot(account, snapshot);
     }
 
     private void saveBalance(BrokerAccountEntity account, KisApiClient.KisBalanceSnapshot snapshot) {
