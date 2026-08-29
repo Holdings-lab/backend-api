@@ -51,17 +51,17 @@ public class KisLiveClientService implements KisApiClient {
         String ctxAreaNk100 = "";
 
         for (int page = 0; page < 20; page++) {
-            JsonNode pageNode = callBalance(credential, ctxAreaFk100, ctxAreaNk100, page == 0);
+            JsonNode pageNode = callBalance(credential, ctxAreaFk100, ctxAreaNk100, page == 0, page > 0);
             if (firstPage == null) {
                 firstPage = pageNode;
             }
-            JsonNode output1 = pageNode.path("output1");
-            if (output1.isArray()) {
-                output1.forEach(mergedHoldings::add);
-            }
-            ctxAreaFk100 = pageNode.path("ctx_area_fk100").asText("").trim();
-            ctxAreaNk100 = pageNode.path("ctx_area_nk100").asText("").trim();
-            if (ctxAreaNk100.isEmpty()) {
+            appendHoldings(mergedHoldings, pageNode.path("output1"));
+            ctxAreaFk100 = pageNode.path("ctx_area_fk100").asText("");
+            ctxAreaNk100 = pageNode.path("ctx_area_nk100").asText("");
+            boolean hasMore = hasMorePages(pageNode, ctxAreaNk100);
+            ctxAreaFk100 = ctxAreaFk100.trim();
+            ctxAreaNk100 = ctxAreaNk100.trim();
+            if (!hasMore) {
                 break;
             }
         }
@@ -73,6 +73,13 @@ public class KisLiveClientService implements KisApiClient {
         if (firstPage != null && firstPage.has("output2")) {
             merged.set("output2", firstPage.get("output2"));
         }
+        if (mergedHoldings.isEmpty()) {
+            log.warn("[KIS] inquire-balance returned no holdings. CANO={} ACNT_PRDT_CD={} output1={} output2={}",
+                    credential.cano(),
+                    credential.accountProductCode(),
+                    firstPage == null ? null : firstPage.path("output1"),
+                    firstPage == null ? null : firstPage.path("output2"));
+        }
         return KisFieldMapper.toSnapshot(credential, merged);
     }
 
@@ -80,13 +87,14 @@ public class KisLiveClientService implements KisApiClient {
             KisCredential credential,
             String ctxAreaFk100,
             String ctxAreaNk100,
-            boolean allowTokenRetry) {
+            boolean allowTokenRetry,
+            boolean continuation) {
         int maxRetries = Math.max(1, kisProperties.getApi().getMaxRetries());
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 String accessToken = kisTokenService.getAccessToken(credential.appKey(), credential.appSecret());
                 String url = baseUrl() + BALANCE_PATH + "?" + balanceQuery(credential, ctxAreaFk100, ctxAreaNk100);
-                HttpRequest request = HttpRequest.newBuilder()
+                HttpRequest.Builder builder = HttpRequest.newBuilder()
                         .uri(URI.create(url))
                         .timeout(Duration.ofSeconds(kisProperties.getApi().getTimeoutSeconds()))
                         .header("content-type", "application/json; charset=utf-8")
@@ -95,10 +103,12 @@ public class KisLiveClientService implements KisApiClient {
                         .header("appsecret", credential.appSecret())
                         .header("tr_id", trId())
                         .header("custtype", "P")
-                        .GET()
-                        .build();
+                        .GET();
+                if (continuation) {
+                    builder.header("tr_cont", "N");
+                }
 
-                HttpResponse<String> response = httpClient.send(request,
+                HttpResponse<String> response = httpClient.send(builder.build(),
                         HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 
                 if ((response.statusCode() == 401 || isTokenExpired(response.body()))
@@ -122,6 +132,10 @@ public class KisLiveClientService implements KisApiClient {
 
                 JsonNode root = objectMapper.readTree(response.body());
                 KisFieldMapper.requireSuccess(root);
+                String trCont = response.headers().firstValue("tr_cont").orElse("");
+                if (root instanceof ObjectNode objectNode && !trCont.isBlank()) {
+                    objectNode.put("_tr_cont", trCont.trim());
+                }
                 return root;
             } catch (ApiException ae) {
                 throw ae;
@@ -182,6 +196,30 @@ public class KisLiveClientService implements KisApiClient {
                 || isBlank(credential.accountProductCode())) {
             throw ApiException.badRequest("한투 연동 정보가 누락되었습니다.", "KIS_CREDENTIAL_MISSING");
         }
+    }
+
+    private static void appendHoldings(ArrayNode target, JsonNode output1) {
+        if (output1 == null || output1.isMissingNode() || output1.isNull()) {
+            return;
+        }
+        if (output1.isTextual() && output1.asText().isBlank()) {
+            return;
+        }
+        if (output1.isArray()) {
+            output1.forEach(target::add);
+            return;
+        }
+        if (output1.isObject() && output1.size() > 0) {
+            target.add(output1);
+        }
+    }
+
+    private static boolean hasMorePages(JsonNode pageNode, String ctxAreaNk100) {
+        String trCont = pageNode.path("_tr_cont").asText("").trim();
+        if ("M".equalsIgnoreCase(trCont) || "F".equalsIgnoreCase(trCont)) {
+            return true;
+        }
+        return ctxAreaNk100 != null && !ctxAreaNk100.isBlank();
     }
 
     private static boolean isBlank(String value) {

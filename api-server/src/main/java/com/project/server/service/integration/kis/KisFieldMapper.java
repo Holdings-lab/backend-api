@@ -73,11 +73,8 @@ public final class KisFieldMapper {
 
     private static List<KisApiClient.KisPosition> toPositions(JsonNode output1) {
         List<KisApiClient.KisPosition> positions = new ArrayList<>();
-        if (output1 == null || !output1.isArray()) {
-            return positions;
-        }
-        for (JsonNode row : output1) {
-            String itemCode = text(row, "pdno");
+        for (JsonNode row : asRows(output1)) {
+            String itemCode = text(row, "pdno", "item_cd", "stck_shrn_iscd");
             if (itemCode == null || itemCode.isBlank()) {
                 continue;
             }
@@ -110,6 +107,21 @@ public final class KisFieldMapper {
             String code = root.path("msg_cd").asText("KIS_API_ERROR");
             throw ApiException.badRequest(msg, code);
         }
+    }
+
+    private static List<JsonNode> asRows(JsonNode node) {
+        List<JsonNode> rows = new ArrayList<>();
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return rows;
+        }
+        if (node.isArray()) {
+            node.forEach(rows::add);
+            return rows;
+        }
+        if (node.isObject() && node.size() > 0) {
+            rows.add(node);
+        }
+        return rows;
     }
 
     private static JsonNode firstObject(JsonNode node) {
