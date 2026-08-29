@@ -107,7 +107,7 @@ kis:
     cano: ${KIS_MOCK_CANO:}
     acnt-prdt-cd: ${KIS_MOCK_ACNT_PRDT_CD:01}
   api:
-    mode: ${KIS_MOCK_API_MODE:stub}  # real | paper | stub
+    mode: ${KIS_MOCK_API_MODE:paper}  # real | paper
     real-base-url: ${KIS_MOCK_REAL_BASE_URL:https://openapi.koreainvestment.com:9443}
     paper-base-url: ${KIS_MOCK_PAPER_BASE_URL:https://openapivts.koreainvestment.com:29443}
     timeout-seconds: ${KIS_MOCK_API_TIMEOUT:12}

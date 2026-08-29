@@ -15,12 +15,9 @@ public class KisProperties {
     private final Api api = new Api();
     private final Sync sync = new Sync();
 
-    public boolean isStubMode() {
-        return "stub".equalsIgnoreCase(api.getMode());
-    }
-
+    /** real이 아니면 모의투자(paper) 엔드포인트 */
     public boolean isPaperMode() {
-        return "paper".equalsIgnoreCase(api.getMode());
+        return !"real".equalsIgnoreCase(api.getMode());
     }
 
     @Getter
@@ -39,8 +36,8 @@ public class KisProperties {
     @Getter
     @Setter
     public static class Api {
-        /** real | paper | stub */
-        private String mode = "stub";
+        /** real | paper */
+        private String mode = "paper";
         private String realBaseUrl = "https://openapi.koreainvestment.com:9443";
         private String paperBaseUrl = "https://openapivts.koreainvestment.com:29443";
         private long timeoutSeconds = 12;

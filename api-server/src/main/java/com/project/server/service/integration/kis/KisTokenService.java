@@ -75,13 +75,13 @@ public class KisTokenService {
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 log.error("KIS token request failed: {} - {}", response.statusCode(), response.body());
-                throw ApiException.internalServerError("한투 OAuth 토큰 발급 실패", "KIS_OAUTH_ERROR");
+                throw ApiException.internalServerError("KIS 통신 오류가 발생했습니다.", "KIS_OAUTH_ERROR");
             }
 
             JsonNode tokenResponse = objectMapper.readTree(response.body());
             String accessToken = tokenResponse.path("access_token").asText(null);
             if (accessToken == null || accessToken.isBlank()) {
-                throw ApiException.internalServerError("한투 OAuth 토큰 응답이 올바르지 않습니다.", "KIS_OAUTH_ERROR");
+                throw ApiException.internalServerError("KIS 통신 오류가 발생했습니다.", "KIS_OAUTH_ERROR");
             }
 
             long expiresIn = tokenResponse.path("expires_in").asLong(86400L);
@@ -92,10 +92,10 @@ public class KisTokenService {
             throw ae;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw ApiException.internalServerError("한투 토큰 요청이 중단되었습니다.", "KIS_OAUTH_INTERRUPTED");
+            throw ApiException.internalServerError("KIS 통신 오류가 발생했습니다.", "KIS_OAUTH_INTERRUPTED");
         } catch (Exception e) {
             log.error("Failed to obtain KIS OAuth token", e);
-            throw ApiException.internalServerError("한투 OAuth 토큰 발급 실패", "KIS_OAUTH_ERROR");
+            throw ApiException.internalServerError("KIS 통신 오류가 발생했습니다.", "KIS_OAUTH_ERROR");
         }
     }
 

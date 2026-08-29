@@ -202,11 +202,11 @@ public final class KisFieldMapper {
 
     static void requireSuccess(JsonNode root) {
         if (root == null || root.isMissingNode()) {
-            throw ApiException.internalServerError("한투 API 응답이 올바르지 않습니다.", "INVALID_KIS_RESPONSE");
+            throw ApiException.internalServerError("KIS 통신 오류가 발생했습니다.", "INVALID_KIS_RESPONSE");
         }
         String rtCd = root.path("rt_cd").asText("0");
         if (!"0".equals(rtCd)) {
-            String msg = root.path("msg1").asText("한투 API 호출 실패");
+            String msg = root.path("msg1").asText("KIS 통신 오류가 발생했습니다.");
             String code = root.path("msg_cd").asText("KIS_API_ERROR");
             throw ApiException.badRequest(msg, code);
         }

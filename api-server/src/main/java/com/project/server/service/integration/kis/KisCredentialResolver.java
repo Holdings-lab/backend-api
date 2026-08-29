@@ -93,7 +93,7 @@ public class KisCredentialResolver {
         if (notBlank(account.getAppKey()) && notBlank(account.getAppSecret())) {
             return true;
         }
-        return kisProperties.isStubMode() || envKeysConfigured();
+        return envKeysConfigured();
     }
 
     public boolean envKeysConfigured() {
@@ -109,14 +109,6 @@ public class KisCredentialResolver {
                 defaultProduct());
         KisAccountParser.requireCano(parts);
 
-        if (kisProperties.isStubMode()) {
-            return new KisApiClient.KisCredential(
-                    firstNonBlank(kisProperties.getMock().getAppKey(), "stub-app-key"),
-                    firstNonBlank(kisProperties.getMock().getAppSecret(), "stub-app-secret"),
-                    parts.cano(),
-                    parts.productCode(),
-                    KisApiClient.BrokerAccountCredentialSource.ENV);
-        }
         if (!envKeysConfigured()) {
             throw ApiException.badRequest(
                     "한투 모의투자 앱키가 없습니다. KIS_MOCK_APP_KEY/KIS_MOCK_APP_SECRET를 설정하거나 요청에 appKey/appSecret을 넣으세요.",
@@ -135,7 +127,7 @@ public class KisCredentialResolver {
         if (notBlank(cano)) {
             return cano.trim();
         }
-        return kisProperties.isStubMode() ? "43123456" : null;
+        return null;
     }
 
     private String defaultProduct() {

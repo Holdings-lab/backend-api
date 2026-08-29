@@ -8,7 +8,6 @@ import com.project.server.config.KisProperties;
 import com.project.server.exception.ApiException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -26,8 +25,9 @@ import java.util.Map;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-@ConditionalOnExpression("!'stub'.equalsIgnoreCase('${kis.api.mode:stub}')")
 public class KisLiveClientService implements KisApiClient {
+
+    private static final String KIS_COMMUNICATION_ERROR = "KIS 통신 오류가 발생했습니다.";
 
     private static final String DOMESTIC_BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance";
     private static final String OVERSEAS_PRESENT_PATH = "/uapi/overseas-stock/v1/trading/inquire-present-balance";
@@ -199,7 +199,7 @@ public class KisLiveClientService implements KisApiClient {
                 Thread.sleep(100);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw ApiException.internalServerError("한투 API 요청이 중단되었습니다.", "KIS_INTERRUPTED");
+                throw ApiException.internalServerError(KIS_COMMUNICATION_ERROR, "KIS_INTERRUPTED");
             } catch (ApiException e) {
                 log.warn("[KIS] overseas inquire-balance skipped {}/{}: {}",
                         market.exchange(), market.currency(), e.getMessage());
@@ -296,7 +296,7 @@ public class KisLiveClientService implements KisApiClient {
 
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
                     log.error("KIS API error {} {}: {} - {}", trId, path, response.statusCode(), response.body());
-                    throw ApiException.internalServerError("한투 잔고조회에 실패했습니다.", "KIS_API_ERROR");
+                    throw ApiException.internalServerError(KIS_COMMUNICATION_ERROR, "KIS_API_ERROR");
                 }
 
                 JsonNode root = objectMapper.readTree(response.body());
@@ -310,15 +310,15 @@ public class KisLiveClientService implements KisApiClient {
                 throw ae;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw ApiException.internalServerError("한투 API 요청이 중단되었습니다.", "KIS_INTERRUPTED");
+                throw ApiException.internalServerError(KIS_COMMUNICATION_ERROR, "KIS_INTERRUPTED");
             } catch (Exception e) {
                 log.error("Error calling KIS API {} {}", trId, path, e);
                 if (attempt == maxRetries) {
-                    throw ApiException.internalServerError("한투 잔고조회에 실패했습니다.", "KIS_API_ERROR");
+                    throw ApiException.internalServerError(KIS_COMMUNICATION_ERROR, "KIS_API_ERROR");
                 }
             }
         }
-        throw ApiException.internalServerError("한투 잔고조회에 실패했습니다.", "KIS_API_ERROR");
+        throw ApiException.internalServerError(KIS_COMMUNICATION_ERROR, "KIS_API_ERROR");
     }
 
     private Map<String, String> domesticBalanceQuery(
