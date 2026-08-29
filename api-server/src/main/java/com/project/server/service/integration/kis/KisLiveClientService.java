@@ -29,9 +29,31 @@ import java.util.Map;
 @ConditionalOnExpression("!'stub'.equalsIgnoreCase('${kis.api.mode:stub}')")
 public class KisLiveClientService implements KisApiClient {
 
-    private static final String BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance";
-    private static final String PAPER_TR_ID = "VTTC8434R";
-    private static final String REAL_TR_ID = "TTTC8434R";
+    private static final String DOMESTIC_BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance";
+    private static final String OVERSEAS_PRESENT_PATH = "/uapi/overseas-stock/v1/trading/inquire-present-balance";
+    private static final String OVERSEAS_BALANCE_PATH = "/uapi/overseas-stock/v1/trading/inquire-balance";
+
+    private static final String DOMESTIC_PAPER_TR = "VTTC8434R";
+    private static final String DOMESTIC_REAL_TR = "TTTC8434R";
+    private static final String OVERSEAS_PRESENT_PAPER_TR = "VTRP6504R";
+    private static final String OVERSEAS_PRESENT_REAL_TR = "CTRP6504R";
+    private static final String OVERSEAS_BALANCE_PAPER_TR = "VTTS3012R";
+    private static final String OVERSEAS_BALANCE_REAL_TR = "TTTS3012R";
+
+    /**
+     * 모의는 NASD가 나스닥만, 실전은 미국전체. NYSE/AMEX도 따로 조회한다.
+     * 체결기준현재잔고가 실패했을 때만 사용.
+     */
+    private static final List<OverseasMarket> OVERSEAS_MARKETS = List.of(
+            new OverseasMarket("NASD", "USD"),
+            new OverseasMarket("NYSE", "USD"),
+            new OverseasMarket("AMEX", "USD"),
+            new OverseasMarket("SEHK", "HKD"),
+            new OverseasMarket("SHAA", "CNY"),
+            new OverseasMarket("SZAA", "CNY"),
+            new OverseasMarket("TKSE", "JPY"),
+            new OverseasMarket("HASE", "VND"),
+            new OverseasMarket("VNSE", "VND"));
 
     private final ObjectMapper objectMapper;
     private final KisProperties kisProperties;
@@ -44,24 +66,39 @@ public class KisLiveClientService implements KisApiClient {
     @Override
     public KisBalanceSnapshot fetchBalance(KisCredential credential) {
         validateCredential(credential);
+        KisBalanceSnapshot domestic = fetchDomesticBalance(credential);
+        OverseasHoldings overseas = fetchOverseasHoldings(credential);
+        if (overseas.positions().isEmpty()) {
+            log.info("[KIS] overseas holdings empty. CANO={} ACNT_PRDT_CD={}",
+                    credential.cano(), credential.accountProductCode());
+        } else {
+            log.info("[KIS] merged overseas holdings count={}", overseas.positions().size());
+        }
+        return KisFieldMapper.mergeOverseas(domestic, overseas.positions(), overseas.output3());
+    }
 
+    private KisBalanceSnapshot fetchDomesticBalance(KisCredential credential) {
         JsonNode firstPage = null;
         ArrayNode mergedHoldings = objectMapper.createArrayNode();
         String ctxAreaFk100 = "";
         String ctxAreaNk100 = "";
 
         for (int page = 0; page < 20; page++) {
-            JsonNode pageNode = callBalance(credential, ctxAreaFk100, ctxAreaNk100, page == 0, page > 0);
+            Map<String, String> query = domesticBalanceQuery(credential, ctxAreaFk100, ctxAreaNk100);
+            JsonNode pageNode = callGet(
+                    credential,
+                    DOMESTIC_BALANCE_PATH,
+                    domesticTrId(),
+                    query,
+                    page == 0,
+                    page > 0);
             if (firstPage == null) {
                 firstPage = pageNode;
             }
             appendHoldings(mergedHoldings, pageNode.path("output1"));
-            ctxAreaFk100 = pageNode.path("ctx_area_fk100").asText("");
-            ctxAreaNk100 = pageNode.path("ctx_area_nk100").asText("");
-            boolean hasMore = hasMorePages(pageNode, ctxAreaNk100);
-            ctxAreaFk100 = ctxAreaFk100.trim();
-            ctxAreaNk100 = ctxAreaNk100.trim();
-            if (!hasMore) {
+            ctxAreaFk100 = pageNode.path("ctx_area_fk100").asText("").trim();
+            ctxAreaNk100 = pageNode.path("ctx_area_nk100").asText("").trim();
+            if (!hasMorePages(pageNode, ctxAreaNk100)) {
                 break;
             }
         }
@@ -83,17 +120,149 @@ public class KisLiveClientService implements KisApiClient {
         return KisFieldMapper.toSnapshot(credential, merged);
     }
 
-    private JsonNode callBalance(
+    private OverseasHoldings fetchOverseasHoldings(KisCredential credential) {
+        try {
+            JsonNode present = fetchOverseasPresentBalance(credential);
+            List<KisPosition> positions = KisFieldMapper.toOverseasPresentPositions(present.path("output1"));
+            if (positions.isEmpty() && kisProperties.isPaperMode()) {
+                log.info("[KIS] paper inquire-present-balance empty, trying exchange inquire-balance");
+                List<KisPosition> byExchange = fetchOverseasByExchange(credential);
+                if (!byExchange.isEmpty()) {
+                    positions = byExchange;
+                }
+            }
+            return new OverseasHoldings(positions, present.path("output3"));
+        } catch (ApiException e) {
+            log.warn("[KIS] inquire-present-balance failed, falling back to exchange inquire-balance: {}",
+                    e.getMessage());
+        } catch (Exception e) {
+            log.warn("[KIS] inquire-present-balance failed, falling back to exchange inquire-balance", e);
+        }
+        return new OverseasHoldings(
+                fetchOverseasByExchange(credential),
+                com.fasterxml.jackson.databind.node.MissingNode.getInstance());
+    }
+
+    private JsonNode fetchOverseasPresentBalance(KisCredential credential) {
+        JsonNode firstPage = null;
+        ArrayNode mergedHoldings = objectMapper.createArrayNode();
+        JsonNode output3 = objectMapper.missingNode();
+
+        for (int page = 0; page < 20; page++) {
+            Map<String, String> query = new LinkedHashMap<>();
+            query.put("CANO", credential.cano());
+            query.put("ACNT_PRDT_CD", credential.accountProductCode());
+            query.put("WCRC_FRCR_DVSN_CD", "01");
+            query.put("NATN_CD", "000");
+            query.put("TR_MKET_CD", "00");
+            query.put("INQR_DVSN_CD", "00");
+
+            JsonNode pageNode = callGet(
+                    credential,
+                    OVERSEAS_PRESENT_PATH,
+                    overseasPresentTrId(),
+                    query,
+                    page == 0,
+                    page > 0);
+            if (firstPage == null) {
+                firstPage = pageNode;
+            }
+            appendHoldings(mergedHoldings, pageNode.path("output1"));
+            if (pageNode.has("output3") && !pageNode.path("output3").isMissingNode()) {
+                output3 = pageNode.get("output3");
+            }
+            String ctxNk = pageNode.path("ctx_area_nk200").asText(
+                    pageNode.path("ctx_area_nk100").asText("")).trim();
+            if (!hasMorePages(pageNode, ctxNk)) {
+                break;
+            }
+        }
+
+        ObjectNode merged = firstPage instanceof ObjectNode objectNode
+                ? objectNode.deepCopy()
+                : objectMapper.createObjectNode();
+        merged.set("output1", mergedHoldings);
+        if (output3 != null && !output3.isMissingNode()) {
+            merged.set("output3", output3);
+        }
+        return merged;
+    }
+
+    private List<KisPosition> fetchOverseasByExchange(KisCredential credential) {
+        Map<String, KisPosition> byCode = new LinkedHashMap<>();
+        for (OverseasMarket market : OVERSEAS_MARKETS) {
+            try {
+                JsonNode node = fetchOverseasBalanceForMarket(credential, market);
+                for (KisPosition position : KisFieldMapper.toOverseasBalancePositions(node.path("output1"))) {
+                    byCode.putIfAbsent(position.itemCode(), position);
+                }
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw ApiException.internalServerError("한투 API 요청이 중단되었습니다.", "KIS_INTERRUPTED");
+            } catch (ApiException e) {
+                log.warn("[KIS] overseas inquire-balance skipped {}/{}: {}",
+                        market.exchange(), market.currency(), e.getMessage());
+            } catch (Exception e) {
+                log.warn("[KIS] overseas inquire-balance skipped {}/{}",
+                        market.exchange(), market.currency(), e);
+            }
+        }
+        return new ArrayList<>(byCode.values());
+    }
+
+    private JsonNode fetchOverseasBalanceForMarket(KisCredential credential, OverseasMarket market) {
+        JsonNode firstPage = null;
+        ArrayNode mergedHoldings = objectMapper.createArrayNode();
+        String ctxAreaFk200 = "";
+        String ctxAreaNk200 = "";
+
+        for (int page = 0; page < 20; page++) {
+            Map<String, String> query = new LinkedHashMap<>();
+            query.put("CANO", credential.cano());
+            query.put("ACNT_PRDT_CD", credential.accountProductCode());
+            query.put("OVRS_EXCG_CD", market.exchange());
+            query.put("TR_CRCY_CD", market.currency());
+            query.put("CTX_AREA_FK200", ctxAreaFk200);
+            query.put("CTX_AREA_NK200", ctxAreaNk200);
+
+            JsonNode pageNode = callGet(
+                    credential,
+                    OVERSEAS_BALANCE_PATH,
+                    overseasBalanceTrId(),
+                    query,
+                    page == 0,
+                    page > 0);
+            if (firstPage == null) {
+                firstPage = pageNode;
+            }
+            appendHoldings(mergedHoldings, pageNode.path("output1"));
+            ctxAreaFk200 = pageNode.path("ctx_area_fk200").asText("").trim();
+            ctxAreaNk200 = pageNode.path("ctx_area_nk200").asText("").trim();
+            if (!hasMorePages(pageNode, ctxAreaNk200)) {
+                break;
+            }
+        }
+
+        ObjectNode merged = firstPage instanceof ObjectNode objectNode
+                ? objectNode.deepCopy()
+                : objectMapper.createObjectNode();
+        merged.set("output1", mergedHoldings);
+        return merged;
+    }
+
+    private JsonNode callGet(
             KisCredential credential,
-            String ctxAreaFk100,
-            String ctxAreaNk100,
+            String path,
+            String trId,
+            Map<String, String> query,
             boolean allowTokenRetry,
             boolean continuation) {
         int maxRetries = Math.max(1, kisProperties.getApi().getMaxRetries());
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 String accessToken = kisTokenService.getAccessToken(credential.appKey(), credential.appSecret());
-                String url = baseUrl() + BALANCE_PATH + "?" + balanceQuery(credential, ctxAreaFk100, ctxAreaNk100);
+                String url = baseUrl() + path + "?" + encodeQuery(query);
                 HttpRequest.Builder builder = HttpRequest.newBuilder()
                         .uri(URI.create(url))
                         .timeout(Duration.ofSeconds(kisProperties.getApi().getTimeoutSeconds()))
@@ -101,7 +270,7 @@ public class KisLiveClientService implements KisApiClient {
                         .header("authorization", "Bearer " + accessToken)
                         .header("appkey", credential.appKey())
                         .header("appsecret", credential.appSecret())
-                        .header("tr_id", trId())
+                        .header("tr_id", trId)
                         .header("custtype", "P")
                         .GET();
                 if (continuation) {
@@ -126,7 +295,7 @@ public class KisLiveClientService implements KisApiClient {
                 }
 
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                    log.error("KIS balance API error: {} - {}", response.statusCode(), response.body());
+                    log.error("KIS API error {} {}: {} - {}", trId, path, response.statusCode(), response.body());
                     throw ApiException.internalServerError("한투 잔고조회에 실패했습니다.", "KIS_API_ERROR");
                 }
 
@@ -143,7 +312,7 @@ public class KisLiveClientService implements KisApiClient {
                 Thread.currentThread().interrupt();
                 throw ApiException.internalServerError("한투 API 요청이 중단되었습니다.", "KIS_INTERRUPTED");
             } catch (Exception e) {
-                log.error("Error calling KIS balance API", e);
+                log.error("Error calling KIS API {} {}", trId, path, e);
                 if (attempt == maxRetries) {
                     throw ApiException.internalServerError("한투 잔고조회에 실패했습니다.", "KIS_API_ERROR");
                 }
@@ -152,7 +321,10 @@ public class KisLiveClientService implements KisApiClient {
         throw ApiException.internalServerError("한투 잔고조회에 실패했습니다.", "KIS_API_ERROR");
     }
 
-    private String balanceQuery(KisCredential credential, String ctxAreaFk100, String ctxAreaNk100) {
+    private Map<String, String> domesticBalanceQuery(
+            KisCredential credential,
+            String ctxAreaFk100,
+            String ctxAreaNk100) {
         Map<String, String> params = new LinkedHashMap<>();
         params.put("CANO", credential.cano());
         params.put("ACNT_PRDT_CD", credential.accountProductCode());
@@ -165,9 +337,13 @@ public class KisLiveClientService implements KisApiClient {
         params.put("PRCS_DVSN", "00");
         params.put("CTX_AREA_FK100", ctxAreaFk100 == null ? "" : ctxAreaFk100);
         params.put("CTX_AREA_NK100", ctxAreaNk100 == null ? "" : ctxAreaNk100);
+        return params;
+    }
 
+    private static String encodeQuery(Map<String, String> params) {
         List<String> pairs = new ArrayList<>();
-        params.forEach((key, value) -> pairs.add(key + "=" + URLEncoder.encode(value, StandardCharsets.UTF_8)));
+        params.forEach((key, value) -> pairs.add(key + "=" + URLEncoder.encode(
+                value == null ? "" : value, StandardCharsets.UTF_8)));
         return String.join("&", pairs);
     }
 
@@ -178,8 +354,16 @@ public class KisLiveClientService implements KisApiClient {
         return body.contains("EGW00123") || body.contains("기간이 만료된 token");
     }
 
-    private String trId() {
-        return kisProperties.isPaperMode() ? PAPER_TR_ID : REAL_TR_ID;
+    private String domesticTrId() {
+        return kisProperties.isPaperMode() ? DOMESTIC_PAPER_TR : DOMESTIC_REAL_TR;
+    }
+
+    private String overseasPresentTrId() {
+        return kisProperties.isPaperMode() ? OVERSEAS_PRESENT_PAPER_TR : OVERSEAS_PRESENT_REAL_TR;
+    }
+
+    private String overseasBalanceTrId() {
+        return kisProperties.isPaperMode() ? OVERSEAS_BALANCE_PAPER_TR : OVERSEAS_BALANCE_REAL_TR;
     }
 
     private String baseUrl() {
@@ -214,15 +398,21 @@ public class KisLiveClientService implements KisApiClient {
         }
     }
 
-    private static boolean hasMorePages(JsonNode pageNode, String ctxAreaNk100) {
+    private static boolean hasMorePages(JsonNode pageNode, String ctxAreaNk) {
         String trCont = pageNode.path("_tr_cont").asText("").trim();
         if ("M".equalsIgnoreCase(trCont) || "F".equalsIgnoreCase(trCont)) {
             return true;
         }
-        return ctxAreaNk100 != null && !ctxAreaNk100.isBlank();
+        return ctxAreaNk != null && !ctxAreaNk.isBlank();
     }
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private record OverseasMarket(String exchange, String currency) {
+    }
+
+    private record OverseasHoldings(List<KisPosition> positions, JsonNode output3) {
     }
 }

@@ -5,6 +5,8 @@ import com.project.server.domain.BrokerAccountEntity;
 import com.project.server.dto.BrokerAccountDto;
 import com.project.server.exception.ApiException;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,7 +35,109 @@ public final class KisFieldMapper {
                 firstDecimal(output2, "pchs_amt_smtl_amt", "pchs_amt_smtl"),
                 firstDecimal(output2, "evlu_pfls_smtl_amt"),
                 firstDecimal(output2, "asst_icdc_erng_rt", "evlu_pfls_rt"),
-                toPositions(output1));
+                toDomesticPositions(output1));
+    }
+
+    public static KisApiClient.KisBalanceSnapshot mergeOverseas(
+            KisApiClient.KisBalanceSnapshot domestic,
+            List<KisApiClient.KisPosition> overseasPositions,
+            JsonNode overseasOutput3) {
+        List<KisApiClient.KisPosition> merged = new ArrayList<>();
+        if (domestic.positions() != null) {
+            merged.addAll(domestic.positions());
+        }
+        if (overseasPositions != null) {
+            merged.addAll(overseasPositions);
+        }
+
+        JsonNode output3 = firstObject(overseasOutput3);
+        BigDecimal overseasCash = firstDecimal(output3, "tot_dncl_amt", "dncl_amt");
+        BigDecimal overseasEval = firstDecimal(output3, "evlu_amt_smtl", "evlu_amt_smtl_amt", "frcr_evlu_tota");
+        BigDecimal overseasPurchase = firstDecimal(output3, "pchs_amt_smtl", "pchs_amt_smtl_amt");
+        BigDecimal overseasGain = firstDecimal(output3, "evlu_pfls_amt_smtl", "tot_evlu_pfls_amt");
+        BigDecimal overseasTotal = firstDecimal(output3, "tot_asst_amt");
+        if (overseasTotal.compareTo(BigDecimal.ZERO) == 0) {
+            overseasTotal = overseasEval.add(overseasCash);
+        }
+
+        BigDecimal cash = nz(domestic.cashBalance()).add(overseasCash);
+        BigDecimal evaluation = nz(domestic.evaluationAmount()).add(overseasEval);
+        BigDecimal purchase = nz(domestic.purchaseAmount()).add(overseasPurchase);
+        BigDecimal gainLoss = nz(domestic.gainLoss()).add(overseasGain);
+        BigDecimal total = nz(domestic.totalAssetValue()).add(overseasTotal);
+        BigDecimal gainLossRate = purchase.compareTo(BigDecimal.ZERO) > 0
+                ? gainLoss.divide(purchase, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
+                : nz(domestic.gainLossRate());
+
+        return new KisApiClient.KisBalanceSnapshot(
+                domestic.cano(),
+                domestic.accountProductCode(),
+                domestic.accountDisplay(),
+                cash,
+                total,
+                evaluation,
+                purchase,
+                gainLoss,
+                gainLossRate,
+                merged);
+    }
+
+    public static List<KisApiClient.KisPosition> toOverseasPresentPositions(JsonNode output1) {
+        List<KisApiClient.KisPosition> positions = new ArrayList<>();
+        for (JsonNode row : asRows(output1)) {
+            String itemCode = text(row, "pdno", "ovrs_pdno", "std_pdno");
+            if (itemCode == null || itemCode.isBlank()) {
+                continue;
+            }
+            BigDecimal quantity = firstDecimal(row, "cblc_qty13", "ovrs_cblc_qty", "cblc_qty", "hldg_qty");
+            if (quantity.compareTo(BigDecimal.ZERO) == 0) {
+                continue;
+            }
+            positions.add(new KisApiClient.KisPosition(
+                    itemCode,
+                    defaultString(text(row, "prdt_name", "ovrs_item_name", "item_name"), itemCode),
+                    "STOCK",
+                    itemCode,
+                    quantity,
+                    firstDecimal(row, "avg_unpr3", "pchs_avg_pric"),
+                    firstDecimal(row, "ovrs_now_pric1", "now_pric2", "prpr"),
+                    firstDecimal(row, "frcr_evlu_amt2", "ovrs_stck_evlu_amt", "evlu_amt"),
+                    firstDecimal(row, "pchs_rmnd_wcrc_amt", "frcr_pchs_amt", "frcr_pchs_amt1", "pchs_amt"),
+                    firstDecimal(row, "evlu_pfls_amt2", "frcr_evlu_pfls_amt", "evlu_pfls_amt"),
+                    firstDecimal(row, "evlu_pfls_rt1", "evlu_pfls_rt"),
+                    defaultString(text(row, "buy_crcy_cd", "crcy_cd", "tr_crcy_cd"), "USD"),
+                    "Y"));
+        }
+        return positions;
+    }
+
+    public static List<KisApiClient.KisPosition> toOverseasBalancePositions(JsonNode output1) {
+        List<KisApiClient.KisPosition> positions = new ArrayList<>();
+        for (JsonNode row : asRows(output1)) {
+            String itemCode = text(row, "ovrs_pdno", "pdno", "std_pdno");
+            if (itemCode == null || itemCode.isBlank()) {
+                continue;
+            }
+            BigDecimal quantity = firstDecimal(row, "ovrs_cblc_qty", "cblc_qty", "hldg_qty");
+            if (quantity.compareTo(BigDecimal.ZERO) == 0) {
+                continue;
+            }
+            positions.add(new KisApiClient.KisPosition(
+                    itemCode,
+                    defaultString(text(row, "ovrs_item_name", "prdt_name", "item_name"), itemCode),
+                    "STOCK",
+                    itemCode,
+                    quantity,
+                    firstDecimal(row, "pchs_avg_pric", "avg_unpr3"),
+                    firstDecimal(row, "now_pric2", "ovrs_now_pric1", "prpr"),
+                    firstDecimal(row, "ovrs_stck_evlu_amt", "frcr_evlu_amt2", "evlu_amt"),
+                    firstDecimal(row, "frcr_pchs_amt1", "frcr_pchs_amt", "pchs_amt"),
+                    firstDecimal(row, "frcr_evlu_pfls_amt", "evlu_pfls_amt2", "evlu_pfls_amt"),
+                    firstDecimal(row, "evlu_pfls_rt", "evlu_pfls_rt1"),
+                    defaultString(text(row, "tr_crcy_cd", "buy_crcy_cd", "crcy_cd"), "USD"),
+                    "Y"));
+        }
+        return positions;
     }
 
     public static Map<String, Object> toAccountDetails(KisApiClient.KisBalanceSnapshot snapshot) {
@@ -71,14 +175,13 @@ public final class KisFieldMapper {
                 .build();
     }
 
-    private static List<KisApiClient.KisPosition> toPositions(JsonNode output1) {
+    private static List<KisApiClient.KisPosition> toDomesticPositions(JsonNode output1) {
         List<KisApiClient.KisPosition> positions = new ArrayList<>();
         for (JsonNode row : asRows(output1)) {
             String itemCode = text(row, "pdno", "item_cd", "stck_shrn_iscd");
             if (itemCode == null || itemCode.isBlank()) {
                 continue;
             }
-            String overseasYn = itemCode.replaceAll("[^0-9]", "").length() == 6 ? "N" : "Y";
             positions.add(new KisApiClient.KisPosition(
                     itemCode,
                     text(row, "prdt_name"),
@@ -92,7 +195,7 @@ public final class KisFieldMapper {
                     decimal(row, "evlu_pfls_amt"),
                     decimal(row, "evlu_pfls_rt"),
                     "KRW",
-                    overseasYn));
+                    "N"));
         }
         return positions;
     }
@@ -196,5 +299,9 @@ public final class KisFieldMapper {
 
     private static String defaultString(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static BigDecimal nz(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 }
