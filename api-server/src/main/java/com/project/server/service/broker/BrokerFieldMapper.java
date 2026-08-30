@@ -26,6 +26,10 @@ public final class BrokerFieldMapper {
                 .build();
     }
 
+    public static boolean isOverseas(AssetPositionEntity entity) {
+        return entity != null && "Y".equalsIgnoreCase(entity.getOverseasYn());
+    }
+
     public static BrokerAccountDto.AssetPositionDto toPositionDto(AssetPositionEntity entity) {
         return BrokerAccountDto.AssetPositionDto.builder()
                 .itemCode(entity.getItemCode() != null ? entity.getItemCode() : entity.getSymbol())

@@ -79,6 +79,7 @@ public class PortfolioAggregationService {
 
             List<BrokerAccountDto.AssetPositionDto> positionDtos = assetPositionRepository
                     .findByAccountId(account.getId()).stream()
+                    .filter(BrokerFieldMapper::isOverseas)
                     .map(BrokerFieldMapper::toPositionDto)
                     .collect(Collectors.toList());
 
@@ -104,6 +105,7 @@ public class PortfolioAggregationService {
 
         List<BrokerAccountDto.AssetPositionDto> allPositions = accounts.stream()
                 .flatMap(account -> assetPositionRepository.findByAccountId(account.getId()).stream())
+                .filter(BrokerFieldMapper::isOverseas)
                 .map(BrokerFieldMapper::toPositionDto)
                 .collect(Collectors.toList());
 
@@ -128,6 +130,7 @@ public class PortfolioAggregationService {
                 .orElse(null);
 
         List<BrokerAccountDto.AssetPositionDto> positionDtos = assetPositionRepository.findByAccountId(accountId).stream()
+                .filter(BrokerFieldMapper::isOverseas)
                 .map(BrokerFieldMapper::toPositionDto)
                 .collect(Collectors.toList());
 
@@ -154,6 +157,9 @@ public class PortfolioAggregationService {
 
         for (BrokerAccountEntity account : accounts) {
             for (var position : assetPositionRepository.findByAccountId(account.getId())) {
+                if (!BrokerFieldMapper.isOverseas(position)) {
+                    continue;
+                }
                 String productType = position.getPositionType() != null ? position.getPositionType() : "UNKNOWN";
                 BigDecimal valuationAmount = nullToZero(position.getCurrentValue());
                 assetTypeDistribution.merge(productType, valuationAmount, BigDecimal::add);

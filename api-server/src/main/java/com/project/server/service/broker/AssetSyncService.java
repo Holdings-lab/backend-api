@@ -194,6 +194,9 @@ public class AssetSyncService {
             if (position.itemCode() == null || position.itemCode().isBlank()) {
                 continue;
             }
+            if (!"Y".equalsIgnoreCase(position.overseasYn())) {
+                continue;
+            }
             AssetPositionEntity entity = AssetPositionEntity.builder()
                     .accountId(account.getId())
                     .userId(account.getUserId())

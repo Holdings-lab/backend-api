@@ -245,6 +245,7 @@ public class BrokerAccountService {
         .orElse(null);
 
     List<BrokerAccountDto.AssetPositionDto> positions = assetPositionRepository.findByAccountId(entity.getId()).stream()
+        .filter(BrokerFieldMapper::isOverseas)
         .map(BrokerFieldMapper::toPositionDto)
         .collect(Collectors.toList());
 

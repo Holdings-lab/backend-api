@@ -17,69 +17,38 @@ public final class KisFieldMapper {
     private KisFieldMapper() {
     }
 
-    public static KisApiClient.KisBalanceSnapshot toSnapshot(KisApiClient.KisCredential credential, JsonNode root) {
-        JsonNode output2 = firstObject(root.path("output2"));
-        JsonNode output1 = root.path("output1");
-
-        String cano = credential.cano();
-        String productCode = credential.accountProductCode();
-        String display = KisAccountParser.display(cano, productCode);
-
-        return new KisApiClient.KisBalanceSnapshot(
-                cano,
-                productCode,
-                display,
-                decimal(output2, "dnca_tot_amt"),
-                firstDecimal(output2, "nass_amt", "tot_evlu_amt"),
-                firstDecimal(output2, "tot_evlu_amt", "evlu_amt_smtl_amt"),
-                firstDecimal(output2, "pchs_amt_smtl_amt", "pchs_amt_smtl"),
-                firstDecimal(output2, "evlu_pfls_smtl_amt"),
-                firstDecimal(output2, "asst_icdc_erng_rt", "evlu_pfls_rt"),
-                toDomesticPositions(output1));
-    }
-
-    public static KisApiClient.KisBalanceSnapshot mergeOverseas(
-            KisApiClient.KisBalanceSnapshot domestic,
+    public static KisApiClient.KisBalanceSnapshot toOverseasSnapshot(
+            KisApiClient.KisCredential credential,
             List<KisApiClient.KisPosition> overseasPositions,
             JsonNode overseasOutput3) {
-        List<KisApiClient.KisPosition> merged = new ArrayList<>();
-        if (domestic.positions() != null) {
-            merged.addAll(domestic.positions());
-        }
-        if (overseasPositions != null) {
-            merged.addAll(overseasPositions);
-        }
+        List<KisApiClient.KisPosition> positions = overseasPositions == null
+                ? List.of()
+                : List.copyOf(overseasPositions);
 
         JsonNode output3 = firstObject(overseasOutput3);
-        BigDecimal overseasCash = firstDecimal(output3, "tot_dncl_amt", "dncl_amt");
-        BigDecimal overseasEval = firstDecimal(output3, "evlu_amt_smtl", "evlu_amt_smtl_amt", "frcr_evlu_tota");
-        BigDecimal overseasPurchase = firstDecimal(output3, "pchs_amt_smtl", "pchs_amt_smtl_amt");
-        BigDecimal overseasGain = firstDecimal(output3, "evlu_pfls_amt_smtl", "tot_evlu_pfls_amt");
-        BigDecimal overseasTotal = firstDecimal(output3, "tot_asst_amt");
-        if (overseasTotal.compareTo(BigDecimal.ZERO) == 0) {
-            overseasTotal = overseasEval.add(overseasCash);
+        BigDecimal cash = firstDecimal(output3, "tot_dncl_amt", "dncl_amt");
+        BigDecimal evaluation = firstDecimal(output3, "evlu_amt_smtl", "evlu_amt_smtl_amt", "frcr_evlu_tota");
+        BigDecimal purchase = firstDecimal(output3, "pchs_amt_smtl", "pchs_amt_smtl_amt");
+        BigDecimal gainLoss = firstDecimal(output3, "evlu_pfls_amt_smtl", "tot_evlu_pfls_amt");
+        BigDecimal total = firstDecimal(output3, "tot_asst_amt");
+        if (total.compareTo(BigDecimal.ZERO) == 0) {
+            total = evaluation.add(cash);
         }
-
-        BigDecimal cash = nz(domestic.cashBalance()).add(overseasCash);
-        BigDecimal evaluation = nz(domestic.evaluationAmount()).add(overseasEval);
-        BigDecimal purchase = nz(domestic.purchaseAmount()).add(overseasPurchase);
-        BigDecimal gainLoss = nz(domestic.gainLoss()).add(overseasGain);
-        BigDecimal total = nz(domestic.totalAssetValue()).add(overseasTotal);
         BigDecimal gainLossRate = purchase.compareTo(BigDecimal.ZERO) > 0
                 ? gainLoss.divide(purchase, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
-                : nz(domestic.gainLossRate());
+                : BigDecimal.ZERO;
 
         return new KisApiClient.KisBalanceSnapshot(
-                domestic.cano(),
-                domestic.accountProductCode(),
-                domestic.accountDisplay(),
+                credential.cano(),
+                credential.accountProductCode(),
+                KisAccountParser.display(credential.cano(), credential.accountProductCode()),
                 cash,
                 total,
                 evaluation,
                 purchase,
                 gainLoss,
                 gainLossRate,
-                merged);
+                positions);
     }
 
     public static List<KisApiClient.KisPosition> toOverseasPresentPositions(JsonNode output1) {
@@ -175,31 +144,6 @@ public final class KisFieldMapper {
                 .build();
     }
 
-    private static List<KisApiClient.KisPosition> toDomesticPositions(JsonNode output1) {
-        List<KisApiClient.KisPosition> positions = new ArrayList<>();
-        for (JsonNode row : asRows(output1)) {
-            String itemCode = text(row, "pdno", "item_cd", "stck_shrn_iscd");
-            if (itemCode == null || itemCode.isBlank()) {
-                continue;
-            }
-            positions.add(new KisApiClient.KisPosition(
-                    itemCode,
-                    text(row, "prdt_name"),
-                    defaultString(text(row, "trad_dvsn_name"), "STOCK"),
-                    text(row, "prdt_cd", "pdno"),
-                    decimal(row, "hldg_qty"),
-                    decimal(row, "pchs_avg_pric"),
-                    decimal(row, "prpr"),
-                    decimal(row, "evlu_amt"),
-                    decimal(row, "pchs_amt"),
-                    decimal(row, "evlu_pfls_amt"),
-                    decimal(row, "evlu_pfls_rt"),
-                    "KRW",
-                    "N"));
-        }
-        return positions;
-    }
-
     static void requireSuccess(JsonNode root) {
         if (root == null || root.isMissingNode()) {
             throw ApiException.internalServerError("KIS 통신 오류가 발생했습니다.", "INVALID_KIS_RESPONSE");
@@ -235,10 +179,6 @@ public final class KisFieldMapper {
             return node;
         }
         return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
-    }
-
-    private static java.math.BigDecimal decimal(JsonNode node, String key) {
-        return firstDecimal(node, key);
     }
 
     private static java.math.BigDecimal firstDecimal(JsonNode node, String... keys) {
@@ -299,9 +239,5 @@ public final class KisFieldMapper {
 
     private static String defaultString(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
-    }
-
-    private static BigDecimal nz(BigDecimal value) {
-        return value == null ? BigDecimal.ZERO : value;
     }
 }
