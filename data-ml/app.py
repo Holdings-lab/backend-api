@@ -60,9 +60,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 ML_PREFIX = "/ml"
 BASE_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
-_POLICY_MONITOR_OUTPUT = (os.getenv("POLICY_MONITOR_OUTPUT_PATH") or "").strip()
 POLICY_FEED_CANDIDATES = [
-    *([Path(_POLICY_MONITOR_OUTPUT)] if _POLICY_MONITOR_OUTPUT else []),
     feature_csv_path("policy_updates_features.csv"),
     feature_csv_path("daily_news_features.csv"),
 ]
@@ -877,38 +875,43 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
             target_date=parsed_target_date,
             run_type="policy_monitor",
         )
+        crawl_ok = crawl_result.get("status") == "success"
 
-        raw_count = int(crawl_result.get("raw_count") or 0)
-        processed_count = int(crawl_result.get("processed_count") or 0)
-        skip_prediction = (raw_count <= 0) and (processed_count <= 0)
-
-        if skip_prediction:
+        if not crawl_ok:
             predict_result = {
                 "status": "skipped",
-                "message": "no policy rows collected; prediction skipped",
+                "message": "crawl failed; prediction skipped",
                 "executed_at": datetime.utcnow().isoformat() + "Z",
+            }
+            webhook_result = {
+                "success": True,
+                "status": "skipped",
+                "message": "prediction skipped due to crawl failure; webhook skipped",
+            }
+            signal_payload = {
+                "trigger": trigger,
+                "status": "failed",
+                "signal": "hold",
+                "generatedAt": datetime.utcnow().isoformat() + "Z",
+                "details": {
+                    "crawlStatus": crawl_result.get("status"),
+                    "predictStatus": predict_result.get("status"),
+                },
             }
         else:
             predict_result = run_prediction_now()
 
-        signal_payload = {
-            "trigger": trigger,
-            "status": "ok" if predict_result.get("status") in {"success", "skipped"} else "failed",
-            "signal": "hold",
-            "generatedAt": datetime.utcnow().isoformat() + "Z",
-            "details": {
-                "crawlStatus": crawl_result.get("status"),
-                "predictStatus": predict_result.get("status"),
-            },
-        }
-
-        if skip_prediction:
-            webhook_result = {
-                "success": True,
-                "status": "skipped",
-                "message": "prediction skipped due to empty crawl result; webhook skipped",
+            signal_payload = {
+                "trigger": trigger,
+                "status": "ok" if predict_result.get("status") in {"success", "skipped"} else "failed",
+                "signal": "hold",
+                "generatedAt": datetime.utcnow().isoformat() + "Z",
+                "details": {
+                    "crawlStatus": crawl_result.get("status"),
+                    "predictStatus": predict_result.get("status"),
+                },
             }
-        else:
+
             summary = _safe_json_load(TRAINING_SUMMARY_PATH)
             metrics = summary.get("metrics") or {}
             policy_score = _safe_float(metrics.get("policyScore"), 0.0)
@@ -929,7 +932,7 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
 
         predict_ok = predict_result.get("status") in {"success", "skipped"}
         webhook_ok = bool(webhook_result.get("success"))
-        status = "success" if predict_ok else "failed"
+        status = "success" if crawl_ok and predict_ok else "failed"
         return {
             "status": status,
             "webhook_status": "success" if webhook_ok else "failed",

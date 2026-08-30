@@ -44,10 +44,6 @@ def policy_monitor_path() -> Path:
     return _env_path("POLICY_MONITOR_PATH")
 
 
-def crawl_output_path() -> Path:
-    return _env_path("POLICY_MONITOR_OUTPUT_PATH")
-
-
 def crawler_app_root() -> Path:
     return _env_path("CRAWLER_APP_ROOT")
 
@@ -116,17 +112,17 @@ def _clip(text: str, limit: int = 200_000) -> str:
 
 
 def _failure_log_dir() -> Path | None:
-    raw = (os.getenv("POLICY_MONITOR_OUTPUT_PATH") or "").strip()
+    raw = (os.getenv("POLICY_MONITOR_LOG_DIR") or "").strip()
     if raw:
-        return Path(raw).parent
+        return Path(raw)
     return None
 
 
 def write_policy_monitor_failure_log(error: ExternalCrawlerError) -> str | None:
-    """POLICY_MONITOR_OUTPUT_PATH 와 같은 디렉터리에 실패 로그를 남긴다."""
+    """POLICY_MONITOR_LOG_DIR 에 실패 로그를 남긴다."""
     log_dir = _failure_log_dir()
     if log_dir is None:
-        logger.warning("[Crawl] POLICY_MONITOR_OUTPUT_PATH 가 없어 실패 로그를 쓰지 못했습니다")
+        logger.warning("[Crawl] POLICY_MONITOR_LOG_DIR 가 없어 실패 로그를 쓰지 못했습니다")
         return None
 
     try:
@@ -192,11 +188,10 @@ def _run_policy_monitor(
 ) -> dict[str, Any]:
     """
     env 의 policy_monitor.py 를 --max-cycles 1 로 실행한다.
-    수집 대상 날짜는 policy_monitor.py 가 스스로 정한다.
+    CSV 출력 경로는 policy_monitor.py 가 스스로 정한다.
     """
     crawler_root = crawler_app_root()
     monitor_script = policy_monitor_path()
-    output_path = crawl_output_path()
     python_bin = _crawler_python(crawler_root)
 
     if not crawler_root.exists():
@@ -215,14 +210,10 @@ def _run_policy_monitor(
             target_date.isoformat(),
         )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
     command = [
         python_bin,
         "-B",
         str(monitor_script),
-        "--output-path",
-        str(output_path),
         "--max-cycles",
         "1",
         "--interval-sec",
@@ -239,9 +230,8 @@ def _run_policy_monitor(
         env["OLLAMA_BASE_URL"] = "http://ollama:11434"
 
     logger.info(
-        "[Crawl] running policy_monitor (script=%s, output=%s, cmd=%s)",
+        "[Crawl] running policy_monitor (script=%s, cmd=%s)",
         monitor_script,
-        output_path,
         " ".join(command),
     )
 
@@ -295,25 +285,11 @@ def _run_policy_monitor(
             },
         )
 
-    if not output_path.exists():
-        raise ExternalCrawlerError(
-            f"크롤 출력 CSV 가 없습니다: {output_path}",
-            code="ML_SIGNAL_CRAWL_FAILED",
-            details={
-                "command": command,
-                "stdout": _clip(completed.stdout),
-                "stderr": _clip(completed.stderr),
-                "stdout_tail": _tail(completed.stdout),
-            },
-        )
-
     logger.info(
-        "[Crawl] policy_monitor finished output=%s stdout_tail=%s",
-        output_path,
+        "[Crawl] policy_monitor finished stdout_tail=%s",
         _tail(completed.stdout, 800),
     )
     return {
-        "output_path": str(output_path),
         "stdout_tail": _tail(completed.stdout, 800),
         "stderr_tail": _tail(completed.stderr, 800),
         "command": command,

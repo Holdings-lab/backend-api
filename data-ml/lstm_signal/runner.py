@@ -195,21 +195,15 @@ def prepare_features_from_crawl(
     ticker: str = "QQQ",
 ) -> dict[str, Any]:
     """
-    1) env 의 policy_monitor.py → POLICY_MONITOR_OUTPUT_PATH
-    2) policy CSV → news_event_features.csv + market_long_features.csv
-    3) 두 feature 경로를 predict_signal 입력으로 반환
+    1) env 의 policy_monitor.py 실행 (CSV 출력은 해당 스크립트가 담당)
+    2) 기존 news_event/market_long feature CSV 를 predict_signal 입력으로 반환
     """
     from crawler.external import ExternalCrawlerError, run_apps_crawler_policy_monitor
-    from lstm_signal.build_qqq_features import FeatureBuildError, build_qqq_feature_csvs
 
     parsed_target_date = target_date if isinstance(target_date, date) else _parse_target_date(target_date)
-    news_features_path = _news_features_path()
-    market_features_path = _market_features_path()
-    news_features_path.parent.mkdir(parents=True, exist_ok=True)
-    market_features_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        crawl = run_apps_crawler_policy_monitor(
+        run_apps_crawler_policy_monitor(
             target_date=parsed_target_date,
             bis_max_pages_override=bis_max_pages,
             sleep_sec=sleep_sec,
@@ -217,35 +211,8 @@ def prepare_features_from_crawl(
     except ExternalCrawlerError as error:
         raise SignalRunnerError(error.message, code=error.code, details=error.details) from error
 
-    crawl_output_path = Path(crawl["output_path"])
-
-    try:
-        built = build_qqq_feature_csvs(
-            policy_features_path=crawl_output_path,
-            news_event_output_path=news_features_path,
-            market_long_output_path=market_features_path,
-            ticker=ticker,
-            target_date=parsed_target_date,
-        )
-    except FeatureBuildError as error:
-        raise SignalRunnerError(
-            f"feature 변환에 실패했습니다: {error.message}",
-            code="ML_SIGNAL_FEATURES_BUILD_FAILED",
-            details=error.details,
-        ) from error
-    except Exception as error:
-        raise SignalRunnerError(
-            f"feature 변환에 실패했습니다: {error}",
-            code="ML_SIGNAL_FEATURES_BUILD_FAILED",
-            details={"error": str(error)},
-        ) from error
-
-    return {
-        "news_features_path": str(news_features_path),
-        "market_features_path": str(market_features_path),
-        "policy_features_path": str(crawl_output_path),
-        "feature_build": built,
-    }
+    prepared = prepare_features_existing()
+    return prepared
 
 
 def prepare_features(
