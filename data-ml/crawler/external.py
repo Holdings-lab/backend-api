@@ -119,16 +119,18 @@ def _failure_log_dir() -> Path | None:
 
 
 def write_policy_monitor_failure_log(error: ExternalCrawlerError) -> str | None:
-    """POLICY_MONITOR_LOG_DIR 에 실패 로그를 남긴다."""
-    log_dir = _failure_log_dir()
-    if log_dir is None:
+    """POLICY_MONITOR_LOG_DIR/policy_monitor_failure/<실행시각>.log 에 실패 로그를 남긴다."""
+    log_root = _failure_log_dir()
+    if log_root is None:
         logger.warning("[Crawl] POLICY_MONITOR_LOG_DIR 가 없어 실패 로그를 쓰지 못했습니다")
         return None
 
     try:
+        log_dir = log_root / "policy_monitor_failure"
         log_dir.mkdir(parents=True, exist_ok=True)
-        occurred_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        log_path = log_dir / "policy_monitor_failure.log"
+        occurred_at = datetime.now(timezone.utc)
+        stamp = occurred_at.strftime("%Y%m%dT%H%M%S") + f"_{occurred_at.microsecond:06d}Z"
+        log_path = log_dir / f"{stamp}.log"
         details = error.details or {}
         command = details.get("command")
         command_text = (
@@ -142,7 +144,7 @@ def write_policy_monitor_failure_log(error: ExternalCrawlerError) -> str | None:
         exit_code = details.get("exit_code", "")
 
         block = (
-            f"===== policy_monitor failure {occurred_at} =====\n"
+            f"time: {occurred_at.strftime('%Y-%m-%dT%H:%M:%S.%fZ')}\n"
             f"code: {error.code}\n"
             f"message: {error.message}\n"
             f"exit_code: {exit_code}\n"
@@ -150,10 +152,8 @@ def write_policy_monitor_failure_log(error: ExternalCrawlerError) -> str | None:
             f"error: {extra_error}\n"
             f"\n----- stdout -----\n{stdout}\n"
             f"\n----- stderr -----\n{stderr}\n"
-            f"===== end =====\n\n"
         )
-        with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(block)
+        log_path.write_text(block, encoding="utf-8")
         logger.warning("[Crawl] failure log written: %s", log_path)
         return str(log_path)
     except Exception as write_error:
