@@ -142,6 +142,8 @@ public class BrokerAccountDto {
     @AllArgsConstructor
     public static class AccountBalanceDto {
         private Long id;
+        private String currencyCode;
+        private Map<String, BigDecimal> fxRates;
         private BigDecimal estimatedDepositAsset;
         private BigDecimal cashBalance;
         private BigDecimal totalPurchaseAmount;
@@ -156,20 +158,41 @@ public class BrokerAccountDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    public static class PositionNativeDto {
+        private BigDecimal purchaseUnitPrice;
+        private BigDecimal presentPrice;
+        private BigDecimal purchaseAmount;
+        private BigDecimal valuationAmount;
+        private BigDecimal gainLoss;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PositionKrwDto {
+        private BigDecimal purchaseAmount;
+        private BigDecimal valuationAmount;
+        private BigDecimal gainLoss;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class AssetPositionDto {
         private String itemCode;
         private String itemName;
         private String productType;
         private String productCode;
         private BigDecimal quantity;
-        private BigDecimal purchaseUnitPrice;
-        private BigDecimal presentPrice;
-        private BigDecimal valuationAmount;
-        private BigDecimal purchaseAmount;
-        private BigDecimal valuationGainLoss;
         private BigDecimal profitRate;
         private String currencyCode;
         private String overseasYn;
+        private BigDecimal fxRate;
+        @com.fasterxml.jackson.annotation.JsonProperty("native")
+        private PositionNativeDto nativeAmounts;
+        private PositionKrwDto krw;
     }
 
     @Data
@@ -226,6 +249,8 @@ public class BrokerAccountDto {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CombinedPortfolioResponse {
+        private String currencyCode;
+        private Map<String, BigDecimal> fxRates;
         private BigDecimal estimatedDepositAsset;
         private BigDecimal cashBalance;
         private BigDecimal totalPurchaseAmount;
@@ -245,6 +270,8 @@ public class BrokerAccountDto {
         private Long accountId;
         private String accountNumber;
         private String brokerName;
+        private String currencyCode;
+        private Map<String, BigDecimal> fxRates;
         private BigDecimal estimatedDepositAsset;
         private BigDecimal cashBalance;
         private List<AssetPositionDto> positions;

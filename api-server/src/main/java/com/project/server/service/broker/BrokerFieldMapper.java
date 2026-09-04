@@ -3,6 +3,10 @@ package com.project.server.service.broker;
 import com.project.server.domain.AccountBalanceEntity;
 import com.project.server.domain.AssetPositionEntity;
 import com.project.server.dto.BrokerAccountDto;
+import com.project.server.service.integration.kis.KisFieldMapper;
+
+import java.math.BigDecimal;
+import java.util.Map;
 
 public final class BrokerFieldMapper {
 
@@ -15,6 +19,8 @@ public final class BrokerFieldMapper {
         }
         return BrokerAccountDto.AccountBalanceDto.builder()
                 .id(balance.getId())
+                .currencyCode(balance.getCurrencyCode() != null ? balance.getCurrencyCode() : "KRW")
+                .fxRates(KisFieldMapper.parseFxRates(balance.getFxRatesJson()))
                 .estimatedDepositAsset(balance.getTotalAssetValue())
                 .cashBalance(balance.getCashBalance())
                 .totalPurchaseAmount(balance.getDepositAmount())
@@ -37,14 +43,33 @@ public final class BrokerFieldMapper {
                 .productType(entity.getPositionType())
                 .productCode(entity.getProductCode())
                 .quantity(entity.getQuantity())
-                .purchaseUnitPrice(entity.getPurchasePrice())
-                .presentPrice(entity.getCurrentPrice())
-                .valuationAmount(entity.getCurrentValue())
-                .purchaseAmount(entity.getPurchaseAmount())
-                .valuationGainLoss(entity.getGainLoss())
                 .profitRate(entity.getGainLossRate())
                 .currencyCode(entity.getCurrencyCode())
                 .overseasYn(entity.getOverseasYn())
+                .fxRate(entity.getFxRate())
+                .nativeAmounts(BrokerAccountDto.PositionNativeDto.builder()
+                        .purchaseUnitPrice(entity.getPurchasePrice())
+                        .presentPrice(entity.getCurrentPrice())
+                        .purchaseAmount(entity.getNativePurchaseAmount())
+                        .valuationAmount(entity.getNativeValuationAmount())
+                        .gainLoss(entity.getNativeGainLoss())
+                        .build())
+                .krw(BrokerAccountDto.PositionKrwDto.builder()
+                        .purchaseAmount(entity.getPurchaseAmount())
+                        .valuationAmount(entity.getCurrentValue())
+                        .gainLoss(entity.getGainLoss())
+                        .build())
                 .build();
+    }
+
+    public static Map<String, BigDecimal> mergeFxRates(Map<String, BigDecimal> left, Map<String, BigDecimal> right) {
+        Map<String, BigDecimal> merged = new java.util.LinkedHashMap<>();
+        if (left != null) {
+            merged.putAll(left);
+        }
+        if (right != null) {
+            right.forEach(merged::putIfAbsent);
+        }
+        return merged;
     }
 }

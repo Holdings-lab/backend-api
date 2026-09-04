@@ -12,6 +12,7 @@ import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.repository.BrokerSyncHistoryRepository;
 import com.project.server.service.integration.kis.KisApiClient;
 import com.project.server.service.integration.kis.KisCredentialResolver;
+import com.project.server.service.integration.kis.KisFieldMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -176,6 +177,8 @@ public class AssetSyncService {
                 .gainLossRate(gainLossRate)
                 .dailyGainLoss(BigDecimal.ZERO)
                 .dailyGainLossRate(BigDecimal.ZERO)
+                .currencyCode("KRW")
+                .fxRatesJson(KisFieldMapper.toFxRatesJson(snapshot.fxRates()))
                 .asOfDate(LocalDate.now())
                 .lastSyncedAt(LocalDateTime.now())
                 .build();
@@ -197,6 +200,8 @@ public class AssetSyncService {
             if (!"Y".equalsIgnoreCase(position.overseasYn())) {
                 continue;
             }
+            KisApiClient.NativeQuote nativeQuote = position.nativeQuote();
+            KisApiClient.KrwQuote krw = position.krw();
             AssetPositionEntity entity = AssetPositionEntity.builder()
                     .accountId(account.getId())
                     .userId(account.getUserId())
@@ -207,13 +212,17 @@ public class AssetSyncService {
                     .productCode(position.productCode())
                     .overseasYn(position.overseasYn())
                     .quantity(defaultDecimal(position.quantity()))
-                    .purchasePrice(defaultDecimal(position.purchaseUnitPrice()))
-                    .currentPrice(defaultDecimal(position.presentPrice()))
-                    .currentValue(defaultDecimal(position.valuationAmount()))
-                    .purchaseAmount(defaultDecimal(position.purchaseAmount()))
-                    .gainLoss(defaultDecimal(position.valuationGainLoss()))
+                    .purchasePrice(nativeQuote == null ? BigDecimal.ZERO : defaultDecimal(nativeQuote.purchaseUnitPrice()))
+                    .currentPrice(nativeQuote == null ? BigDecimal.ZERO : defaultDecimal(nativeQuote.presentPrice()))
+                    .nativePurchaseAmount(nativeQuote == null ? BigDecimal.ZERO : defaultDecimal(nativeQuote.purchaseAmount()))
+                    .nativeValuationAmount(nativeQuote == null ? BigDecimal.ZERO : defaultDecimal(nativeQuote.valuationAmount()))
+                    .nativeGainLoss(nativeQuote == null ? BigDecimal.ZERO : defaultDecimal(nativeQuote.gainLoss()))
+                    .purchaseAmount(krw == null ? BigDecimal.ZERO : defaultDecimal(krw.purchaseAmount()))
+                    .currentValue(krw == null ? BigDecimal.ZERO : defaultDecimal(krw.valuationAmount()))
+                    .gainLoss(krw == null ? BigDecimal.ZERO : defaultDecimal(krw.gainLoss()))
                     .gainLossRate(defaultDecimal(position.profitRate()))
-                    .currencyCode(defaultString(position.currencyCode(), "KRW"))
+                    .currencyCode(defaultString(position.currencyCode(), "USD"))
+                    .fxRate(defaultDecimal(position.fxRate()))
                     .lastSyncedAt(LocalDateTime.now())
                     .build();
             assetPositionRepository.save(entity);

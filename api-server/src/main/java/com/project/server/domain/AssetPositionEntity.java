@@ -73,7 +73,19 @@ public class AssetPositionEntity {
     private BigDecimal gainLossRate;
 
     @Column(name = "currency_code", length = 3)
-    private String currencyCode;  // KRW, USD
+    private String currencyCode;
+
+    @Column(name = "fx_rate", precision = 18, scale = 6)
+    private BigDecimal fxRate;
+
+    @Column(name = "native_purchase_amount", precision = 18, scale = 4)
+    private BigDecimal nativePurchaseAmount;
+
+    @Column(name = "native_valuation_amount", precision = 18, scale = 4)
+    private BigDecimal nativeValuationAmount;
+
+    @Column(name = "native_gain_loss", precision = 18, scale = 4)
+    private BigDecimal nativeGainLoss;
 
     @Column(name = "purchased_at")
     private LocalDate purchasedAt;

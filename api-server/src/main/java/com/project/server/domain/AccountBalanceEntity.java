@@ -56,6 +56,12 @@ public class AccountBalanceEntity {
     @Column(name = "daily_gain_loss_rate", precision = 10, scale = 4)
     private BigDecimal dailyGainLossRate;
 
+    @Column(name = "currency_code", length = 3)
+    private String currencyCode;
+
+    @Column(name = "fx_rates", columnDefinition = "jsonb")
+    private String fxRatesJson;
+
     @Column(name = "as_of_date")
     private LocalDate asOfDate;
 

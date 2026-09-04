@@ -7,6 +7,7 @@ import com.project.server.exception.ApiException;
 import com.project.server.repository.AccountBalanceRepository;
 import com.project.server.repository.AssetPositionRepository;
 import com.project.server.repository.BrokerAccountRepository;
+import com.project.server.service.integration.kis.KisFieldMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -38,6 +39,8 @@ public class PortfolioAggregationService {
 
         if (accounts.isEmpty()) {
             return BrokerAccountDto.CombinedPortfolioResponse.builder()
+                    .currencyCode("KRW")
+                    .fxRates(Map.of())
                     .estimatedDepositAsset(BigDecimal.ZERO)
                     .cashBalance(BigDecimal.ZERO)
                     .totalPurchaseAmount(BigDecimal.ZERO)
@@ -57,6 +60,7 @@ public class PortfolioAggregationService {
         BigDecimal totalValuationGainLoss = BigDecimal.ZERO;
 
         Map<String, BrokerAccountDto.AccountPortfolioDto> byBroker = new HashMap<>();
+        Map<String, BigDecimal> fxRates = new HashMap<>();
         LocalDateTime latestSyncTime = null;
 
         for (BrokerAccountEntity account : accounts) {
@@ -71,6 +75,8 @@ public class PortfolioAggregationService {
                 totalPurchaseAmount = totalPurchaseAmount.add(nullToZero(latestBalance.getDepositAmount()));
                 totalValuationAmount = totalValuationAmount.add(nullToZero(latestBalance.getEvaluationAmount()));
                 totalValuationGainLoss = totalValuationGainLoss.add(nullToZero(latestBalance.getGainLoss()));
+                fxRates = BrokerFieldMapper.mergeFxRates(
+                        fxRates, KisFieldMapper.parseFxRates(latestBalance.getFxRatesJson()));
 
                 if (latestSyncTime == null || latestBalance.getLastSyncedAt().isAfter(latestSyncTime)) {
                     latestSyncTime = latestBalance.getLastSyncedAt();
@@ -88,6 +94,10 @@ public class PortfolioAggregationService {
                             .accountId(account.getId())
                             .accountNumber(account.getAccountNumber())
                             .brokerName(account.getBrokerName())
+                            .currencyCode("KRW")
+                            .fxRates(latestBalance != null
+                                    ? KisFieldMapper.parseFxRates(latestBalance.getFxRatesJson())
+                                    : Map.of())
                             .estimatedDepositAsset(
                                     latestBalance != null ? nullToZero(latestBalance.getTotalAssetValue()) : BigDecimal.ZERO)
                             .cashBalance(latestBalance != null ? nullToZero(latestBalance.getCashBalance()) : BigDecimal.ZERO)
@@ -110,6 +120,8 @@ public class PortfolioAggregationService {
                 .collect(Collectors.toList());
 
         return BrokerAccountDto.CombinedPortfolioResponse.builder()
+                .currencyCode("KRW")
+                .fxRates(fxRates)
                 .estimatedDepositAsset(estimatedDepositAsset)
                 .cashBalance(totalCashBalance)
                 .totalPurchaseAmount(totalPurchaseAmount)
@@ -138,6 +150,8 @@ public class PortfolioAggregationService {
                 .accountId(accountId)
                 .accountNumber(account.getAccountNumber())
                 .brokerName(account.getBrokerName())
+                .currencyCode("KRW")
+                .fxRates(latestBalance != null ? KisFieldMapper.parseFxRates(latestBalance.getFxRatesJson()) : Map.of())
                 .estimatedDepositAsset(latestBalance != null ? nullToZero(latestBalance.getTotalAssetValue()) : BigDecimal.ZERO)
                 .cashBalance(latestBalance != null ? nullToZero(latestBalance.getCashBalance()) : BigDecimal.ZERO)
                 .positions(positionDtos)

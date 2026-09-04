@@ -48,65 +48,62 @@ public final class KisFieldMapper {
                 purchase,
                 gainLoss,
                 gainLossRate,
+                collectFxRates(positions),
                 positions);
     }
 
     public static List<KisApiClient.KisPosition> toOverseasPresentPositions(JsonNode output1) {
         List<KisApiClient.KisPosition> positions = new ArrayList<>();
         for (JsonNode row : asRows(output1)) {
-            String itemCode = text(row, "pdno", "ovrs_pdno", "std_pdno");
-            if (itemCode == null || itemCode.isBlank()) {
-                continue;
+            KisApiClient.KisPosition position = toOverseasPosition(row);
+            if (position != null) {
+                positions.add(position);
             }
-            BigDecimal quantity = firstDecimal(row, "cblc_qty13", "ovrs_cblc_qty", "cblc_qty", "hldg_qty");
-            if (quantity.compareTo(BigDecimal.ZERO) == 0) {
-                continue;
-            }
-            positions.add(new KisApiClient.KisPosition(
-                    itemCode,
-                    defaultString(text(row, "prdt_name", "ovrs_item_name", "item_name"), itemCode),
-                    "STOCK",
-                    itemCode,
-                    quantity,
-                    firstDecimal(row, "avg_unpr3", "pchs_avg_pric"),
-                    firstDecimal(row, "ovrs_now_pric1", "now_pric2", "prpr"),
-                    firstDecimal(row, "frcr_evlu_amt2", "ovrs_stck_evlu_amt", "evlu_amt"),
-                    firstDecimal(row, "pchs_rmnd_wcrc_amt", "frcr_pchs_amt", "frcr_pchs_amt1", "pchs_amt"),
-                    firstDecimal(row, "evlu_pfls_amt2", "frcr_evlu_pfls_amt", "evlu_pfls_amt"),
-                    firstDecimal(row, "evlu_pfls_rt1", "evlu_pfls_rt"),
-                    defaultString(text(row, "buy_crcy_cd", "crcy_cd", "tr_crcy_cd"), "USD"),
-                    "Y"));
         }
         return positions;
     }
 
     public static List<KisApiClient.KisPosition> toOverseasBalancePositions(JsonNode output1) {
-        List<KisApiClient.KisPosition> positions = new ArrayList<>();
-        for (JsonNode row : asRows(output1)) {
-            String itemCode = text(row, "ovrs_pdno", "pdno", "std_pdno");
-            if (itemCode == null || itemCode.isBlank()) {
-                continue;
-            }
-            BigDecimal quantity = firstDecimal(row, "ovrs_cblc_qty", "cblc_qty", "hldg_qty");
-            if (quantity.compareTo(BigDecimal.ZERO) == 0) {
-                continue;
-            }
-            positions.add(new KisApiClient.KisPosition(
-                    itemCode,
-                    defaultString(text(row, "ovrs_item_name", "prdt_name", "item_name"), itemCode),
-                    "STOCK",
-                    itemCode,
-                    quantity,
-                    firstDecimal(row, "pchs_avg_pric", "avg_unpr3"),
-                    firstDecimal(row, "now_pric2", "ovrs_now_pric1", "prpr"),
-                    firstDecimal(row, "ovrs_stck_evlu_amt", "frcr_evlu_amt2", "evlu_amt"),
-                    firstDecimal(row, "frcr_pchs_amt1", "frcr_pchs_amt", "pchs_amt"),
-                    firstDecimal(row, "frcr_evlu_pfls_amt", "evlu_pfls_amt2", "evlu_pfls_amt"),
-                    firstDecimal(row, "evlu_pfls_rt", "evlu_pfls_rt1"),
-                    defaultString(text(row, "tr_crcy_cd", "buy_crcy_cd", "crcy_cd"), "USD"),
-                    "Y"));
+        return toOverseasPresentPositions(output1);
+    }
+
+    public static String toFxRatesJson(Map<String, BigDecimal> fxRates) {
+        if (fxRates == null || fxRates.isEmpty()) {
+            return "{}";
         }
-        return positions;
+        StringBuilder json = new StringBuilder("{");
+        boolean first = true;
+        for (Map.Entry<String, BigDecimal> entry : fxRates.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) {
+                continue;
+            }
+            if (!first) {
+                json.append(',');
+            }
+            json.append('"').append(entry.getKey()).append("\":").append(entry.getValue().toPlainString());
+            first = false;
+        }
+        return json.append('}').toString();
+    }
+
+    public static Map<String, BigDecimal> parseFxRates(String json) {
+        Map<String, BigDecimal> rates = new LinkedHashMap<>();
+        if (json == null || json.isBlank() || "{}".equals(json.trim())) {
+            return rates;
+        }
+        try {
+            JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+            node.fields().forEachRemaining(entry -> {
+                try {
+                    rates.put(entry.getKey(), new BigDecimal(entry.getValue().asText()));
+                } catch (NumberFormatException ignored) {
+                    // skip
+                }
+            });
+        } catch (Exception ignored) {
+            return Map.of();
+        }
+        return rates;
     }
 
     public static Map<String, Object> toAccountDetails(KisApiClient.KisBalanceSnapshot snapshot) {
@@ -142,6 +139,109 @@ public final class KisFieldMapper {
                 .accountProductCode(product)
                 .cano(cano)
                 .build();
+    }
+
+    private static KisApiClient.KisPosition toOverseasPosition(JsonNode row) {
+        String itemCode = text(row, "pdno", "ovrs_pdno", "std_pdno");
+        if (itemCode == null || itemCode.isBlank()) {
+            return null;
+        }
+        BigDecimal quantity = firstDecimal(row, "cblc_qty13", "ovrs_cblc_qty", "cblc_qty", "hldg_qty");
+        if (quantity.compareTo(BigDecimal.ZERO) == 0) {
+            return null;
+        }
+
+        BigDecimal fxRate = firstDecimal(row, "bass_exrt", "frst_bltn_exrt");
+        BigDecimal nativeAvg = firstDecimal(row, "avg_unpr3", "pchs_avg_pric");
+        BigDecimal nativePrice = firstDecimal(row, "ovrs_now_pric1", "now_pric2", "prpr");
+        BigDecimal nativePurchase = firstDecimal(row, "frcr_pchs_amt", "frcr_pchs_amt1");
+        if (isZero(nativePurchase) && !isZero(quantity) && !isZero(nativeAvg)) {
+            nativePurchase = quantity.multiply(nativeAvg);
+        }
+        BigDecimal nativeValuation = !isZero(quantity) && !isZero(nativePrice)
+                ? quantity.multiply(nativePrice)
+                : BigDecimal.ZERO;
+        BigDecimal reportedEval = firstDecimal(row, "frcr_evlu_amt2", "ovrs_stck_evlu_amt", "evlu_amt");
+        if (isZero(nativeValuation) && !isZero(reportedEval) && (isZero(fxRate) || !looksLikeKrw(reportedEval, nativeValuation, fxRate))) {
+            nativeValuation = reportedEval;
+        }
+        BigDecimal nativeGain = nativeValuation.subtract(nativePurchase);
+
+        BigDecimal krwPurchase = firstDecimal(row, "pchs_rmnd_wcrc_amt");
+        if (isZero(krwPurchase)) {
+            krwPurchase = toKrw(nativePurchase, fxRate);
+        }
+        BigDecimal krwGain = firstDecimal(row, "evlu_pfls_amt2");
+        if (isZero(krwGain)) {
+            krwGain = firstDecimal(row, "frcr_evlu_pfls_amt", "evlu_pfls_amt");
+            if (!isZero(krwGain) && looksLikeKrw(krwGain, nativeGain, fxRate)) {
+                // already KRW
+            } else if (!isZero(fxRate)) {
+                krwGain = toKrw(nativeGain, fxRate);
+            }
+        }
+        BigDecimal krwValuation = BigDecimal.ZERO;
+        if (!isZero(reportedEval) && looksLikeKrw(reportedEval, nativeValuation, fxRate)) {
+            krwValuation = reportedEval;
+        } else if (!isZero(krwPurchase) || !isZero(krwGain)) {
+            krwValuation = krwPurchase.add(krwGain);
+        } else {
+            krwValuation = toKrw(nativeValuation, fxRate);
+        }
+
+        BigDecimal profitRate = firstDecimal(row, "evlu_pfls_rt1", "evlu_pfls_rt");
+        if (isZero(profitRate) && !isZero(nativePurchase)) {
+            profitRate = nativeGain.divide(nativePurchase, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"));
+        }
+
+        return new KisApiClient.KisPosition(
+                itemCode,
+                defaultString(text(row, "prdt_name", "ovrs_item_name", "item_name"), itemCode),
+                "STOCK",
+                itemCode,
+                quantity,
+                profitRate,
+                defaultString(text(row, "buy_crcy_cd", "crcy_cd", "tr_crcy_cd"), "USD"),
+                "Y",
+                fxRate,
+                new KisApiClient.NativeQuote(nativeAvg, nativePrice, nativePurchase, nativeValuation, nativeGain),
+                new KisApiClient.KrwQuote(krwPurchase, krwValuation, krwGain));
+    }
+
+    private static Map<String, BigDecimal> collectFxRates(List<KisApiClient.KisPosition> positions) {
+        Map<String, BigDecimal> fxRates = new LinkedHashMap<>();
+        for (KisApiClient.KisPosition position : positions) {
+            if (position.currencyCode() == null || position.currencyCode().isBlank()) {
+                continue;
+            }
+            if (position.fxRate() == null || isZero(position.fxRate())) {
+                continue;
+            }
+            fxRates.putIfAbsent(position.currencyCode(), position.fxRate());
+        }
+        return fxRates;
+    }
+
+    private static boolean looksLikeKrw(BigDecimal amount, BigDecimal nativeAmount, BigDecimal fxRate) {
+        if (isZero(amount)) {
+            return false;
+        }
+        if (isZero(nativeAmount) || isZero(fxRate)) {
+            return fxRate.compareTo(new BigDecimal("10")) > 0 && amount.abs().compareTo(new BigDecimal("1000")) > 0;
+        }
+        BigDecimal ratio = amount.abs().divide(nativeAmount.abs(), 4, RoundingMode.HALF_UP);
+        return ratio.compareTo(new BigDecimal("8")) > 0;
+    }
+
+    private static BigDecimal toKrw(BigDecimal nativeAmount, BigDecimal fxRate) {
+        if (isZero(nativeAmount) || isZero(fxRate)) {
+            return BigDecimal.ZERO;
+        }
+        return nativeAmount.multiply(fxRate).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static boolean isZero(BigDecimal value) {
+        return value == null || value.compareTo(BigDecimal.ZERO) == 0;
     }
 
     static void requireSuccess(JsonNode root) {

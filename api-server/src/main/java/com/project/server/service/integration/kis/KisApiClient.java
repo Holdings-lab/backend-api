@@ -2,6 +2,7 @@ package com.project.server.service.integration.kis;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 public interface KisApiClient {
 
@@ -18,20 +19,32 @@ public interface KisApiClient {
         USER
     }
 
+    record NativeQuote(
+            BigDecimal purchaseUnitPrice,
+            BigDecimal presentPrice,
+            BigDecimal purchaseAmount,
+            BigDecimal valuationAmount,
+            BigDecimal gainLoss) {
+    }
+
+    record KrwQuote(
+            BigDecimal purchaseAmount,
+            BigDecimal valuationAmount,
+            BigDecimal gainLoss) {
+    }
+
     record KisPosition(
             String itemCode,
             String itemName,
             String productType,
             String productCode,
             BigDecimal quantity,
-            BigDecimal purchaseUnitPrice,
-            BigDecimal presentPrice,
-            BigDecimal valuationAmount,
-            BigDecimal purchaseAmount,
-            BigDecimal valuationGainLoss,
             BigDecimal profitRate,
             String currencyCode,
-            String overseasYn) {
+            String overseasYn,
+            BigDecimal fxRate,
+            NativeQuote nativeQuote,
+            KrwQuote krw) {
     }
 
     record KisBalanceSnapshot(
@@ -44,6 +57,7 @@ public interface KisApiClient {
             BigDecimal purchaseAmount,
             BigDecimal gainLoss,
             BigDecimal gainLossRate,
+            Map<String, BigDecimal> fxRates,
             List<KisPosition> positions) {
     }
 
