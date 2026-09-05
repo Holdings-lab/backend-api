@@ -47,7 +47,6 @@ public class PortfolioAggregationService {
                     .totalValuationGainLoss(BigDecimal.ZERO)
                     .totalProfitRate(BigDecimal.ZERO)
                     .positions(List.of())
-                    .byBroker(Map.of())
                     .lastSyncedAt(null)
                     .build();
         }
@@ -58,13 +57,13 @@ public class PortfolioAggregationService {
         BigDecimal totalValuationAmount = BigDecimal.ZERO;
         BigDecimal totalValuationGainLoss = BigDecimal.ZERO;
 
-        Map<String, BrokerAccountDto.AccountPortfolioDto> byBroker = new HashMap<>();
         Map<String, BigDecimal> fxRates = new HashMap<>();
         LocalDateTime latestSyncTime = null;
+        List<BrokerAccountDto.AssetPositionDto> allPositions = new java.util.ArrayList<>();
 
         for (BrokerAccountEntity account : accounts) {
             AccountBalanceEntity latestBalance = accountBalanceRepository
-                    .findTopByAccountIdOrderByAsOfDateDesc(account.getId())
+                    .findTopByAccountIdOrderByLastSyncedAtDesc(account.getId())
                     .orElse(null);
 
             if (latestBalance != null) {
@@ -82,14 +81,11 @@ public class PortfolioAggregationService {
                 }
             }
 
-            List<BrokerAccountDto.AssetPositionDto> positionDtos = assetPositionRepository
+            allPositions.addAll(assetPositionRepository
                     .findByAccountId(account.getId()).stream()
                     .filter(BrokerFieldMapper::isOverseas)
                     .map(BrokerFieldMapper::toPositionDto)
-                    .collect(Collectors.toList());
-
-            byBroker.put(account.getBrokerName() + "_" + account.getAccountNumber(),
-                    toAccountPortfolio(account, latestBalance, positionDtos));
+                    .toList());
         }
 
         BigDecimal totalProfitRate = BigDecimal.ZERO;
@@ -98,12 +94,6 @@ public class PortfolioAggregationService {
                     .divide(totalPurchaseAmount, 4, java.math.RoundingMode.HALF_UP)
                     .multiply(new BigDecimal(100));
         }
-
-        List<BrokerAccountDto.AssetPositionDto> allPositions = accounts.stream()
-                .flatMap(account -> assetPositionRepository.findByAccountId(account.getId()).stream())
-                .filter(BrokerFieldMapper::isOverseas)
-                .map(BrokerFieldMapper::toPositionDto)
-                .collect(Collectors.toList());
 
         return BrokerAccountDto.CombinedPortfolioResponse.builder()
                 .currencyCode("KRW")
@@ -115,7 +105,6 @@ public class PortfolioAggregationService {
                 .totalValuationGainLoss(scaleKrw(totalValuationGainLoss))
                 .totalProfitRate(scaleRate(totalProfitRate))
                 .positions(allPositions)
-                .byBroker(byBroker)
                 .lastSyncedAt(latestSyncTime)
                 .build();
     }
@@ -124,7 +113,7 @@ public class PortfolioAggregationService {
         BrokerAccountEntity account = validateAccountAccess(userId, accountId);
 
         AccountBalanceEntity latestBalance = accountBalanceRepository
-                .findTopByAccountIdOrderByAsOfDateDesc(accountId)
+                .findTopByAccountIdOrderByLastSyncedAtDesc(accountId)
                 .orElse(null);
 
         List<BrokerAccountDto.AssetPositionDto> positionDtos = assetPositionRepository.findByAccountId(accountId).stream()

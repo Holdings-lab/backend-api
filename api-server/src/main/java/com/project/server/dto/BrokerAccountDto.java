@@ -246,7 +246,6 @@ public class BrokerAccountDto {
         private BigDecimal totalValuationGainLoss;
         private BigDecimal totalProfitRate;
         private List<AssetPositionDto> positions;
-        private Map<String, AccountPortfolioDto> byBroker;
         private LocalDateTime lastSyncedAt;
     }
 

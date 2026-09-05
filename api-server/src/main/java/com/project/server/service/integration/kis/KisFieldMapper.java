@@ -18,23 +18,28 @@ public final class KisFieldMapper {
     public static KisApiClient.KisBalanceSnapshot toOverseasSnapshot(
             KisApiClient.KisCredential credential,
             List<KisApiClient.KisPosition> overseasPositions,
+            JsonNode overseasOutput2,
             JsonNode overseasOutput3) {
-        List<KisApiClient.KisPosition> positions = overseasPositions == null
-                ? List.of()
-                : List.copyOf(overseasPositions);
-
         JsonNode output3 = firstObject(overseasOutput3);
         BigDecimal cash = firstDecimal(output3, "tot_dncl_amt", "dncl_amt");
         BigDecimal evaluation = firstDecimal(output3, "evlu_amt_smtl", "evlu_amt_smtl_amt", "frcr_evlu_tota");
         BigDecimal purchase = firstDecimal(output3, "pchs_amt_smtl", "pchs_amt_smtl_amt");
         BigDecimal gainLoss = firstDecimal(output3, "evlu_pfls_amt_smtl", "tot_evlu_pfls_amt");
-        BigDecimal total = firstDecimal(output3, "tot_asst_amt");
-        if (total.compareTo(BigDecimal.ZERO) == 0) {
-            total = evaluation.add(cash);
+        BigDecimal overseasTotal = evaluation.add(cash);
+        BigDecimal reportedTotal = firstDecimal(output3, "tot_asst_amt");
+        BigDecimal total = overseasTotal;
+        if (!isZero(reportedTotal)
+                && reportedTotal.compareTo(overseasTotal.multiply(new BigDecimal("2"))) <= 0) {
+            total = reportedTotal;
         }
         BigDecimal gainLossRate = purchase.compareTo(BigDecimal.ZERO) > 0
                 ? gainLoss.divide(purchase, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
                 : BigDecimal.ZERO;
+
+        List<KisApiClient.KisPosition> positions = applyFxAndKrw(
+                overseasPositions,
+                collectFxFromOutput2(overseasOutput2),
+                deriveUsdKrw(overseasPositions, purchase, evaluation));
 
         return new KisApiClient.KisBalanceSnapshot(
                 credential.cano(),
@@ -87,7 +92,7 @@ public final class KisFieldMapper {
             return null;
         }
 
-        BigDecimal fxRate = firstDecimal(row, "bass_exrt", "frst_bltn_exrt");
+        BigDecimal fxRate = firstDecimal(row, "bass_exrt", "frst_bltn_exrt", "exrt", "ovrs_exrt", "wcrc_exrt");
         BigDecimal nativeAvg = firstDecimal(row, "avg_unpr3", "pchs_avg_pric");
         BigDecimal nativePrice = firstDecimal(row, "ovrs_now_pric1", "now_pric2", "prpr");
         BigDecimal nativePurchase = firstDecimal(row, "frcr_pchs_amt", "frcr_pchs_amt1");
@@ -142,6 +147,122 @@ public final class KisFieldMapper {
                 fxRate,
                 new KisApiClient.NativeQuote(nativeAvg, nativePrice, nativePurchase, nativeValuation, nativeGain),
                 new KisApiClient.KrwQuote(krwPurchase, krwValuation, krwGain));
+    }
+
+    private static List<KisApiClient.KisPosition> applyFxAndKrw(
+            List<KisApiClient.KisPosition> source,
+            Map<String, BigDecimal> fxByCurrency,
+            BigDecimal derivedUsdKrw) {
+        if (source == null || source.isEmpty()) {
+            return List.of();
+        }
+        List<KisApiClient.KisPosition> result = new ArrayList<>();
+        for (KisApiClient.KisPosition position : source) {
+            BigDecimal fx = position.fxRate();
+            if (isZero(fx) && position.currencyCode() != null) {
+                fx = fxByCurrency.get(position.currencyCode());
+            }
+            if (isZero(fx) && "USD".equalsIgnoreCase(position.currencyCode())) {
+                fx = derivedUsdKrw;
+            }
+            result.add(withFx(position, fx));
+        }
+        return List.copyOf(result);
+    }
+
+    private static KisApiClient.KisPosition withFx(KisApiClient.KisPosition position, BigDecimal fxRate) {
+        KisApiClient.NativeQuote nativeQuote = position.nativeQuote();
+        KisApiClient.KrwQuote krw = rebuildKrw(nativeQuote, position.krw(), fxRate);
+        return new KisApiClient.KisPosition(
+                position.itemCode(),
+                position.itemName(),
+                position.productType(),
+                position.productCode(),
+                position.quantity(),
+                position.profitRate(),
+                position.currencyCode(),
+                position.overseasYn(),
+                isZero(fxRate) ? BigDecimal.ZERO : fxRate,
+                nativeQuote,
+                krw);
+    }
+
+    private static KisApiClient.KrwQuote rebuildKrw(
+            KisApiClient.NativeQuote nativeQuote,
+            KisApiClient.KrwQuote reported,
+            BigDecimal fxRate) {
+        BigDecimal nativePurchase = nativeQuote == null ? BigDecimal.ZERO : defaultDecimal(nativeQuote.purchaseAmount());
+        BigDecimal nativeValuation = nativeQuote == null ? BigDecimal.ZERO : defaultDecimal(nativeQuote.valuationAmount());
+        BigDecimal nativeGain = nativeQuote == null ? BigDecimal.ZERO : defaultDecimal(nativeQuote.gainLoss());
+
+        BigDecimal krwPurchase = reported == null ? BigDecimal.ZERO : defaultDecimal(reported.purchaseAmount());
+        BigDecimal krwValuation = reported == null ? BigDecimal.ZERO : defaultDecimal(reported.valuationAmount());
+        BigDecimal krwGain = reported == null ? BigDecimal.ZERO : defaultDecimal(reported.gainLoss());
+
+        if (!looksLikeKrw(krwPurchase, nativePurchase, fxRate)) {
+            krwPurchase = toKrw(nativePurchase, fxRate);
+        }
+        if (!looksLikeKrw(krwValuation, nativeValuation, fxRate)) {
+            krwValuation = toKrw(nativeValuation, fxRate);
+        }
+        if (!looksLikeKrw(krwGain, nativeGain, fxRate) || krwGain.abs().compareTo(krwValuation.abs()) > 0) {
+            krwGain = krwValuation.subtract(krwPurchase);
+        }
+        return new KisApiClient.KrwQuote(krwPurchase, krwValuation, krwGain);
+    }
+
+    private static Map<String, BigDecimal> collectFxFromOutput2(JsonNode output2) {
+        Map<String, BigDecimal> rates = new LinkedHashMap<>();
+        for (JsonNode row : asRows(output2)) {
+            String currency = text(row, "crcy_cd", "buy_crcy_cd", "tr_crcy_cd");
+            BigDecimal rate = firstDecimal(row, "bass_exrt", "frst_bltn_exrt", "exrt", "ovrs_exrt", "wcrc_exrt");
+            if (currency == null || currency.isBlank() || isZero(rate)) {
+                continue;
+            }
+            if (currency.length() > 3) {
+                continue;
+            }
+            rates.putIfAbsent(currency.toUpperCase(), rate);
+        }
+        return rates;
+    }
+
+    private static BigDecimal deriveUsdKrw(
+            List<KisApiClient.KisPosition> positions,
+            BigDecimal krwPurchaseTotal,
+            BigDecimal krwValuationTotal) {
+        if (positions == null || positions.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal nativePurchase = BigDecimal.ZERO;
+        BigDecimal nativeValuation = BigDecimal.ZERO;
+        for (KisApiClient.KisPosition position : positions) {
+            if (!"USD".equalsIgnoreCase(position.currencyCode()) || position.nativeQuote() == null) {
+                continue;
+            }
+            nativePurchase = nativePurchase.add(defaultDecimal(position.nativeQuote().purchaseAmount()));
+            nativeValuation = nativeValuation.add(defaultDecimal(position.nativeQuote().valuationAmount()));
+        }
+        BigDecimal fromPurchase = ratioAsFx(krwPurchaseTotal, nativePurchase);
+        if (!isZero(fromPurchase)) {
+            return fromPurchase;
+        }
+        return ratioAsFx(krwValuationTotal, nativeValuation);
+    }
+
+    private static BigDecimal ratioAsFx(BigDecimal krw, BigDecimal nativeAmount) {
+        if (isZero(krw) || isZero(nativeAmount)) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal ratio = krw.abs().divide(nativeAmount.abs(), 4, RoundingMode.HALF_UP);
+        if (ratio.compareTo(new BigDecimal("100")) < 0 || ratio.compareTo(new BigDecimal("10000")) > 0) {
+            return BigDecimal.ZERO;
+        }
+        return ratio;
+    }
+
+    private static BigDecimal defaultDecimal(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 
     private static Map<String, BigDecimal> collectFxRates(List<KisApiClient.KisPosition> positions) {

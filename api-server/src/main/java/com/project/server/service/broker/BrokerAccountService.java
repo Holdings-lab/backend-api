@@ -17,7 +17,10 @@ import com.project.server.service.security.CryptoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -39,26 +42,38 @@ public class BrokerAccountService {
   private final CryptoService cryptoService;
   private final ObjectMapper objectMapper;
   private final OnboardingService onboardingService;
+  private final PlatformTransactionManager transactionManager;
 
   /**
    * 한투 계좌 연동.
    * appKey/appSecret이 없으면 KIS_MOCK_* env 계좌를 현재 사용자에게 바인딩한다.
+   * 한투 호출은 트랜잭션 밖에서 하고, 이미 연동된 계좌면 KIS를 다시 치지 않는다.
    */
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public List<BrokerAccountDto.BrokerAccountResponse> linkAccounts(Long userId, BrokerAccountDto.LinkRequest request) {
     BrokerAccountDto.LinkRequest safe = request == null ? new BrokerAccountDto.LinkRequest() : request;
     String brokerName = resolveBrokerName(userId, safe);
     KisApiClient.KisCredential credential = kisCredentialResolver.fromLinkRequest(safe);
     String storedAccountNumber = credential.cano() + credential.accountProductCode();
 
-    boolean alreadyLinked = brokerAccountRepository
+    return brokerAccountRepository
         .findByUserIdAndBrokerNameAndAccountNumber(userId, brokerName, storedAccountNumber)
-        .isPresent();
-    if (alreadyLinked) {
-      throw ApiException.conflict("해당 계좌가 이미 연동되어 있습니다.", "ALL_ACCOUNTS_ALREADY_LINKED");
-    }
+        .map(existing -> List.of(toResponse(existing)))
+        .orElseGet(() -> {
+          KisApiClient.KisBalanceSnapshot snapshot = kisApiClient.fetchBalance(credential);
+          TransactionTemplate tx = new TransactionTemplate(transactionManager);
+          List<BrokerAccountDto.BrokerAccountResponse> created = tx.execute(
+              status -> List.of(insertLinkedAccount(userId, brokerName, credential, snapshot)));
+          return created == null ? List.of() : created;
+        });
+  }
 
-    KisApiClient.KisBalanceSnapshot snapshot = kisApiClient.fetchBalance(credential);
-
+  private BrokerAccountDto.BrokerAccountResponse insertLinkedAccount(
+      Long userId,
+      String brokerName,
+      KisApiClient.KisCredential credential,
+      KisApiClient.KisBalanceSnapshot snapshot) {
+    String storedAccountNumber = credential.cano() + credential.accountProductCode();
     boolean isPrimary = brokerAccountRepository.findByUserId(userId).isEmpty();
     BrokerAccountEntity.CredentialSource source =
         credential.source() == KisApiClient.BrokerAccountCredentialSource.USER
@@ -91,9 +106,10 @@ public class BrokerAccountService {
     onboardingService.markAccountLinked(userId);
     log.info("Linked KIS account: userId={}, accountNumber={}, source={}",
         userId, storedAccountNumber, source);
-    return List.of(toResponse(account));
+    return toResponse(account);
   }
 
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public BrokerAccountDto.BrokerAccountResponse updateCredentials(
       Long userId,
       Long accountId,
@@ -103,6 +119,16 @@ public class BrokerAccountService {
     KisApiClient.KisCredential credential = kisCredentialResolver.fromCredentialUpdate(account, request);
     KisApiClient.KisBalanceSnapshot snapshot = kisApiClient.fetchBalance(credential);
 
+    TransactionTemplate tx = new TransactionTemplate(transactionManager);
+    return tx.execute(status -> applyCredentialUpdate(account, credential, snapshot, previousAppKey, userId));
+  }
+
+  private BrokerAccountDto.BrokerAccountResponse applyCredentialUpdate(
+      BrokerAccountEntity account,
+      KisApiClient.KisCredential credential,
+      KisApiClient.KisBalanceSnapshot snapshot,
+      String previousAppKey,
+      Long userId) {
     if (previousAppKey != null) {
       kisTokenService.invalidate(previousAppKey);
     }
@@ -127,7 +153,7 @@ public class BrokerAccountService {
     }
     brokerAccountRepository.save(account);
     persistHoldings(account, snapshot);
-    log.info("Updated KIS credentials: userId={}, accountId={}, source={}", userId, accountId, source);
+    log.info("Updated KIS credentials: userId={}, accountId={}, source={}", userId, account.getId(), source);
     return toResponse(account);
   }
 
@@ -237,7 +263,7 @@ public class BrokerAccountService {
 
   private BrokerAccountDto.BrokerAccountDetailResponse toDetailResponse(BrokerAccountEntity entity) {
     BrokerAccountDto.AccountBalanceDto latestBalance = accountBalanceRepository
-        .findTopByAccountIdOrderByAsOfDateDesc(entity.getId())
+        .findTopByAccountIdOrderByLastSyncedAtDesc(entity.getId())
         .map(BrokerFieldMapper::toBalanceDto)
         .orElse(null);
 
@@ -259,7 +285,9 @@ public class BrokerAccountService {
         .hasCredentials(kisCredentialResolver.hasResolvableCredentials(entity))
         .latestBalance(latestBalance)
         .positions(positions)
-        .lastSyncedAt(entity.getLastSyncedAt())
+        .lastSyncedAt(latestBalance != null && latestBalance.getLastSyncedAt() != null
+            ? latestBalance.getLastSyncedAt()
+            : entity.getLastSyncedAt())
         .syncCount(entity.getSyncCount())
         .build();
   }

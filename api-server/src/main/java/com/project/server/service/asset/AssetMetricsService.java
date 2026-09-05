@@ -77,7 +77,7 @@ public class AssetMetricsService {
         BigDecimal total = BigDecimal.ZERO;
         for (BrokerAccountEntity account : getConnectedAccounts(userId)) {
             AccountBalanceEntity balance = accountBalanceRepository
-                    .findTopByAccountIdOrderByAsOfDateDesc(account.getId())
+                    .findTopByAccountIdOrderByLastSyncedAtDesc(account.getId())
                     .orElse(null);
             if (balance != null && balance.getTotalAssetValue() != null) {
                 total = total.add(balance.getTotalAssetValue());

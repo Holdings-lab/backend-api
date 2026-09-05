@@ -45,7 +45,7 @@ public final class BrokerFieldMapper {
                 .quantity(qty(entity.getQuantity()))
                 .profitRate(rate(entity.getGainLossRate()))
                 .currencyCode(entity.getCurrencyCode())
-                .fxRate(fx(entity.getFxRate()))
+                .fxRate(isZero(entity.getFxRate()) ? null : fx(entity.getFxRate()))
                 .nativeAmounts(BrokerAccountDto.PositionNativeDto.builder()
                         .purchaseUnitPrice(nativeUnit(entity.getPurchasePrice()))
                         .presentPrice(nativeUnit(entity.getCurrentPrice()))
@@ -78,7 +78,7 @@ public final class BrokerFieldMapper {
         }
         Map<String, BigDecimal> scaled = new LinkedHashMap<>();
         fxRates.forEach((currency, rate) -> {
-            if (currency != null && !currency.isBlank() && rate != null) {
+            if (currency != null && !currency.isBlank() && rate != null && rate.compareTo(BigDecimal.ZERO) > 0) {
                 scaled.put(currency, fx(rate));
             }
         });
@@ -114,5 +114,9 @@ public final class BrokerFieldMapper {
             return null;
         }
         return value.setScale(places, RoundingMode.HALF_UP);
+    }
+
+    private static boolean isZero(BigDecimal value) {
+        return value == null || value.compareTo(BigDecimal.ZERO) == 0;
     }
 }

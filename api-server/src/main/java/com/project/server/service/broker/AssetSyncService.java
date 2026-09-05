@@ -71,6 +71,9 @@ public class AssetSyncService {
             history.setRecordCount(recordCount);
             history.setCompletedAt(LocalDateTime.now());
             history.setSyncDurationMs((int) (System.currentTimeMillis() - startedAtMs));
+            account.setSyncCount((account.getSyncCount() != null ? account.getSyncCount() : 0) + 1);
+            account.setLastSyncedAt(LocalDateTime.now());
+            brokerAccountRepository.save(account);
 
         } catch (Exception e) {
             log.error("Sync failed for account: {}", accountId, e);
@@ -81,9 +84,6 @@ public class AssetSyncService {
         }
 
         syncHistoryRepository.save(history);
-        account.setSyncCount((account.getSyncCount() != null ? account.getSyncCount() : 0) + 1);
-        account.setLastSyncedAt(LocalDateTime.now());
-        brokerAccountRepository.save(account);
 
         return BrokerAccountDto.SyncResponse.builder()
                 .syncId(syncId)
@@ -137,6 +137,7 @@ public class AssetSyncService {
         connectedAccounts.forEach(account -> {
             try {
                 performSync(account);
+                account.setSyncCount((account.getSyncCount() != null ? account.getSyncCount() : 0) + 1);
                 account.setLastSyncedAt(LocalDateTime.now());
                 brokerAccountRepository.save(account);
             } catch (Exception e) {
@@ -178,22 +179,28 @@ public class AssetSyncService {
             totalAssetValue = evaluationAmount.add(cashBalance);
         }
 
-        AccountBalanceEntity balance = AccountBalanceEntity.builder()
-                .accountId(account.getId())
-                .userId(account.getUserId())
-                .totalAssetValue(totalAssetValue)
-                .cashBalance(cashBalance)
-                .depositAmount(purchaseAmount)
-                .evaluationAmount(evaluationAmount)
-                .gainLoss(gainLoss)
-                .gainLossRate(gainLossRate)
-                .dailyGainLoss(BigDecimal.ZERO)
-                .dailyGainLossRate(BigDecimal.ZERO)
-                .currencyCode("KRW")
-                .fxRates(copyFxRates(snapshot.fxRates()))
-                .asOfDate(LocalDate.now())
-                .lastSyncedAt(LocalDateTime.now())
-                .build();
+        LocalDate asOfDate = LocalDate.now();
+        LocalDateTime syncedAt = LocalDateTime.now();
+        AccountBalanceEntity balance = accountBalanceRepository
+                .findTopByAccountIdAndAsOfDateOrderByIdDesc(account.getId(), asOfDate)
+                .orElseGet(() -> AccountBalanceEntity.builder()
+                        .accountId(account.getId())
+                        .userId(account.getUserId())
+                        .asOfDate(asOfDate)
+                        .build());
+
+        balance.setTotalAssetValue(totalAssetValue);
+        balance.setCashBalance(cashBalance);
+        balance.setDepositAmount(purchaseAmount);
+        balance.setEvaluationAmount(evaluationAmount);
+        balance.setGainLoss(gainLoss);
+        balance.setGainLossRate(gainLossRate);
+        balance.setDailyGainLoss(BigDecimal.ZERO);
+        balance.setDailyGainLossRate(BigDecimal.ZERO);
+        balance.setCurrencyCode("KRW");
+        balance.setFxRates(copyFxRates(snapshot.fxRates()));
+        balance.setAsOfDate(asOfDate);
+        balance.setLastSyncedAt(syncedAt);
 
         accountBalanceRepository.save(balance);
         log.info("KIS balance synced for account: {}", account.getId());

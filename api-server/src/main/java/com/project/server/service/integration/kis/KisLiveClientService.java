@@ -39,12 +39,14 @@ public class KisLiveClientService implements KisApiClient {
 
     /**
      * 모의는 NASD가 나스닥만, 실전은 미국전체. NYSE/AMEX도 따로 조회한다.
-     * 체결기준현재잔고가 실패했을 때만 사용.
+     * 체결기준현재잔고가 실패했을 때만 사용. 미국 외 시장은 타임아웃으로 502가 나기 쉬워 후순위로 둔다.
      */
-    private static final List<OverseasMarket> OVERSEAS_MARKETS = List.of(
+    private static final List<OverseasMarket> US_MARKETS = List.of(
             new OverseasMarket("NASD", "USD"),
             new OverseasMarket("NYSE", "USD"),
-            new OverseasMarket("AMEX", "USD"),
+            new OverseasMarket("AMEX", "USD"));
+
+    private static final List<OverseasMarket> OTHER_MARKETS = List.of(
             new OverseasMarket("SEHK", "HKD"),
             new OverseasMarket("SHAA", "CNY"),
             new OverseasMarket("SZAA", "CNY"),
@@ -70,7 +72,8 @@ public class KisLiveClientService implements KisApiClient {
         } else {
             log.info("[KIS] overseas holdings count={}", overseas.positions().size());
         }
-        return KisFieldMapper.toOverseasSnapshot(credential, overseas.positions(), overseas.output3());
+        return KisFieldMapper.toOverseasSnapshot(
+                credential, overseas.positions(), overseas.output2(), overseas.output3());
     }
 
     private OverseasHoldings fetchOverseasHoldings(KisCredential credential) {
@@ -84,7 +87,7 @@ public class KisLiveClientService implements KisApiClient {
                     positions = byExchange;
                 }
             }
-            return new OverseasHoldings(positions, present.path("output3"));
+            return new OverseasHoldings(positions, present.path("output2"), present.path("output3"));
         } catch (ApiException e) {
             log.warn("[KIS] inquire-present-balance failed, falling back to exchange inquire-balance: {}",
                     e.getMessage());
@@ -93,6 +96,7 @@ public class KisLiveClientService implements KisApiClient {
         }
         return new OverseasHoldings(
                 fetchOverseasByExchange(credential),
+                com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance());
     }
 
@@ -142,8 +146,23 @@ public class KisLiveClientService implements KisApiClient {
     }
 
     private List<KisPosition> fetchOverseasByExchange(KisCredential credential) {
+        List<KisPosition> us = fetchMarkets(credential, US_MARKETS);
+        if (!us.isEmpty() || kisProperties.isPaperMode()) {
+            return us;
+        }
+        Map<String, KisPosition> merged = new LinkedHashMap<>();
+        for (KisPosition position : us) {
+            merged.putIfAbsent(position.itemCode(), position);
+        }
+        for (KisPosition position : fetchMarkets(credential, OTHER_MARKETS)) {
+            merged.putIfAbsent(position.itemCode(), position);
+        }
+        return new ArrayList<>(merged.values());
+    }
+
+    private List<KisPosition> fetchMarkets(KisCredential credential, List<OverseasMarket> markets) {
         Map<String, KisPosition> byCode = new LinkedHashMap<>();
-        for (OverseasMarket market : OVERSEAS_MARKETS) {
+        for (OverseasMarket market : markets) {
             try {
                 JsonNode node = fetchOverseasBalanceForMarket(credential, market);
                 for (KisPosition position : KisFieldMapper.toOverseasBalancePositions(node.path("output1"))) {
@@ -343,6 +362,6 @@ public class KisLiveClientService implements KisApiClient {
     private record OverseasMarket(String exchange, String currency) {
     }
 
-    private record OverseasHoldings(List<KisPosition> positions, JsonNode output3) {
+    private record OverseasHoldings(List<KisPosition> positions, JsonNode output2, JsonNode output3) {
     }
 }
