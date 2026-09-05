@@ -1,5 +1,8 @@
 package com.project.server.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -45,22 +48,6 @@ public class BrokerAccountDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class AccountSnapshot {
-        private String accountDisplay;
-        private String accountName;
-        private String accountNick;
-        private String balance;
-        private String currencyCode;
-        private String availableBalance;
-        private String accountHolder;
-        private String accountProductCode;
-        private String cano;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
     public static class BrokerAccountResponse {
         /** 앱 내부 연동 계좌 PK */
         private Long accountId;
@@ -71,7 +58,6 @@ public class BrokerAccountDto {
         private String accountType;
         private String status;
         private Boolean isPrimary;
-        private AccountSnapshot accountSnapshot;
         private String credentialSource;
         private Boolean hasCredentials;
         private LocalDateTime lastSyncedAt;
@@ -93,7 +79,6 @@ public class BrokerAccountDto {
         private String accountType;
         private String status;
         private Boolean isPrimary;
-        private AccountSnapshot accountSnapshot;
         private String credentialSource;
         private Boolean hasCredentials;
         private AccountBalanceDto latestBalance;
@@ -140,7 +125,9 @@ public class BrokerAccountDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class AccountBalanceDto {
+        @JsonIgnore
         private Long id;
         private String currencyCode;
         private Map<String, BigDecimal> fxRates;
@@ -158,6 +145,7 @@ public class BrokerAccountDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class PositionNativeDto {
         private BigDecimal purchaseUnitPrice;
         private BigDecimal presentPrice;
@@ -170,6 +158,7 @@ public class BrokerAccountDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class PositionKrwDto {
         private BigDecimal purchaseAmount;
         private BigDecimal valuationAmount;
@@ -180,17 +169,16 @@ public class BrokerAccountDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class AssetPositionDto {
         private String itemCode;
         private String itemName;
         private String productType;
-        private String productCode;
         private BigDecimal quantity;
         private BigDecimal profitRate;
         private String currencyCode;
-        private String overseasYn;
         private BigDecimal fxRate;
-        @com.fasterxml.jackson.annotation.JsonProperty("native")
+        @JsonProperty("native")
         private PositionNativeDto nativeAmounts;
         private PositionKrwDto krw;
     }
@@ -274,6 +262,10 @@ public class BrokerAccountDto {
         private Map<String, BigDecimal> fxRates;
         private BigDecimal estimatedDepositAsset;
         private BigDecimal cashBalance;
+        private BigDecimal totalPurchaseAmount;
+        private BigDecimal totalValuationAmount;
+        private BigDecimal totalValuationGainLoss;
+        private BigDecimal totalProfitRate;
         private List<AssetPositionDto> positions;
         private LocalDateTime lastSyncedAt;
     }

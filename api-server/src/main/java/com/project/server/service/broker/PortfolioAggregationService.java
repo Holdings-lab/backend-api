@@ -89,20 +89,7 @@ public class PortfolioAggregationService {
                     .collect(Collectors.toList());
 
             byBroker.put(account.getBrokerName() + "_" + account.getAccountNumber(),
-                    BrokerAccountDto.AccountPortfolioDto.builder()
-                            .accountId(account.getId())
-                            .accountNumber(account.getAccountNumber())
-                            .brokerName(account.getBrokerName())
-                            .currencyCode("KRW")
-                            .fxRates(latestBalance != null && latestBalance.getFxRates() != null
-                                    ? latestBalance.getFxRates()
-                                    : Map.of())
-                            .estimatedDepositAsset(
-                                    latestBalance != null ? nullToZero(latestBalance.getTotalAssetValue()) : BigDecimal.ZERO)
-                            .cashBalance(latestBalance != null ? nullToZero(latestBalance.getCashBalance()) : BigDecimal.ZERO)
-                            .positions(positionDtos)
-                            .lastSyncedAt(latestBalance != null ? latestBalance.getLastSyncedAt() : null)
-                            .build());
+                    toAccountPortfolio(account, latestBalance, positionDtos));
         }
 
         BigDecimal totalProfitRate = BigDecimal.ZERO;
@@ -120,13 +107,13 @@ public class PortfolioAggregationService {
 
         return BrokerAccountDto.CombinedPortfolioResponse.builder()
                 .currencyCode("KRW")
-                .fxRates(fxRates)
-                .estimatedDepositAsset(estimatedDepositAsset)
-                .cashBalance(totalCashBalance)
-                .totalPurchaseAmount(totalPurchaseAmount)
-                .totalValuationAmount(totalValuationAmount)
-                .totalValuationGainLoss(totalValuationGainLoss)
-                .totalProfitRate(totalProfitRate)
+                .fxRates(BrokerFieldMapper.scaleFxRates(fxRates))
+                .estimatedDepositAsset(scaleKrw(estimatedDepositAsset))
+                .cashBalance(scaleKrw(totalCashBalance))
+                .totalPurchaseAmount(scaleKrw(totalPurchaseAmount))
+                .totalValuationAmount(scaleKrw(totalValuationAmount))
+                .totalValuationGainLoss(scaleKrw(totalValuationGainLoss))
+                .totalProfitRate(scaleRate(totalProfitRate))
                 .positions(allPositions)
                 .byBroker(byBroker)
                 .lastSyncedAt(latestSyncTime)
@@ -145,18 +132,30 @@ public class PortfolioAggregationService {
                 .map(BrokerFieldMapper::toPositionDto)
                 .collect(Collectors.toList());
 
+        return toAccountPortfolio(account, latestBalance, positionDtos);
+    }
+
+    private static BrokerAccountDto.AccountPortfolioDto toAccountPortfolio(
+            BrokerAccountEntity account,
+            AccountBalanceEntity latestBalance,
+            List<BrokerAccountDto.AssetPositionDto> positions) {
+        BrokerAccountDto.AccountBalanceDto balance = BrokerFieldMapper.toBalanceDto(latestBalance);
+        BigDecimal zero = BigDecimal.ZERO.setScale(2);
+
         return BrokerAccountDto.AccountPortfolioDto.builder()
-                .accountId(accountId)
+                .accountId(account.getId())
                 .accountNumber(account.getAccountNumber())
                 .brokerName(account.getBrokerName())
                 .currencyCode("KRW")
-                .fxRates(latestBalance != null && latestBalance.getFxRates() != null
-                        ? latestBalance.getFxRates()
-                        : Map.of())
-                .estimatedDepositAsset(latestBalance != null ? nullToZero(latestBalance.getTotalAssetValue()) : BigDecimal.ZERO)
-                .cashBalance(latestBalance != null ? nullToZero(latestBalance.getCashBalance()) : BigDecimal.ZERO)
-                .positions(positionDtos)
-                .lastSyncedAt(latestBalance != null ? latestBalance.getLastSyncedAt() : null)
+                .fxRates(balance != null ? balance.getFxRates() : Map.of())
+                .estimatedDepositAsset(balance != null ? balance.getEstimatedDepositAsset() : zero)
+                .cashBalance(balance != null ? balance.getCashBalance() : zero)
+                .totalPurchaseAmount(balance != null ? balance.getTotalPurchaseAmount() : zero)
+                .totalValuationAmount(balance != null ? balance.getTotalValuationAmount() : zero)
+                .totalValuationGainLoss(balance != null ? balance.getTotalValuationGainLoss() : zero)
+                .totalProfitRate(balance != null ? balance.getTotalProfitRate() : zero)
+                .positions(positions)
+                .lastSyncedAt(balance != null ? balance.getLastSyncedAt() : null)
                 .build();
     }
 
@@ -242,5 +241,13 @@ public class PortfolioAggregationService {
 
     private static BigDecimal nullToZero(BigDecimal value) {
         return value != null ? value : BigDecimal.ZERO;
+    }
+
+    private static BigDecimal scaleKrw(BigDecimal value) {
+        return nullToZero(value).setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal scaleRate(BigDecimal value) {
+        return nullToZero(value).setScale(2, java.math.RoundingMode.HALF_UP);
     }
 }

@@ -1,6 +1,5 @@
 package com.project.server.service.broker;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.server.domain.BrokerAccountEntity;
 import com.project.server.domain.broker.SupportedBroker;
@@ -22,7 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -229,7 +227,6 @@ public class BrokerAccountService {
         .accountType(entity.getAccountType())
         .status(statusName(entity))
         .isPrimary(entity.getIsPrimary())
-        .accountSnapshot(parseAccountSnapshot(entity))
         .credentialSource(entity.getCredentialSource() != null ? entity.getCredentialSource().name() : null)
         .hasCredentials(kisCredentialResolver.hasResolvableCredentials(entity))
         .lastSyncedAt(entity.getLastSyncedAt())
@@ -258,7 +255,6 @@ public class BrokerAccountService {
         .accountType(entity.getAccountType())
         .status(statusName(entity))
         .isPrimary(entity.getIsPrimary())
-        .accountSnapshot(parseAccountSnapshot(entity))
         .credentialSource(entity.getCredentialSource() != null ? entity.getCredentialSource().name() : null)
         .hasCredentials(kisCredentialResolver.hasResolvableCredentials(entity))
         .latestBalance(latestBalance)
@@ -266,22 +262,6 @@ public class BrokerAccountService {
         .lastSyncedAt(entity.getLastSyncedAt())
         .syncCount(entity.getSyncCount())
         .build();
-  }
-
-  private BrokerAccountDto.AccountSnapshot parseAccountSnapshot(BrokerAccountEntity entity) {
-    if (entity.getAccountDetails() == null || entity.getAccountDetails().isEmpty()) {
-      return null;
-    }
-    try {
-      Map<String, Object> details = objectMapper.readValue(
-          entity.getAccountDetails(),
-          new TypeReference<Map<String, Object>>() {
-          });
-      return KisFieldMapper.toAccountSnapshot(entity, details);
-    } catch (Exception e) {
-      log.warn("Failed to parse account details JSON for accountId={}", entity.getId(), e);
-      return null;
-    }
   }
 
   private void persistHoldings(BrokerAccountEntity account, KisApiClient.KisBalanceSnapshot snapshot) {

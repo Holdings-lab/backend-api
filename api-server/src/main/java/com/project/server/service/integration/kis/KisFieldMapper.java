@@ -1,8 +1,6 @@
 package com.project.server.service.integration.kis;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.project.server.domain.BrokerAccountEntity;
-import com.project.server.dto.BrokerAccountDto;
 import com.project.server.exception.ApiException;
 
 import java.math.BigDecimal;
@@ -77,29 +75,6 @@ public final class KisFieldMapper {
         details.put("availableBalance", text(snapshot.cashBalance()));
         details.put("currencyCode", "KRW");
         return details;
-    }
-
-    public static BrokerAccountDto.AccountSnapshot toAccountSnapshot(BrokerAccountEntity entity, Map<String, Object> details) {
-        String cano = stringValue(details, "cano");
-        String product = firstString(details, "accountProductCode", "acntPrdtCd");
-        if (product == null) {
-            product = entity.getAccountProductCode();
-        }
-        String display = firstString(details, "accountDisplay", "acctDisp");
-        if (display == null && cano != null && product != null) {
-            display = KisAccountParser.display(cano, product);
-        }
-        return BrokerAccountDto.AccountSnapshot.builder()
-                .accountDisplay(display)
-                .accountName(firstString(details, "accountName", "acctNm"))
-                .accountNick(firstString(details, "accountNick", "acctNick"))
-                .balance(firstString(details, "balance", "nassAmt"))
-                .currencyCode(firstString(details, "currencyCode", "curCd"))
-                .availableBalance(firstString(details, "availableBalance", "ablBal", "dncaTotAmt"))
-                .accountHolder(firstString(details, "accountHolder", "acctHolder"))
-                .accountProductCode(product)
-                .cano(cano)
-                .build();
     }
 
     private static KisApiClient.KisPosition toOverseasPosition(JsonNode row) {
@@ -277,25 +252,6 @@ public final class KisFieldMapper {
 
     private static String text(java.math.BigDecimal value) {
         return value == null ? null : value.toPlainString();
-    }
-
-    private static String stringValue(Map<String, Object> map, String key) {
-        Object value = map.get(key);
-        if (value == null) {
-            return null;
-        }
-        String text = String.valueOf(value);
-        return text.isBlank() ? null : text;
-    }
-
-    private static String firstString(Map<String, Object> map, String... keys) {
-        for (String key : keys) {
-            String value = stringValue(map, key);
-            if (value != null) {
-                return value;
-            }
-        }
-        return null;
     }
 
     private static String defaultString(String value, String fallback) {
