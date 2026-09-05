@@ -3,7 +3,6 @@ package com.project.server.service.broker;
 import com.project.server.domain.AccountBalanceEntity;
 import com.project.server.domain.AssetPositionEntity;
 import com.project.server.dto.BrokerAccountDto;
-import com.project.server.service.integration.kis.KisFieldMapper;
 
 import java.math.BigDecimal;
 import java.util.Map;
@@ -20,7 +19,7 @@ public final class BrokerFieldMapper {
         return BrokerAccountDto.AccountBalanceDto.builder()
                 .id(balance.getId())
                 .currencyCode(balance.getCurrencyCode() != null ? balance.getCurrencyCode() : "KRW")
-                .fxRates(KisFieldMapper.parseFxRates(balance.getFxRatesJson()))
+                .fxRates(balance.getFxRates() != null ? balance.getFxRates() : java.util.Map.of())
                 .estimatedDepositAsset(balance.getTotalAssetValue())
                 .cashBalance(balance.getCashBalance())
                 .totalPurchaseAmount(balance.getDepositAmount())

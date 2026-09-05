@@ -6,10 +6,13 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 @Entity
 @Table(name = "account_balances", indexes = {
@@ -59,8 +62,9 @@ public class AccountBalanceEntity {
     @Column(name = "currency_code", length = 3)
     private String currencyCode;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "fx_rates", columnDefinition = "jsonb")
-    private String fxRatesJson;
+    private Map<String, BigDecimal> fxRates;
 
     @Column(name = "as_of_date")
     private LocalDate asOfDate;

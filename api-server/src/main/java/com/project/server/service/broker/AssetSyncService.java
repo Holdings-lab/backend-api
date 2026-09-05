@@ -12,19 +12,23 @@ import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.repository.BrokerSyncHistoryRepository;
 import com.project.server.service.integration.kis.KisApiClient;
 import com.project.server.service.integration.kis.KisCredentialResolver;
-import com.project.server.service.integration.kis.KisFieldMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -39,6 +43,7 @@ public class AssetSyncService {
     private final BrokerSyncHistoryRepository syncHistoryRepository;
     private final KisApiClient kisApiClient;
     private final KisCredentialResolver kisCredentialResolver;
+    private final PlatformTransactionManager transactionManager;
 
     public BrokerAccountDto.SyncResponse requestSync(Long userId, Long accountId) {
         BrokerAccountEntity account = validateAccountAccess(userId, accountId);
@@ -60,7 +65,7 @@ public class AssetSyncService {
         Long syncId = history.getId();
 
         try {
-            int recordCount = performSync(account);
+            int recordCount = performSyncInNewTransaction(account);
 
             history.setStatus(BrokerSyncHistoryEntity.SyncStatus.SUCCESS);
             history.setRecordCount(recordCount);
@@ -149,6 +154,13 @@ public class AssetSyncService {
         return savePositions(account, snapshot);
     }
 
+    private int performSyncInNewTransaction(BrokerAccountEntity account) {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        Integer count = template.execute(status -> performSync(account));
+        return count == null ? 0 : count;
+    }
+
     private int performSync(BrokerAccountEntity account) {
         KisApiClient.KisCredential credential = kisCredentialResolver.resolve(account);
         KisApiClient.KisBalanceSnapshot snapshot = kisApiClient.fetchBalance(credential);
@@ -178,7 +190,7 @@ public class AssetSyncService {
                 .dailyGainLoss(BigDecimal.ZERO)
                 .dailyGainLossRate(BigDecimal.ZERO)
                 .currencyCode("KRW")
-                .fxRatesJson(KisFieldMapper.toFxRatesJson(snapshot.fxRates()))
+                .fxRates(copyFxRates(snapshot.fxRates()))
                 .asOfDate(LocalDate.now())
                 .lastSyncedAt(LocalDateTime.now())
                 .build();
@@ -298,5 +310,9 @@ public class AssetSyncService {
 
     private static BigDecimal defaultDecimal(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private static Map<String, BigDecimal> copyFxRates(Map<String, BigDecimal> fxRates) {
+        return fxRates == null ? new LinkedHashMap<>() : new LinkedHashMap<>(fxRates);
     }
 }

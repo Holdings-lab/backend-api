@@ -7,7 +7,6 @@ import com.project.server.exception.ApiException;
 import com.project.server.repository.AccountBalanceRepository;
 import com.project.server.repository.AssetPositionRepository;
 import com.project.server.repository.BrokerAccountRepository;
-import com.project.server.service.integration.kis.KisFieldMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -76,7 +75,7 @@ public class PortfolioAggregationService {
                 totalValuationAmount = totalValuationAmount.add(nullToZero(latestBalance.getEvaluationAmount()));
                 totalValuationGainLoss = totalValuationGainLoss.add(nullToZero(latestBalance.getGainLoss()));
                 fxRates = BrokerFieldMapper.mergeFxRates(
-                        fxRates, KisFieldMapper.parseFxRates(latestBalance.getFxRatesJson()));
+                        fxRates, latestBalance.getFxRates());
 
                 if (latestSyncTime == null || latestBalance.getLastSyncedAt().isAfter(latestSyncTime)) {
                     latestSyncTime = latestBalance.getLastSyncedAt();
@@ -95,8 +94,8 @@ public class PortfolioAggregationService {
                             .accountNumber(account.getAccountNumber())
                             .brokerName(account.getBrokerName())
                             .currencyCode("KRW")
-                            .fxRates(latestBalance != null
-                                    ? KisFieldMapper.parseFxRates(latestBalance.getFxRatesJson())
+                            .fxRates(latestBalance != null && latestBalance.getFxRates() != null
+                                    ? latestBalance.getFxRates()
                                     : Map.of())
                             .estimatedDepositAsset(
                                     latestBalance != null ? nullToZero(latestBalance.getTotalAssetValue()) : BigDecimal.ZERO)
@@ -151,7 +150,9 @@ public class PortfolioAggregationService {
                 .accountNumber(account.getAccountNumber())
                 .brokerName(account.getBrokerName())
                 .currencyCode("KRW")
-                .fxRates(latestBalance != null ? KisFieldMapper.parseFxRates(latestBalance.getFxRatesJson()) : Map.of())
+                .fxRates(latestBalance != null && latestBalance.getFxRates() != null
+                        ? latestBalance.getFxRates()
+                        : Map.of())
                 .estimatedDepositAsset(latestBalance != null ? nullToZero(latestBalance.getTotalAssetValue()) : BigDecimal.ZERO)
                 .cashBalance(latestBalance != null ? nullToZero(latestBalance.getCashBalance()) : BigDecimal.ZERO)
                 .positions(positionDtos)

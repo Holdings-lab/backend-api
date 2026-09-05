@@ -67,45 +67,6 @@ public final class KisFieldMapper {
         return toOverseasPresentPositions(output1);
     }
 
-    public static String toFxRatesJson(Map<String, BigDecimal> fxRates) {
-        if (fxRates == null || fxRates.isEmpty()) {
-            return "{}";
-        }
-        StringBuilder json = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<String, BigDecimal> entry : fxRates.entrySet()) {
-            if (entry.getKey() == null || entry.getValue() == null) {
-                continue;
-            }
-            if (!first) {
-                json.append(',');
-            }
-            json.append('"').append(entry.getKey()).append("\":").append(entry.getValue().toPlainString());
-            first = false;
-        }
-        return json.append('}').toString();
-    }
-
-    public static Map<String, BigDecimal> parseFxRates(String json) {
-        Map<String, BigDecimal> rates = new LinkedHashMap<>();
-        if (json == null || json.isBlank() || "{}".equals(json.trim())) {
-            return rates;
-        }
-        try {
-            JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
-            node.fields().forEachRemaining(entry -> {
-                try {
-                    rates.put(entry.getKey(), new BigDecimal(entry.getValue().asText()));
-                } catch (NumberFormatException ignored) {
-                    // skip
-                }
-            });
-        } catch (Exception ignored) {
-            return Map.of();
-        }
-        return rates;
-    }
-
     public static Map<String, Object> toAccountDetails(KisApiClient.KisBalanceSnapshot snapshot) {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("cano", snapshot.cano());
