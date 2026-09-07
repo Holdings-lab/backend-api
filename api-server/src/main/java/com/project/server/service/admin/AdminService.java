@@ -401,7 +401,7 @@ public class AdminService {
             brokerAccountRepository.save(account);
 
             // 저장 후 최신 계좌 정보 조회해서 반환 (일관성 있는 응답)
-            return brokerAccountService.getAccount(account.getUserId(), accountId);
+            return brokerAccountService.getStoredAccount(account.getUserId(), accountId);
         } catch (ApiException e) {
             throw e;
         } catch (Exception e) {

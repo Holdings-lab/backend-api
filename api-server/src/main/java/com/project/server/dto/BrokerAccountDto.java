@@ -61,7 +61,6 @@ public class BrokerAccountDto {
         private String credentialSource;
         private Boolean hasCredentials;
         private LocalDateTime lastSyncedAt;
-        private Integer syncCount;
         private LocalDateTime createdAt;
     }
 
@@ -81,10 +80,9 @@ public class BrokerAccountDto {
         private Boolean isPrimary;
         private String credentialSource;
         private Boolean hasCredentials;
-        private AccountBalanceDto latestBalance;
+        private AccountBalanceDto balance;
         private List<AssetPositionDto> positions;
         private LocalDateTime lastSyncedAt;
-        private Integer syncCount;
     }
 
     @Data

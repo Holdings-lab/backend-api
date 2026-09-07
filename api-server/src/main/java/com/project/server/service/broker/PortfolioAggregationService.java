@@ -10,6 +10,7 @@ import com.project.server.repository.BrokerAccountRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -28,11 +29,15 @@ public class PortfolioAggregationService {
     private final BrokerAccountRepository brokerAccountRepository;
     private final AssetPositionRepository assetPositionRepository;
     private final AccountBalanceRepository accountBalanceRepository;
+    private final AssetSyncService assetSyncService;
 
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public BrokerAccountDto.CombinedPortfolioResponse getUserCombinedPortfolio(Long userId) {
         if (userId == null || userId <= 0) {
             throw ApiException.badRequest("유효하지 않은 사용자 ID입니다.", "INVALID_USER_ID");
         }
+
+        assetSyncService.refreshUserQuietly(userId);
 
         List<BrokerAccountEntity> accounts = brokerAccountRepository.findByUserId(userId);
 
@@ -109,8 +114,10 @@ public class PortfolioAggregationService {
                 .build();
     }
 
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public BrokerAccountDto.AccountPortfolioDto getAccountPortfolio(Long userId, Long accountId) {
         BrokerAccountEntity account = validateAccountAccess(userId, accountId);
+        assetSyncService.refreshAccountQuietly(account);
 
         AccountBalanceEntity latestBalance = accountBalanceRepository
                 .findTopByAccountIdOrderByLastSyncedAtDesc(accountId)
@@ -148,10 +155,13 @@ public class PortfolioAggregationService {
                 .build();
     }
 
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public Map<String, Object> analyzeAssetAllocation(Long userId) {
         if (userId == null || userId <= 0) {
             throw ApiException.badRequest("유효하지 않은 사용자 ID입니다.", "INVALID_USER_ID");
         }
+
+        assetSyncService.refreshUserQuietly(userId);
 
         List<BrokerAccountEntity> accounts = brokerAccountRepository.findByUserId(userId);
 

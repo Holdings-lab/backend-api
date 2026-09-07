@@ -89,7 +89,6 @@ public class BrokerAccountService {
         .accountType("KIS")
         .connectionStatus(BrokerAccountEntity.ConnectionStatus.CONNECTED)
         .isPrimary(isPrimary)
-        .syncCount(0)
         .appKey(source == BrokerAccountEntity.CredentialSource.USER
             ? cryptoService.encrypt(credential.appKey())
             : null)
@@ -169,8 +168,15 @@ public class BrokerAccountService {
         .collect(Collectors.toList());
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public BrokerAccountDto.BrokerAccountDetailResponse getAccount(Long userId, Long accountId) {
+    BrokerAccountEntity account = validateAccountAccess(userId, accountId);
+    assetSyncService.refreshAccountQuietly(account);
+    return toDetailResponse(account);
+  }
+
+  @Transactional(readOnly = true)
+  public BrokerAccountDto.BrokerAccountDetailResponse getStoredAccount(Long userId, Long accountId) {
     BrokerAccountEntity account = validateAccountAccess(userId, accountId);
     return toDetailResponse(account);
   }
@@ -256,13 +262,12 @@ public class BrokerAccountService {
         .credentialSource(entity.getCredentialSource() != null ? entity.getCredentialSource().name() : null)
         .hasCredentials(kisCredentialResolver.hasResolvableCredentials(entity))
         .lastSyncedAt(entity.getLastSyncedAt())
-        .syncCount(entity.getSyncCount())
         .createdAt(entity.getCreatedAt())
         .build();
   }
 
   private BrokerAccountDto.BrokerAccountDetailResponse toDetailResponse(BrokerAccountEntity entity) {
-    BrokerAccountDto.AccountBalanceDto latestBalance = accountBalanceRepository
+    BrokerAccountDto.AccountBalanceDto balance = accountBalanceRepository
         .findTopByAccountIdOrderByLastSyncedAtDesc(entity.getId())
         .map(BrokerFieldMapper::toBalanceDto)
         .orElse(null);
@@ -283,12 +288,11 @@ public class BrokerAccountService {
         .isPrimary(entity.getIsPrimary())
         .credentialSource(entity.getCredentialSource() != null ? entity.getCredentialSource().name() : null)
         .hasCredentials(kisCredentialResolver.hasResolvableCredentials(entity))
-        .latestBalance(latestBalance)
+        .balance(balance)
         .positions(positions)
-        .lastSyncedAt(latestBalance != null && latestBalance.getLastSyncedAt() != null
-            ? latestBalance.getLastSyncedAt()
+        .lastSyncedAt(balance != null && balance.getLastSyncedAt() != null
+            ? balance.getLastSyncedAt()
             : entity.getLastSyncedAt())
-        .syncCount(entity.getSyncCount())
         .build();
   }
 
@@ -296,7 +300,6 @@ public class BrokerAccountService {
     assetSyncService.persistSnapshot(account, snapshot);
     account.setAccountDetails(writeDetails(snapshot));
     account.setLastSyncedAt(LocalDateTime.now());
-    account.setSyncCount((account.getSyncCount() != null ? account.getSyncCount() : 0) + 1);
     brokerAccountRepository.save(account);
   }
 

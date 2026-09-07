@@ -73,9 +73,6 @@ public class BrokerAccountEntity {
     @Column(name = "last_synced_at")
     private LocalDateTime lastSyncedAt;
 
-    @Column(name = "sync_count")
-    private Integer syncCount;
-
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -89,9 +86,6 @@ public class BrokerAccountEntity {
         }
         if (updatedAt == null) {
             updatedAt = LocalDateTime.now();
-        }
-        if (syncCount == null) {
-            syncCount = 0;
         }
         if (connectionStatus == null) {
             connectionStatus = ConnectionStatus.PENDING;

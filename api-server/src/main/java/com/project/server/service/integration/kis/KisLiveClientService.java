@@ -103,6 +103,7 @@ public class KisLiveClientService implements KisApiClient {
     private JsonNode fetchOverseasPresentBalance(KisCredential credential) {
         JsonNode firstPage = null;
         ArrayNode mergedHoldings = objectMapper.createArrayNode();
+        JsonNode output2 = objectMapper.missingNode();
         JsonNode output3 = objectMapper.missingNode();
 
         for (int page = 0; page < 20; page++) {
@@ -125,6 +126,9 @@ public class KisLiveClientService implements KisApiClient {
                 firstPage = pageNode;
             }
             appendHoldings(mergedHoldings, pageNode.path("output1"));
+            if (pageNode.has("output2") && !pageNode.path("output2").isMissingNode()) {
+                output2 = pageNode.get("output2");
+            }
             if (pageNode.has("output3") && !pageNode.path("output3").isMissingNode()) {
                 output3 = pageNode.get("output3");
             }
@@ -139,6 +143,9 @@ public class KisLiveClientService implements KisApiClient {
                 ? objectNode.deepCopy()
                 : objectMapper.createObjectNode();
         merged.set("output1", mergedHoldings);
+        if (output2 != null && !output2.isMissingNode()) {
+            merged.set("output2", output2);
+        }
         if (output3 != null && !output3.isMissingNode()) {
             merged.set("output3", output3);
         }

@@ -50,7 +50,7 @@ public class BrokerAccountController {
         return ResponseEntity.ok(response);
     }
 
-    /** 계좌 상세 조회 */
+    /** 계좌 상세 조회. CONNECTED 계좌는 한투에서 실시간 잔고/보유를 받아 DB에 반영한 뒤 반환 */
     @GetMapping("/accounts/{accountId}")
     public ResponseEntity<BrokerAccountDto.BrokerAccountDetailResponse> getAccount(
             @CurrentUserId Long userId,
@@ -77,7 +77,7 @@ public class BrokerAccountController {
         return ResponseEntity.ok(response);
     }
 
-    /** 계좌 동기화 요청 */
+    /** 명시적 동기화. 히스토리를 남긴다. 조회 API는 실시간 갱신하므로 일상 조회에는 필요 없다. */
     @PostMapping("/accounts/{accountId}/sync")
     public ResponseEntity<BrokerAccountDto.SyncResponse> requestSync(
             @CurrentUserId Long userId,
@@ -105,7 +105,7 @@ public class BrokerAccountController {
         return ResponseEntity.ok(response);
     }
 
-    /** 포트폴리오 조회 */
+    /** 포트폴리오 조회. CONNECTED 계좌는 한투에서 실시간으로 받아온다. */
     @GetMapping("/portfolio")
     public ResponseEntity<BrokerAccountDto.CombinedPortfolioResponse> getCombinedPortfolio(
             @CurrentUserId Long userId) {
@@ -114,7 +114,7 @@ public class BrokerAccountController {
         return ResponseEntity.ok(response);
     }
 
-    /** 계좌별 포트폴리오 조회 */
+    /** 계좌별 포트폴리오 조회. CONNECTED 계좌는 한투에서 실시간으로 받아온다. */
     @GetMapping("/accounts/{accountId}/portfolio")
     public ResponseEntity<BrokerAccountDto.AccountPortfolioDto> getAccountPortfolio(
             @CurrentUserId Long userId,

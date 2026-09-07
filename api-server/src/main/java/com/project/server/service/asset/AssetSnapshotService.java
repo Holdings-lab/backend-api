@@ -7,6 +7,7 @@ import com.project.server.domain.asset.UserAssetSnapshotEntity;
 import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.repository.asset.UserAssetAthRepository;
 import com.project.server.repository.asset.UserAssetSnapshotRepository;
+import com.project.server.service.broker.AssetSyncService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,6 +31,7 @@ public class AssetSnapshotService {
     private final AssetMetricsService assetMetricsService;
     private final UserAssetSnapshotRepository snapshotRepository;
     private final UserAssetAthRepository athRepository;
+    private final AssetSyncService assetSyncService;
 
     public void capturePreviousDaySnapshots() {
         LocalDate snapshotDate = LocalDate.now(KST).minusDays(1);
@@ -41,6 +43,7 @@ public class AssetSnapshotService {
 
         for (Long userId : userIds) {
             try {
+                assetSyncService.refreshUserQuietly(userId);
                 saveSnapshot(userId, AssetSnapshotType.PREVIOUS_DAY, snapshotDate);
             } catch (Exception e) {
                 log.error("Failed to capture previous-day snapshot for user {}", userId, e);
@@ -58,6 +61,7 @@ public class AssetSnapshotService {
         LocalDate today = LocalDate.now(KST);
         for (Long userId : userIds) {
             try {
+                assetSyncService.refreshUserQuietly(userId);
                 updateAth(userId, today);
             } catch (Exception e) {
                 log.error("Failed to scan ATH for user {}", userId, e);

@@ -6,6 +6,7 @@ import com.project.server.dto.UserAssetDto;
 import com.project.server.exception.ApiException;
 import com.project.server.repository.AssetPositionRepository;
 import com.project.server.repository.BrokerAccountRepository;
+import com.project.server.service.broker.AssetSyncService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,9 +30,11 @@ public class HoldingsService {
     private final BrokerAccountRepository brokerAccountRepository;
     private final AssetPositionRepository assetPositionRepository;
     private final AssetMetricsService assetMetricsService;
+    private final AssetSyncService assetSyncService;
 
     public UserAssetDto.HoldingsResponse getHoldings(Long userId) {
         validateUserId(userId);
+        assetSyncService.refreshUserQuietly(userId);
 
         List<BrokerAccountEntity> connectedAccounts = brokerAccountRepository.findByUserId(userId).stream()
                 .filter(account -> account.getConnectionStatus() == BrokerAccountEntity.ConnectionStatus.CONNECTED)

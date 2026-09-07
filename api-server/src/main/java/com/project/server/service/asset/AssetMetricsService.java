@@ -15,6 +15,7 @@ import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.repository.asset.UserAssetAthRepository;
 import com.project.server.repository.asset.UserAssetSnapshotRepository;
 import com.project.server.repository.asset.UserInvestmentProfileRepository;
+import com.project.server.service.broker.AssetSyncService;
 import lombok.Builder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -35,9 +36,11 @@ public class AssetMetricsService {
     private final UserAssetSnapshotRepository userAssetSnapshotRepository;
     private final UserInvestmentProfileRepository userInvestmentProfileRepository;
     private final AssetProperties assetProperties;
+    private final AssetSyncService assetSyncService;
 
     public AssetMetrics compute(Long userId) {
         validateUserId(userId);
+        assetSyncService.refreshUserQuietly(userId);
 
         BigDecimal assetTotal = calculateAssetTotal(userId);
         BigDecimal dailyChangePct = calculateDailyChangePct(userId, assetTotal);

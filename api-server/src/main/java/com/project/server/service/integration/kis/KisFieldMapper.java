@@ -21,25 +21,34 @@ public final class KisFieldMapper {
             JsonNode overseasOutput2,
             JsonNode overseasOutput3) {
         JsonNode output3 = firstObject(overseasOutput3);
-        BigDecimal cash = firstDecimal(output3, "tot_dncl_amt", "dncl_amt");
         BigDecimal evaluation = firstDecimal(output3, "evlu_amt_smtl", "evlu_amt_smtl_amt", "frcr_evlu_tota");
         BigDecimal purchase = firstDecimal(output3, "pchs_amt_smtl", "pchs_amt_smtl_amt");
         BigDecimal gainLoss = firstDecimal(output3, "evlu_pfls_amt_smtl", "tot_evlu_pfls_amt");
-        BigDecimal overseasTotal = evaluation.add(cash);
+        Map<String, BigDecimal> fxFromOutput2 = collectFxFromOutput2(overseasOutput2);
+        BigDecimal derivedUsdKrw = deriveUsdKrw(overseasPositions, purchase, evaluation);
+        List<KisApiClient.KisPosition> positions = applyFxAndKrw(
+                overseasPositions, fxFromOutput2, derivedUsdKrw);
+        Map<String, BigDecimal> fxRates = collectFxRates(positions);
+        fxFromOutput2.forEach(fxRates::putIfAbsent);
+        if (!isZero(derivedUsdKrw)) {
+            fxRates.putIfAbsent("USD", derivedUsdKrw);
+        }
+
+        BigDecimal krwDeposit = firstDecimal(output3, "tot_dncl_amt", "dncl_amt");
+        BigDecimal foreignDepositKrw = sumForeignDepositKrw(overseasOutput2, fxRates, derivedUsdKrw);
+        BigDecimal cash = krwDeposit.add(foreignDepositKrw);
         BigDecimal reportedTotal = firstDecimal(output3, "tot_asst_amt");
-        BigDecimal total = overseasTotal;
-        if (!isZero(reportedTotal)
-                && reportedTotal.compareTo(overseasTotal.multiply(new BigDecimal("2"))) <= 0) {
+        BigDecimal total = evaluation.add(cash);
+        if (!isZero(reportedTotal)) {
             total = reportedTotal;
+            BigDecimal impliedCash = reportedTotal.subtract(evaluation);
+            if (impliedCash.compareTo(cash) > 0) {
+                cash = impliedCash;
+            }
         }
         BigDecimal gainLossRate = purchase.compareTo(BigDecimal.ZERO) > 0
                 ? gainLoss.divide(purchase, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
                 : BigDecimal.ZERO;
-
-        List<KisApiClient.KisPosition> positions = applyFxAndKrw(
-                overseasPositions,
-                collectFxFromOutput2(overseasOutput2),
-                deriveUsdKrw(overseasPositions, purchase, evaluation));
 
         return new KisApiClient.KisBalanceSnapshot(
                 credential.cano(),
@@ -51,7 +60,7 @@ public final class KisFieldMapper {
                 purchase,
                 gainLoss,
                 gainLossRate,
-                collectFxRates(positions),
+                fxRates,
                 positions);
     }
 
@@ -225,6 +234,35 @@ public final class KisFieldMapper {
             rates.putIfAbsent(currency.toUpperCase(), rate);
         }
         return rates;
+    }
+
+    private static BigDecimal sumForeignDepositKrw(
+            JsonNode output2,
+            Map<String, BigDecimal> fxRates,
+            BigDecimal usdKrw) {
+        BigDecimal sum = BigDecimal.ZERO;
+        for (JsonNode row : asRows(output2)) {
+            String currency = text(row, "crcy_cd", "buy_crcy_cd", "tr_crcy_cd");
+            if (currency != null && "KRW".equalsIgnoreCase(currency)) {
+                continue;
+            }
+            BigDecimal amount = firstDecimal(row, "frcr_dncl_amt", "frcr_dncl_amt1", "dncl_amt", "frcr_cblc_amt");
+            if (isZero(amount)) {
+                continue;
+            }
+            BigDecimal fx = BigDecimal.ZERO;
+            if (currency != null && fxRates.get(currency.toUpperCase()) != null) {
+                fx = fxRates.get(currency.toUpperCase());
+            } else if (!isZero(usdKrw) && (currency == null || "USD".equalsIgnoreCase(currency))) {
+                fx = usdKrw;
+            }
+            if (amount.abs().compareTo(new BigDecimal("10000000")) >= 0) {
+                sum = sum.add(amount);
+            } else {
+                sum = sum.add(toKrw(amount, fx));
+            }
+        }
+        return sum;
     }
 
     private static BigDecimal deriveUsdKrw(

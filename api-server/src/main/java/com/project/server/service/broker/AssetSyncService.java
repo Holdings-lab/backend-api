@@ -19,6 +19,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -71,7 +72,6 @@ public class AssetSyncService {
             history.setRecordCount(recordCount);
             history.setCompletedAt(LocalDateTime.now());
             history.setSyncDurationMs((int) (System.currentTimeMillis() - startedAtMs));
-            account.setSyncCount((account.getSyncCount() != null ? account.getSyncCount() : 0) + 1);
             account.setLastSyncedAt(LocalDateTime.now());
             brokerAccountRepository.save(account);
 
@@ -93,6 +93,48 @@ public class AssetSyncService {
                 .build();
     }
 
+    /**
+     * 조회 API용 실시간 갱신. 한투 실패 시 DB 값을 쓰기 위해 예외를 삼킨다.
+     * GET마다 히스토리를 남기지 않는다.
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public void refreshAccountQuietly(BrokerAccountEntity account) {
+        if (account == null
+                || account.getConnectionStatus() != BrokerAccountEntity.ConnectionStatus.CONNECTED) {
+            return;
+        }
+        try {
+            KisApiClient.KisCredential credential = kisCredentialResolver.resolve(account);
+            KisApiClient.KisBalanceSnapshot snapshot = kisApiClient.fetchBalance(credential);
+            TransactionTemplate template = new TransactionTemplate(transactionManager);
+            template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            LocalDateTime syncedAt = template.execute(status -> {
+                BrokerAccountEntity managed = brokerAccountRepository.findById(account.getId())
+                        .orElse(account);
+                persistSnapshot(managed, snapshot);
+                LocalDateTime now = LocalDateTime.now();
+                managed.setLastSyncedAt(now);
+                brokerAccountRepository.save(managed);
+                return now;
+            });
+            if (syncedAt != null) {
+                account.setLastSyncedAt(syncedAt);
+            }
+        } catch (Exception e) {
+            log.warn("Live KIS refresh skipped for account {}: {}", account.getId(), e.getMessage());
+        }
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public void refreshUserQuietly(Long userId) {
+        if (userId == null || userId <= 0) {
+            return;
+        }
+        brokerAccountRepository.findByUserId(userId).stream()
+                .filter(account -> account.getConnectionStatus() == BrokerAccountEntity.ConnectionStatus.CONNECTED)
+                .forEach(this::refreshAccountQuietly);
+    }
+
     public void syncAllConnectedAccounts(Long userId) {
         if (userId == null || userId <= 0) {
             throw ApiException.badRequest("유효하지 않은 사용자 ID입니다.", "INVALID_USER_ID");
@@ -110,7 +152,6 @@ public class AssetSyncService {
         for (BrokerAccountEntity account : connectedAccounts) {
             try {
                 performSync(account);
-                account.setSyncCount((account.getSyncCount() != null ? account.getSyncCount() : 0) + 1);
                 account.setLastSyncedAt(LocalDateTime.now());
                 brokerAccountRepository.save(account);
             } catch (Exception e) {
@@ -137,7 +178,6 @@ public class AssetSyncService {
         connectedAccounts.forEach(account -> {
             try {
                 performSync(account);
-                account.setSyncCount((account.getSyncCount() != null ? account.getSyncCount() : 0) + 1);
                 account.setLastSyncedAt(LocalDateTime.now());
                 brokerAccountRepository.save(account);
             } catch (Exception e) {
