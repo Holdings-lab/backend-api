@@ -62,4 +62,6 @@ public interface KisApiClient {
     }
 
     KisBalanceSnapshot fetchBalance(KisCredential credential);
+
+    KisBalanceSnapshot fetchBalance(KisCredential credential, boolean allowExchangeFallback);
 }

@@ -171,7 +171,13 @@ public class BrokerAccountService {
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public BrokerAccountDto.BrokerAccountDetailResponse getAccount(Long userId, Long accountId) {
     BrokerAccountEntity account = validateAccountAccess(userId, accountId);
-    assetSyncService.refreshAccountQuietly(account);
+    KisApiClient.KisBalanceSnapshot snapshot = assetSyncService.fetchLiveSnapshot(account);
+    if (snapshot != null) {
+      LocalDateTime syncedAt = LocalDateTime.now();
+      account.setLastSyncedAt(syncedAt);
+      assetSyncService.persistSnapshotAsync(account.getId(), snapshot);
+      return toDetailResponse(account, snapshot, syncedAt);
+    }
     return toDetailResponse(account);
   }
 
@@ -267,15 +273,28 @@ public class BrokerAccountService {
   }
 
   private BrokerAccountDto.BrokerAccountDetailResponse toDetailResponse(BrokerAccountEntity entity) {
-    BrokerAccountDto.AccountBalanceDto balance = accountBalanceRepository
-        .findTopByAccountIdOrderByLastSyncedAtDesc(entity.getId())
-        .map(BrokerFieldMapper::toBalanceDto)
-        .orElse(null);
+    return toDetailResponse(entity, null, null);
+  }
 
-    List<BrokerAccountDto.AssetPositionDto> positions = assetPositionRepository.findByAccountId(entity.getId()).stream()
-        .filter(BrokerFieldMapper::isOverseas)
-        .map(BrokerFieldMapper::toPositionDto)
-        .collect(Collectors.toList());
+  private BrokerAccountDto.BrokerAccountDetailResponse toDetailResponse(
+      BrokerAccountEntity entity,
+      KisApiClient.KisBalanceSnapshot snapshot,
+      LocalDateTime syncedAt) {
+    BrokerAccountDto.AccountBalanceDto balance;
+    List<BrokerAccountDto.AssetPositionDto> positions;
+    if (snapshot != null) {
+      balance = BrokerFieldMapper.toBalanceDto(snapshot, syncedAt);
+      positions = BrokerFieldMapper.toPositionDtos(snapshot);
+    } else {
+      balance = accountBalanceRepository
+          .findTopByAccountIdOrderByLastSyncedAtDesc(entity.getId())
+          .map(BrokerFieldMapper::toBalanceDto)
+          .orElse(null);
+      positions = assetPositionRepository.findByAccountId(entity.getId()).stream()
+          .filter(BrokerFieldMapper::isOverseas)
+          .map(BrokerFieldMapper::toPositionDto)
+          .collect(Collectors.toList());
+    }
 
     return BrokerAccountDto.BrokerAccountDetailResponse.builder()
         .accountId(entity.getId())

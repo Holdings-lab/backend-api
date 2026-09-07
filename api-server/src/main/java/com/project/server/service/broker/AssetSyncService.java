@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -94,6 +95,48 @@ public class AssetSyncService {
     }
 
     /**
+     * 조회 API용 실시간 한투 호출. 실패 시 null.
+     * GET 응답은 이 스냅샷을 바로 쓰고, DB 저장은 persistSnapshotAsync로 넘긴다.
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public KisApiClient.KisBalanceSnapshot fetchLiveSnapshot(BrokerAccountEntity account) {
+        if (account == null
+                || account.getConnectionStatus() != BrokerAccountEntity.ConnectionStatus.CONNECTED) {
+            return null;
+        }
+        try {
+            KisApiClient.KisCredential credential = kisCredentialResolver.resolve(account);
+            return kisApiClient.fetchBalance(credential, false);
+        } catch (Exception e) {
+            log.warn("Live KIS fetch skipped for account {}: {}", account.getId(), e.getMessage());
+            return null;
+        }
+    }
+
+    @Async("taskExecutor")
+    public void persistSnapshotAsync(Long accountId, KisApiClient.KisBalanceSnapshot snapshot) {
+        if (accountId == null || snapshot == null) {
+            return;
+        }
+        try {
+            TransactionTemplate template = new TransactionTemplate(transactionManager);
+            template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            template.execute(status -> {
+                BrokerAccountEntity managed = brokerAccountRepository.findById(accountId).orElse(null);
+                if (managed == null) {
+                    return null;
+                }
+                persistSnapshot(managed, snapshot);
+                managed.setLastSyncedAt(LocalDateTime.now());
+                brokerAccountRepository.save(managed);
+                return null;
+            });
+        } catch (Exception e) {
+            log.warn("Async KIS persist skipped for account {}: {}", accountId, e.getMessage());
+        }
+    }
+
+    /**
      * 조회 API용 실시간 갱신. 한투 실패 시 DB 값을 쓰기 위해 예외를 삼킨다.
      * GET마다 히스토리를 남기지 않는다.
      */
@@ -105,7 +148,7 @@ public class AssetSyncService {
         }
         try {
             KisApiClient.KisCredential credential = kisCredentialResolver.resolve(account);
-            KisApiClient.KisBalanceSnapshot snapshot = kisApiClient.fetchBalance(credential);
+            KisApiClient.KisBalanceSnapshot snapshot = kisApiClient.fetchBalance(credential, false);
             TransactionTemplate template = new TransactionTemplate(transactionManager);
             template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             LocalDateTime syncedAt = template.execute(status -> {
@@ -248,10 +291,11 @@ public class AssetSyncService {
 
     private int savePositions(BrokerAccountEntity account, KisApiClient.KisBalanceSnapshot snapshot) {
         assetPositionRepository.deleteByAccountId(account.getId());
-        int savedCount = 0;
-        if (snapshot.positions() == null) {
-            return savedCount;
+        if (snapshot.positions() == null || snapshot.positions().isEmpty()) {
+            log.info("KIS positions synced for account: {}, count=0", account.getId());
+            return 0;
         }
+        List<AssetPositionEntity> toSave = new ArrayList<>();
         for (KisApiClient.KisPosition position : snapshot.positions()) {
             if (position.itemCode() == null || position.itemCode().isBlank()) {
                 continue;
@@ -261,7 +305,7 @@ public class AssetSyncService {
             }
             KisApiClient.NativeQuote nativeQuote = position.nativeQuote();
             KisApiClient.KrwQuote krw = position.krw();
-            AssetPositionEntity entity = AssetPositionEntity.builder()
+            toSave.add(AssetPositionEntity.builder()
                     .accountId(account.getId())
                     .userId(account.getUserId())
                     .symbol(position.itemCode())
@@ -283,12 +327,13 @@ public class AssetSyncService {
                     .currencyCode(defaultString(position.currencyCode(), "USD"))
                     .fxRate(defaultDecimal(position.fxRate()))
                     .lastSyncedAt(LocalDateTime.now())
-                    .build();
-            assetPositionRepository.save(entity);
-            savedCount++;
+                    .build());
         }
-        log.info("KIS positions synced for account: {}, count={}", account.getId(), savedCount);
-        return savedCount;
+        if (!toSave.isEmpty()) {
+            assetPositionRepository.saveAll(toSave);
+        }
+        log.info("KIS positions synced for account: {}, count={}", account.getId(), toSave.size());
+        return toSave.size();
     }
 
     @Transactional(readOnly = true)

@@ -64,34 +64,35 @@ public class KisLiveClientService implements KisApiClient {
 
     @Override
     public KisBalanceSnapshot fetchBalance(KisCredential credential) {
+        return fetchBalance(credential, true);
+    }
+
+    @Override
+    public KisBalanceSnapshot fetchBalance(KisCredential credential, boolean allowExchangeFallback) {
         validateCredential(credential);
-        OverseasHoldings overseas = fetchOverseasHoldings(credential);
-        if (overseas.positions().isEmpty()) {
-            log.info("[KIS] overseas holdings empty. CANO={} ACNT_PRDT_CD={}",
-                    credential.cano(), credential.accountProductCode());
-        } else {
-            log.info("[KIS] overseas holdings count={}", overseas.positions().size());
-        }
+        long startedAt = System.currentTimeMillis();
+        OverseasHoldings overseas = fetchOverseasHoldings(credential, allowExchangeFallback);
+        log.info("[KIS] fetchBalance cano={} positions={} elapsedMs={}",
+                credential.cano(), overseas.positions().size(), System.currentTimeMillis() - startedAt);
         return KisFieldMapper.toOverseasSnapshot(
                 credential, overseas.positions(), overseas.output2(), overseas.output3());
     }
 
-    private OverseasHoldings fetchOverseasHoldings(KisCredential credential) {
+    private OverseasHoldings fetchOverseasHoldings(KisCredential credential, boolean allowExchangeFallback) {
         try {
             JsonNode present = fetchOverseasPresentBalance(credential);
             List<KisPosition> positions = KisFieldMapper.toOverseasPresentPositions(present.path("output1"));
-            if (positions.isEmpty() && kisProperties.isPaperMode()) {
-                log.info("[KIS] paper inquire-present-balance empty, trying exchange inquire-balance");
-                List<KisPosition> byExchange = fetchOverseasByExchange(credential);
-                if (!byExchange.isEmpty()) {
-                    positions = byExchange;
-                }
-            }
             return new OverseasHoldings(positions, present.path("output2"), present.path("output3"));
         } catch (ApiException e) {
+            if (!allowExchangeFallback) {
+                throw e;
+            }
             log.warn("[KIS] inquire-present-balance failed, falling back to exchange inquire-balance: {}",
                     e.getMessage());
         } catch (Exception e) {
+            if (!allowExchangeFallback) {
+                throw e instanceof RuntimeException runtime ? runtime : new RuntimeException(e);
+            }
             log.warn("[KIS] inquire-present-balance failed, falling back to exchange inquire-balance", e);
         }
         return new OverseasHoldings(
@@ -132,9 +133,7 @@ public class KisLiveClientService implements KisApiClient {
             if (pageNode.has("output3") && !pageNode.path("output3").isMissingNode()) {
                 output3 = pageNode.get("output3");
             }
-            String ctxNk = pageNode.path("ctx_area_nk200").asText(
-                    pageNode.path("ctx_area_nk100").asText("")).trim();
-            if (!hasMorePages(pageNode, ctxNk)) {
+            if (!hasMorePages(pageNode)) {
                 break;
             }
         }
@@ -218,7 +217,7 @@ public class KisLiveClientService implements KisApiClient {
             appendHoldings(mergedHoldings, pageNode.path("output1"));
             ctxAreaFk200 = pageNode.path("ctx_area_fk200").asText("").trim();
             ctxAreaNk200 = pageNode.path("ctx_area_nk200").asText("").trim();
-            if (!hasMorePages(pageNode, ctxAreaNk200)) {
+            if (!hasMorePages(pageNode)) {
                 break;
             }
         }
@@ -354,12 +353,9 @@ public class KisLiveClientService implements KisApiClient {
         }
     }
 
-    private static boolean hasMorePages(JsonNode pageNode, String ctxAreaNk) {
+    private static boolean hasMorePages(JsonNode pageNode) {
         String trCont = pageNode.path("_tr_cont").asText("").trim();
-        if ("M".equalsIgnoreCase(trCont) || "F".equalsIgnoreCase(trCont)) {
-            return true;
-        }
-        return ctxAreaNk != null && !ctxAreaNk.isBlank();
+        return "M".equalsIgnoreCase(trCont) || "F".equalsIgnoreCase(trCont);
     }
 
     private static boolean isBlank(String value) {

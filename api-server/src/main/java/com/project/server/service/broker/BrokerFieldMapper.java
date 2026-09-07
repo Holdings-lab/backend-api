@@ -3,10 +3,15 @@ package com.project.server.service.broker;
 import com.project.server.domain.AccountBalanceEntity;
 import com.project.server.domain.AssetPositionEntity;
 import com.project.server.dto.BrokerAccountDto;
+import com.project.server.service.integration.kis.KisApiClient;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public final class BrokerFieldMapper {
@@ -33,6 +38,49 @@ public final class BrokerFieldMapper {
                 .build();
     }
 
+    public static BrokerAccountDto.AccountBalanceDto toBalanceDto(
+            KisApiClient.KisBalanceSnapshot snapshot,
+            LocalDateTime syncedAt) {
+        if (snapshot == null) {
+            return null;
+        }
+        BigDecimal cash = nullToZero(snapshot.cashBalance());
+        BigDecimal evaluation = nullToZero(snapshot.evaluationAmount());
+        BigDecimal total = nullToZero(snapshot.totalAssetValue());
+        if (total.compareTo(BigDecimal.ZERO) == 0) {
+            total = evaluation.add(cash);
+        }
+        return BrokerAccountDto.AccountBalanceDto.builder()
+                .currencyCode("KRW")
+                .fxRates(scaleFxRates(snapshot.fxRates()))
+                .estimatedDepositAsset(krw(total))
+                .cashBalance(krw(cash))
+                .totalPurchaseAmount(krw(snapshot.purchaseAmount()))
+                .totalValuationAmount(krw(evaluation))
+                .totalValuationGainLoss(krw(snapshot.gainLoss()))
+                .totalProfitRate(rate(snapshot.gainLossRate()))
+                .asOfDate(LocalDate.now())
+                .lastSyncedAt(syncedAt)
+                .build();
+    }
+
+    public static List<BrokerAccountDto.AssetPositionDto> toPositionDtos(KisApiClient.KisBalanceSnapshot snapshot) {
+        if (snapshot == null || snapshot.positions() == null) {
+            return List.of();
+        }
+        List<BrokerAccountDto.AssetPositionDto> positions = new ArrayList<>();
+        for (KisApiClient.KisPosition position : snapshot.positions()) {
+            if (position.itemCode() == null || position.itemCode().isBlank()) {
+                continue;
+            }
+            if (!"Y".equalsIgnoreCase(position.overseasYn())) {
+                continue;
+            }
+            positions.add(toPositionDto(position));
+        }
+        return positions;
+    }
+
     public static boolean isOverseas(AssetPositionEntity entity) {
         return entity != null && "Y".equalsIgnoreCase(entity.getOverseasYn());
     }
@@ -57,6 +105,32 @@ public final class BrokerFieldMapper {
                         .purchaseAmount(krw(entity.getPurchaseAmount()))
                         .valuationAmount(krw(entity.getCurrentValue()))
                         .gainLoss(krw(entity.getGainLoss()))
+                        .build())
+                .build();
+    }
+
+    public static BrokerAccountDto.AssetPositionDto toPositionDto(KisApiClient.KisPosition position) {
+        KisApiClient.NativeQuote nativeQuote = position.nativeQuote();
+        KisApiClient.KrwQuote krwQuote = position.krw();
+        return BrokerAccountDto.AssetPositionDto.builder()
+                .itemCode(position.itemCode())
+                .itemName(position.itemName())
+                .productType(position.productType())
+                .quantity(qty(position.quantity()))
+                .profitRate(rate(position.profitRate()))
+                .currencyCode(position.currencyCode())
+                .fxRate(isZero(position.fxRate()) ? null : fx(position.fxRate()))
+                .nativeAmounts(BrokerAccountDto.PositionNativeDto.builder()
+                        .purchaseUnitPrice(nativeQuote == null ? null : nativeUnit(nativeQuote.purchaseUnitPrice()))
+                        .presentPrice(nativeQuote == null ? null : nativeUnit(nativeQuote.presentPrice()))
+                        .purchaseAmount(nativeQuote == null ? null : nativeAmount(nativeQuote.purchaseAmount()))
+                        .valuationAmount(nativeQuote == null ? null : nativeAmount(nativeQuote.valuationAmount()))
+                        .gainLoss(nativeQuote == null ? null : nativeAmount(nativeQuote.gainLoss()))
+                        .build())
+                .krw(BrokerAccountDto.PositionKrwDto.builder()
+                        .purchaseAmount(krwQuote == null ? null : krw(krwQuote.purchaseAmount()))
+                        .valuationAmount(krwQuote == null ? null : krw(krwQuote.valuationAmount()))
+                        .gainLoss(krwQuote == null ? null : krw(krwQuote.gainLoss()))
                         .build())
                 .build();
     }
@@ -114,6 +188,10 @@ public final class BrokerFieldMapper {
             return null;
         }
         return value.setScale(places, RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal nullToZero(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 
     private static boolean isZero(BigDecimal value) {
