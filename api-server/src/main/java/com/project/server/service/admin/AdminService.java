@@ -6,6 +6,7 @@ import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.Notification;
 import com.project.server.config.AdminProperties;
+import com.project.server.config.AppTime;
 import com.project.server.domain.NotificationHistoryEntity;
 import com.project.server.domain.UserEntity;
 import com.project.server.domain.UserProfileEntity;
@@ -388,16 +389,16 @@ public class AdminService {
                         .gainLossRate(totalProfitRate)
                         .dailyGainLoss(BigDecimal.ZERO)
                         .dailyGainLossRate(BigDecimal.ZERO)
-                        .asOfDate(LocalDate.now())
-                        .lastSyncedAt(LocalDateTime.now())
+                        .asOfDate(AppTime.today())
+                        .lastSyncedAt(AppTime.now())
                         .build());
             }
 
             // Map을 JSON 문자열로 변환해서 저장
             String accountDetailsJson = objectMapper.writeValueAsString(accountDetails);
             account.setAccountDetails(accountDetailsJson);
-            account.setUpdatedAt(java.time.LocalDateTime.now());
-            account.setLastSyncedAt(LocalDateTime.now());
+            account.setUpdatedAt(AppTime.now());
+            account.setLastSyncedAt(AppTime.now());
             brokerAccountRepository.save(account);
 
             // 저장 후 최신 계좌 정보 조회해서 반환 (일관성 있는 응답)

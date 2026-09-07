@@ -12,6 +12,7 @@ import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.repository.BrokerSyncHistoryRepository;
 import com.project.server.service.integration.kis.KisApiClient;
 import com.project.server.service.integration.kis.KisCredentialResolver;
+import com.project.server.config.AppTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -73,7 +74,7 @@ public class AssetSyncService {
             history.setRecordCount(recordCount);
             history.setCompletedAt(LocalDateTime.now());
             history.setSyncDurationMs((int) (System.currentTimeMillis() - startedAtMs));
-            account.setLastSyncedAt(LocalDateTime.now());
+            account.setLastSyncedAt(AppTime.now());
             brokerAccountRepository.save(account);
 
         } catch (Exception e) {
@@ -127,7 +128,7 @@ public class AssetSyncService {
                     return null;
                 }
                 persistSnapshot(managed, snapshot);
-                managed.setLastSyncedAt(LocalDateTime.now());
+                managed.setLastSyncedAt(AppTime.now());
                 brokerAccountRepository.save(managed);
                 return null;
             });
@@ -155,7 +156,7 @@ public class AssetSyncService {
                 BrokerAccountEntity managed = brokerAccountRepository.findById(account.getId())
                         .orElse(account);
                 persistSnapshot(managed, snapshot);
-                LocalDateTime now = LocalDateTime.now();
+                LocalDateTime now = AppTime.now();
                 managed.setLastSyncedAt(now);
                 brokerAccountRepository.save(managed);
                 return now;
@@ -195,7 +196,7 @@ public class AssetSyncService {
         for (BrokerAccountEntity account : connectedAccounts) {
             try {
                 performSync(account);
-                account.setLastSyncedAt(LocalDateTime.now());
+                account.setLastSyncedAt(AppTime.now());
                 brokerAccountRepository.save(account);
             } catch (Exception e) {
                 log.error("Sync failed for account: {}", account.getId(), e);
@@ -221,7 +222,7 @@ public class AssetSyncService {
         connectedAccounts.forEach(account -> {
             try {
                 performSync(account);
-                account.setLastSyncedAt(LocalDateTime.now());
+                account.setLastSyncedAt(AppTime.now());
                 brokerAccountRepository.save(account);
             } catch (Exception e) {
                 log.error("Scheduled sync failed for account: {}", account.getId(), e);
@@ -262,8 +263,8 @@ public class AssetSyncService {
             totalAssetValue = evaluationAmount.add(cashBalance);
         }
 
-        LocalDate asOfDate = LocalDate.now();
-        LocalDateTime syncedAt = LocalDateTime.now();
+        LocalDate asOfDate = AppTime.today();
+        LocalDateTime syncedAt = AppTime.now();
         AccountBalanceEntity balance = accountBalanceRepository
                 .findTopByAccountIdAndAsOfDateOrderByIdDesc(account.getId(), asOfDate)
                 .orElseGet(() -> AccountBalanceEntity.builder()
@@ -326,7 +327,7 @@ public class AssetSyncService {
                     .gainLossRate(defaultDecimal(position.profitRate()))
                     .currencyCode(defaultString(position.currencyCode(), "USD"))
                     .fxRate(defaultDecimal(position.fxRate()))
-                    .lastSyncedAt(LocalDateTime.now())
+                    .lastSyncedAt(AppTime.now())
                     .build());
         }
         if (!toSave.isEmpty()) {

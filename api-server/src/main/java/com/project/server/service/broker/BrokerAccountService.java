@@ -14,6 +14,7 @@ import com.project.server.service.integration.kis.KisFieldMapper;
 import com.project.server.service.integration.kis.KisTokenService;
 import com.project.server.service.onboarding.OnboardingService;
 import com.project.server.service.security.CryptoService;
+import com.project.server.config.AppTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -173,7 +174,7 @@ public class BrokerAccountService {
     BrokerAccountEntity account = validateAccountAccess(userId, accountId);
     KisApiClient.KisBalanceSnapshot snapshot = assetSyncService.fetchLiveSnapshot(account);
     if (snapshot != null) {
-      LocalDateTime syncedAt = LocalDateTime.now();
+      LocalDateTime syncedAt = AppTime.now();
       account.setLastSyncedAt(syncedAt);
       assetSyncService.persistSnapshotAsync(account.getId(), snapshot);
       BrokerAccountDto.BrokerAccountDetailResponse live = toDetailResponse(account, snapshot, syncedAt);
@@ -332,7 +333,7 @@ public class BrokerAccountService {
   private void persistHoldings(BrokerAccountEntity account, KisApiClient.KisBalanceSnapshot snapshot) {
     assetSyncService.persistSnapshot(account, snapshot);
     account.setAccountDetails(writeDetails(snapshot));
-    account.setLastSyncedAt(LocalDateTime.now());
+    account.setLastSyncedAt(AppTime.now());
     brokerAccountRepository.save(account);
   }
 
