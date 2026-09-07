@@ -176,7 +176,14 @@ public class BrokerAccountService {
       LocalDateTime syncedAt = LocalDateTime.now();
       account.setLastSyncedAt(syncedAt);
       assetSyncService.persistSnapshotAsync(account.getId(), snapshot);
-      return toDetailResponse(account, snapshot, syncedAt);
+      BrokerAccountDto.BrokerAccountDetailResponse live = toDetailResponse(account, snapshot, syncedAt);
+      if (live.getPositions() == null || live.getPositions().isEmpty()) {
+        List<BrokerAccountDto.AssetPositionDto> stored = storedPositions(account.getId());
+        if (!stored.isEmpty()) {
+          live.setPositions(stored);
+        }
+      }
+      return live;
     }
     return toDetailResponse(account);
   }
@@ -270,6 +277,13 @@ public class BrokerAccountService {
         .lastSyncedAt(entity.getLastSyncedAt())
         .createdAt(entity.getCreatedAt())
         .build();
+  }
+
+  private List<BrokerAccountDto.AssetPositionDto> storedPositions(Long accountId) {
+    return assetPositionRepository.findByAccountId(accountId).stream()
+        .filter(BrokerFieldMapper::isOverseas)
+        .map(BrokerFieldMapper::toPositionDto)
+        .collect(Collectors.toList());
   }
 
   private BrokerAccountDto.BrokerAccountDetailResponse toDetailResponse(BrokerAccountEntity entity) {

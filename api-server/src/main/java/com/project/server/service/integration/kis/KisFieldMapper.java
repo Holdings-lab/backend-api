@@ -92,11 +92,13 @@ public final class KisFieldMapper {
     }
 
     private static KisApiClient.KisPosition toOverseasPosition(JsonNode row) {
-        String itemCode = text(row, "pdno", "ovrs_pdno", "std_pdno");
+        String itemCode = text(row, "pdno", "ovrs_pdno", "std_pdno", "item_cd", "scty_no");
         if (itemCode == null || itemCode.isBlank()) {
             return null;
         }
-        BigDecimal quantity = firstDecimal(row, "cblc_qty13", "ovrs_cblc_qty", "cblc_qty", "hldg_qty");
+        BigDecimal quantity = firstDecimal(row,
+                "ccld_qty_smtl1", "ccld_qty_smtl", "ccld_qty",
+                "cblc_qty13", "ovrs_cblc_qty", "cblc_qty", "hldg_qty");
         if (quantity.compareTo(BigDecimal.ZERO) == 0) {
             return null;
         }

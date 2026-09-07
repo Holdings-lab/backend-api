@@ -82,6 +82,13 @@ public class KisLiveClientService implements KisApiClient {
         try {
             JsonNode present = fetchOverseasPresentBalance(credential);
             List<KisPosition> positions = KisFieldMapper.toOverseasPresentPositions(present.path("output1"));
+            if (positions.isEmpty()) {
+                log.info("[KIS] present-balance holdings empty, trying exchange inquire-balance");
+                List<KisPosition> byExchange = fetchOverseasByExchange(credential);
+                if (!byExchange.isEmpty()) {
+                    positions = byExchange;
+                }
+            }
             return new OverseasHoldings(positions, present.path("output2"), present.path("output3"));
         } catch (ApiException e) {
             if (!allowExchangeFallback) {
@@ -106,6 +113,8 @@ public class KisLiveClientService implements KisApiClient {
         ArrayNode mergedHoldings = objectMapper.createArrayNode();
         JsonNode output2 = objectMapper.missingNode();
         JsonNode output3 = objectMapper.missingNode();
+        String ctxAreaFk200 = "";
+        String ctxAreaNk200 = "";
 
         for (int page = 0; page < 20; page++) {
             Map<String, String> query = new LinkedHashMap<>();
@@ -115,6 +124,8 @@ public class KisLiveClientService implements KisApiClient {
             query.put("NATN_CD", "000");
             query.put("TR_MKET_CD", "00");
             query.put("INQR_DVSN_CD", "00");
+            query.put("CTX_AREA_FK200", ctxAreaFk200);
+            query.put("CTX_AREA_NK200", ctxAreaNk200);
 
             JsonNode pageNode = callGet(
                     credential,
@@ -133,6 +144,10 @@ public class KisLiveClientService implements KisApiClient {
             if (pageNode.has("output3") && !pageNode.path("output3").isMissingNode()) {
                 output3 = pageNode.get("output3");
             }
+            ctxAreaFk200 = pageNode.path("ctx_area_fk200").asText(
+                    pageNode.path("ctx_area_fk100").asText("")).trim();
+            ctxAreaNk200 = pageNode.path("ctx_area_nk200").asText(
+                    pageNode.path("ctx_area_nk100").asText("")).trim();
             if (!hasMorePages(pageNode)) {
                 break;
             }

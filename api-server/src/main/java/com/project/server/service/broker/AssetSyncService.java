@@ -290,11 +290,11 @@ public class AssetSyncService {
     }
 
     private int savePositions(BrokerAccountEntity account, KisApiClient.KisBalanceSnapshot snapshot) {
-        assetPositionRepository.deleteByAccountId(account.getId());
         if (snapshot.positions() == null || snapshot.positions().isEmpty()) {
-            log.info("KIS positions synced for account: {}, count=0", account.getId());
+            log.info("KIS positions empty for account: {}, keeping stored holdings", account.getId());
             return 0;
         }
+        assetPositionRepository.deleteByAccountId(account.getId());
         List<AssetPositionEntity> toSave = new ArrayList<>();
         for (KisApiClient.KisPosition position : snapshot.positions()) {
             if (position.itemCode() == null || position.itemCode().isBlank()) {
