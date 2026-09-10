@@ -180,6 +180,7 @@ public class PolicyFeedDto {
         private String source;
         private String category;
         private String docType;
+        private String sector;
         private String title;
         private String bodySummary;
         private String bodyExcerpt;

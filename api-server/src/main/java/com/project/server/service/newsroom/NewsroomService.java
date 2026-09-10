@@ -69,7 +69,9 @@ public class NewsroomService {
 
         List<PolicyFeedDto.Card> cards;
         try {
-            cards = policyFeedProxyService.getCards(userId, 50, null, null, null);
+            // 관심자산(userId) 필터는 티커와 네임스페이스가 달라 카드가 0건이 되므로
+            // 뉴스룸은 비필터 피드를 받은 뒤 보유 종목 기준으로 직접 매칭
+            cards = policyFeedProxyService.getCards(null, 50, null, null, null);
         } catch (Exception ex) {
             log.warn("뉴스룸 정책 피드 조회 실패: userId={}, message={}", userId, ex.getMessage());
             throw new NewsroomUnavailableException(
@@ -123,7 +125,7 @@ public class NewsroomService {
 
         List<PolicyFeedDto.Card> cards;
         try {
-            cards = policyFeedProxyService.getCards(userId, 50, null, null, null);
+            cards = policyFeedProxyService.getCards(null, 50, null, null, null);
         } catch (Exception ex) {
             log.warn("뉴스룸 상세 정책 피드 조회 실패: userId={}, ticker={}, message={}",
                     userId, normalizedTicker, ex.getMessage());
@@ -340,6 +342,9 @@ public class NewsroomService {
     }
 
     private boolean cardMatchesTicker(PolicyFeedDto.Card card, String tickerUpper) {
+        if (card.getSector() != null && tickerUpper.equalsIgnoreCase(card.getSector().trim())) {
+            return true;
+        }
         if (card.getAssetSignals() != null) {
             for (PolicyFeedDto.AssetSignal signal : card.getAssetSignals()) {
                 if (signal.getTicker() != null && tickerUpper.equalsIgnoreCase(signal.getTicker())) {
