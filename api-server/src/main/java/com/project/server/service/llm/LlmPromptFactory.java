@@ -37,4 +37,57 @@ public final class LlmPromptFactory {
                 + "확언, 공포 조장, 투자 자문 표현은 사용하지 마세요.\n"
                 + "스냅샷: " + snapshot;
     }
+
+    public static String buildNewsroomLocalizeSystemPrompt() {
+        return STRICT_JSON_GUARDRAILS + """
+
+                Return the following JSON schema exactly:
+                {
+                  "items": [
+                    {
+                      "ticker": "string",
+                      "headline": "string",
+                      "summary": "string or null"
+                    }
+                  ]
+                }
+                Rules:
+                - Translate and rewrite every headline/summary into natural Korean.
+                - Keep ticker unchanged.
+                - If the source text is already Korean, lightly polish it but keep the meaning.
+                - headline must be concise (about 40 characters or less when possible).
+                - summary must be 1-2 short sentences, or null when the input summary is null/empty.
+                - Do not invent facts that are not in the source text.
+                - Do not include investment advice.
+                """;
+    }
+
+    public static String buildNewsroomLocalizeUserPrompt(Object items) {
+        return "뉴스룸 카드용 텍스트입니다. 각 항목의 headline/summary를 한국어로 번역·요약해 주세요.\n"
+                + "입력: " + items;
+    }
+
+    public static String buildNewsroomDetailLocalizeSystemPrompt() {
+        return STRICT_JSON_GUARDRAILS + """
+
+                Return the following JSON schema exactly:
+                {
+                  "headline": "string",
+                  "summaryBody": "string",
+                  "findings": ["string"],
+                  "aiJudgement": "string"
+                }
+                Rules:
+                - Write all natural-language fields in Korean.
+                - headline: concise news headline style.
+                - summaryBody: 2-3 short sentences.
+                - findings: keep the same count when possible; each item one short Korean bullet.
+                - aiJudgement: one short neutral analytical sentence.
+                - Do not invent facts; do not give investment advice.
+                """;
+    }
+
+    public static String buildNewsroomDetailLocalizeUserPrompt(Map<String, Object> payload) {
+        return "뉴스룸 상세 브리핑 텍스트를 한국어로 번역·요약해 주세요.\n입력: " + payload;
+    }
 }
