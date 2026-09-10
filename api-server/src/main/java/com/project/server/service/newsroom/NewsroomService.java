@@ -220,6 +220,7 @@ public class NewsroomService {
                 .name(holding.name())
                 .logoUrl(stockLogoService.getLogoUrl(holding.ticker()))
                 .weightPct(holding.weightPct())
+                .hasNews(hasNews)
                 .briefingType(type)
                 .dailyChangePct(dailyChangePct)
                 .totalAssetImpactPct(totalAssetImpactPct)

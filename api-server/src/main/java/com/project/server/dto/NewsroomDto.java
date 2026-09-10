@@ -57,6 +57,7 @@ public class NewsroomDto {
         private String name;
         private String logoUrl;
         private BigDecimal weightPct;
+        private boolean hasNews;
         private BriefingType briefingType;
         private BigDecimal dailyChangePct;
         private BigDecimal totalAssetImpactPct;
