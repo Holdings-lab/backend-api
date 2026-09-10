@@ -56,7 +56,6 @@ public class NewsroomService {
     private final AssetMetricsService assetMetricsService;
     private final PolicyFeedProxyService policyFeedProxyService;
     private final StockLogoService stockLogoService;
-    private final NewsroomLlmService newsroomLlmService;
 
     public NewsroomDto.TabResponse getNewsroom(Long userId, String briefingDate) {
         validateUserId(userId);
@@ -88,7 +87,6 @@ public class NewsroomService {
         for (HoldingPosition holding : holdings) {
             briefings.add(buildHoldingBriefing(holding, cards, heroTickers));
         }
-        briefings = localizeHoldingBriefings(briefings);
 
         return NewsroomDto.TabResponse.builder()
                 .header(NewsroomDto.Header.builder()
@@ -150,23 +148,18 @@ public class NewsroomService {
                 .map(this::toSourceItem)
                 .toList();
 
-        String headline = firstNonBlank(primary.getTitle(), holding.name() + " 관련 소식");
+        String headline = firstNonBlank(
+                primary.getTitleKo(),
+                primary.getTitle(),
+                holding.name() + " 관련 소식");
         String summaryBody = firstNonBlank(
+                primary.getBodySummaryKo(),
                 primary.getBodySummary(),
                 primary.getBodyExcerpt(),
                 headline);
         List<String> findings = buildFindings(matched);
 
         String thumbnailUrl = resolveNewsThumbnail(matched);
-
-        NewsroomLlmService.DetailLocalizedText localized = newsroomLlmService.localizeDetail(
-                new NewsroomLlmService.DetailLocalizedText(
-                        headline,
-                        summaryBody,
-                        findings,
-                        HARDCODED_AI_JUDGEMENT
-                )
-        );
 
         return NewsroomDto.DetailResponse.builder()
                 .stock(NewsroomDto.StockMeta.builder()
@@ -177,12 +170,12 @@ public class NewsroomService {
                         .weightPct(holding.weightPct())
                         .totalAssetImpactPct(totalAssetImpactPct)
                         .build())
-                .headline(localized.headline())
+                .headline(headline)
                 .imageUrl(thumbnailUrl)
-                .aiJudgement(localized.aiJudgement())
+                .aiJudgement(HARDCODED_AI_JUDGEMENT)
                 .summary(NewsroomDto.DetailSummary.builder()
-                        .body(localized.summaryBody())
-                        .findings(localized.findings())
+                        .body(summaryBody)
+                        .findings(findings)
                         .build())
                 .sources(sources)
                 .footer(NewsroomDto.DetailFooter.builder()
@@ -210,14 +203,26 @@ public class NewsroomService {
 
         if (type == NewsroomDto.BriefingType.Hero) {
             PolicyFeedDto.Card primary = matched.get(0);
-            headline = firstNonBlank(primary.getTitle(), holding.name() + " 관련 소식");
-            summary = firstNonBlank(primary.getBodySummary(), primary.getBodyExcerpt(), headline);
+            headline = firstNonBlank(
+                    primary.getTitleKo(),
+                    primary.getTitle(),
+                    holding.name() + " 관련 소식");
+            summary = firstNonBlank(
+                    primary.getBodySummaryKo(),
+                    primary.getBodySummary(),
+                    primary.getBodyExcerpt(),
+                    headline);
             dailyChangePct = resolveDailyChangePct(primary);
             totalAssetImpactPct = resolveTotalAssetImpactPct(dailyChangePct, holding.weightPct());
             detailPath = detailPath(holding.ticker());
         } else if (type == NewsroomDto.BriefingType.Compact) {
             PolicyFeedDto.Card primary = matched.get(0);
-            headline = firstNonBlank(primary.getBodySummary(), primary.getTitle(), holding.name() + " 관련 소식");
+            headline = firstNonBlank(
+                    primary.getBodySummaryKo(),
+                    primary.getTitleKo(),
+                    primary.getBodySummary(),
+                    primary.getTitle(),
+                    holding.name() + " 관련 소식");
             summary = null;
             detailPath = detailPath(holding.ticker());
         } else {
@@ -239,47 +244,6 @@ public class NewsroomService {
                 .summary(summary)
                 .detailPath(detailPath)
                 .build();
-    }
-
-    private List<NewsroomDto.HoldingBriefing> localizeHoldingBriefings(
-            List<NewsroomDto.HoldingBriefing> briefings
-    ) {
-        List<NewsroomLlmService.LocalizedText> sources = briefings.stream()
-                .filter(item -> item.isHasNews())
-                .map(item -> new NewsroomLlmService.LocalizedText(
-                        item.getTicker(),
-                        item.getHeadline(),
-                        item.getSummary()
-                ))
-                .toList();
-        if (sources.isEmpty()) {
-            return briefings;
-        }
-
-        Map<String, NewsroomLlmService.LocalizedText> localized =
-                newsroomLlmService.localizeHoldings(sources);
-
-        List<NewsroomDto.HoldingBriefing> updated = new ArrayList<>(briefings.size());
-        for (NewsroomDto.HoldingBriefing item : briefings) {
-            if (!item.isHasNews()) {
-                updated.add(item);
-                continue;
-            }
-            NewsroomLlmService.LocalizedText text = localized.get(item.getTicker().toUpperCase(Locale.ROOT));
-            if (text == null) {
-                updated.add(item);
-                continue;
-            }
-            item.setHeadline(text.headline());
-            // Compact는 summary를 null로 유지
-            if (item.getBriefingType() == NewsroomDto.BriefingType.Compact) {
-                item.setSummary(null);
-            } else {
-                item.setSummary(text.summary());
-            }
-            updated.add(item);
-        }
-        return updated;
     }
 
     /**
@@ -455,7 +419,7 @@ public class NewsroomService {
         }
         return NewsroomDto.SourceItem.builder()
                 .newsId(firstNonBlank(card.getNewsId(), card.getId()))
-                .title(firstNonBlank(card.getTitle(), "원문 기사"))
+                .title(firstNonBlank(card.getTitleKo(), card.getTitle(), "원문 기사"))
                 .publisher(firstNonBlank(card.getSource(), "Unknown"))
                 .publishedAt(publishedAt)
                 .thumbnailUrl(card.getThumbnailUrl())
@@ -466,7 +430,11 @@ public class NewsroomService {
     private List<String> buildFindings(List<PolicyFeedDto.Card> matched) {
         List<String> findings = new ArrayList<>();
         for (PolicyFeedDto.Card card : matched) {
-            String finding = firstNonBlank(card.getBodySummary(), card.getTitle());
+            String finding = firstNonBlank(
+                    card.getBodySummaryKo(),
+                    card.getTitleKo(),
+                    card.getBodySummary(),
+                    card.getTitle());
             if (finding != null && !finding.isBlank()) {
                 findings.add(finding);
             }

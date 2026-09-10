@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS policy_document_features (
     id BIGSERIAL PRIMARY KEY,
     document_id BIGINT NOT NULL UNIQUE REFERENCES policy_documents(id) ON DELETE CASCADE,
     body_summary TEXT,
+    title_ko TEXT,
+    body_summary_ko TEXT,
     body_original_length INTEGER,
     title_positive_prob DOUBLE PRECISION,
     title_negative_prob DOUBLE PRECISION,

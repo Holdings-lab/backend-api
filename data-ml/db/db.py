@@ -77,6 +77,9 @@ def init_db() -> None:
                     ADD COLUMN IF NOT EXISTS summary_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
                     ADD COLUMN IF NOT EXISTS metadata_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
                     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+                ALTER TABLE IF EXISTS policy_document_features
+                    ADD COLUMN IF NOT EXISTS title_ko TEXT,
+                    ADD COLUMN IF NOT EXISTS body_summary_ko TEXT;
                 """
             )
             cursor.execute(
@@ -278,18 +281,20 @@ def upsert_policy_document_features(document_id: int, record: dict[str, Any]) ->
     payload = _row_to_dict(record)
     query = """
         INSERT INTO policy_document_features (
-            document_id, body_summary, body_original_length,
+            document_id, body_summary, title_ko, body_summary_ko, body_original_length,
             title_positive_prob, title_negative_prob, title_neutral_prob, title_sentiment_score,
             body_positive_prob, body_negative_prob, body_neutral_prob, body_sentiment_score, body_n_chunks,
             body_summary_embedding, feature_payload, updated_at
         ) VALUES (
-            %(document_id)s, %(body_summary)s, %(body_original_length)s,
+            %(document_id)s, %(body_summary)s, %(title_ko)s, %(body_summary_ko)s, %(body_original_length)s,
             %(title_positive_prob)s, %(title_negative_prob)s, %(title_neutral_prob)s, %(title_sentiment_score)s,
             %(body_positive_prob)s, %(body_negative_prob)s, %(body_neutral_prob)s, %(body_sentiment_score)s, %(body_n_chunks)s,
             %(body_summary_embedding)s, %(feature_payload)s, NOW()
         )
         ON CONFLICT (document_id) DO UPDATE SET
             body_summary = EXCLUDED.body_summary,
+            title_ko = EXCLUDED.title_ko,
+            body_summary_ko = EXCLUDED.body_summary_ko,
             body_original_length = EXCLUDED.body_original_length,
             title_positive_prob = EXCLUDED.title_positive_prob,
             title_negative_prob = EXCLUDED.title_negative_prob,
@@ -308,6 +313,8 @@ def upsert_policy_document_features(document_id: int, record: dict[str, Any]) ->
     params = {
         "document_id": int(document_id),
         "body_summary": _safe_str(payload.get("body_summary"), "") or "",
+        "title_ko": _safe_str(payload.get("title_ko"), "") or None,
+        "body_summary_ko": _safe_str(payload.get("body_summary_ko"), "") or None,
         "body_original_length": _safe_int(payload.get("body_original_length"), 0),
         "title_positive_prob": _safe_float(payload.get("title_positive_prob"), 0.0),
         "title_negative_prob": _safe_float(payload.get("title_negative_prob"), 0.0),
@@ -560,6 +567,8 @@ def fetch_policy_feed_frame(
             d.url AS link,
             d.body,
             COALESCE(f.body_summary, LEFT(COALESCE(d.body, ''), 280)) AS body_summary,
+            NULLIF(TRIM(BOTH FROM COALESCE(f.title_ko, '')), '') AS title_ko,
+            NULLIF(TRIM(BOTH FROM COALESCE(f.body_summary_ko, '')), '') AS body_summary_ko,
             NULLIF(TRIM(BOTH FROM COALESCE(d.raw_payload->>'thumbnail_url', '')), '') AS thumbnail_url,
             COALESCE(f.title_positive_prob, 0.0) AS title_positive_prob,
             COALESCE(f.title_negative_prob, 0.0) AS title_negative_prob,
@@ -610,6 +619,8 @@ def fetch_policy_feed_frame(
                 d.url AS link,
                 d.body,
                 LEFT(COALESCE(d.body, ''), 280) AS body_summary,
+                NULL AS title_ko,
+                NULL AS body_summary_ko,
                 NULLIF(TRIM(BOTH FROM COALESCE(d.raw_payload->>'thumbnail_url', '')), '') AS thumbnail_url,
                 0.0 AS title_positive_prob,
                 0.0 AS title_negative_prob,

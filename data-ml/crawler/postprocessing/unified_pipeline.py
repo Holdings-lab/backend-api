@@ -23,17 +23,33 @@ from crawler.postprocessing.text_summarizer import summarize_to_under_limit as o
 from crawler.postprocessing.sentiment_score import analyze_titles, analyze_bodies
 from crawler.postprocessing.sentence_transformer import encode_summaries
 from crawler.postprocessing.preprocessing import one_hot_encode_category
+from llm.providers import build_llm_client
 
 # 후처리 단계 설정
 TITLE_COL = "title"
 BODY_COL = "body"
 BODY_SUMMARY_COL = "body_summary"
+TITLE_KO_COL = "title_ko"
+BODY_SUMMARY_KO_COL = "body_summary_ko"
 EMBEDDING_COL = f"{BODY_SUMMARY_COL}_embedding"
 MAX_SUMMARY_CHARS = 2000
 SLEEP_BETWEEN_SUMMARIZE_SEC = 0.5
+LOCALIZE_BATCH_SIZE = 8
+MAX_LOCALIZE_CHARS = 1200
 
 PCA_DIM = 30
 EXPECTED_CATEGORY_VALUES = ["BIS", "EIA", "FOMC", "FRASER", "UCSB", "YAHOO"]
+
+
+def _looks_korean(text: str) -> bool:
+    return any("\uac00" <= ch <= "\ud7a3" for ch in (text or ""))
+
+
+def _truncate_for_localize(text: str, limit: int = MAX_LOCALIZE_CHARS) -> str:
+    normalized = (text or "").strip()
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[:limit].rstrip()
 
 def _sector_pca_model_path(sector: str | None) -> str:
     """섹터별 PCA 모델 경로를 반환한다."""
@@ -270,18 +286,137 @@ def apply_embeddings(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def apply_korean_localization(df: pd.DataFrame, batch_size: int = LOCALIZE_BATCH_SIZE) -> pd.DataFrame:
+    """
+    영어 title/body_summary를 유지한 채 한국어 display 필드를 추가한다.
+    FinBERT/임베딩 이후에 호출해야 예측 피처에 영향을 주지 않는다.
+    """
+    df = df.copy()
+    if TITLE_COL not in df.columns and BODY_SUMMARY_COL not in df.columns:
+        print("[LOCALIZE] WARN: title/body_summary missing, skipping Korean localization")
+        return df
+
+    if TITLE_KO_COL not in df.columns:
+        df[TITLE_KO_COL] = None
+    if BODY_SUMMARY_KO_COL not in df.columns:
+        df[BODY_SUMMARY_KO_COL] = None
+
+    pending_indices: list[object] = []
+    for idx in df.index.tolist():
+        raw_title = df.at[idx, TITLE_COL] if TITLE_COL in df.columns else ""
+        raw_summary = df.at[idx, BODY_SUMMARY_COL] if BODY_SUMMARY_COL in df.columns else ""
+        title = "" if pd.isna(raw_title) else str(raw_title).strip()
+        summary = "" if pd.isna(raw_summary) else str(raw_summary).strip()
+
+        existing_title_ko = df.at[idx, TITLE_KO_COL]
+        existing_summary_ko = df.at[idx, BODY_SUMMARY_KO_COL]
+        if pd.notna(existing_title_ko) and str(existing_title_ko).strip():
+            title_ko = str(existing_title_ko).strip()
+        elif _looks_korean(title):
+            title_ko = title
+        else:
+            title_ko = ""
+
+        if pd.notna(existing_summary_ko) and str(existing_summary_ko).strip():
+            summary_ko = str(existing_summary_ko).strip()
+        elif _looks_korean(summary):
+            summary_ko = summary
+        else:
+            summary_ko = ""
+
+        df.at[idx, TITLE_KO_COL] = title_ko or None
+        df.at[idx, BODY_SUMMARY_KO_COL] = summary_ko or None
+
+        needs_title = bool(title) and not title_ko
+        needs_summary = bool(summary) and not summary_ko
+        if needs_title or needs_summary:
+            pending_indices.append(idx)
+
+    if not pending_indices:
+        print("[LOCALIZE] Korean localization: nothing to translate")
+        return df
+
+    print(f"[LOCALIZE] Korean localization: translating {len(pending_indices)} rows...")
+    try:
+        client = build_llm_client()
+    except Exception as error:
+        print(f"[LOCALIZE] WARN: LLM client unavailable, skipping: {error}")
+        return df
+
+    system_prompt = """
+You must return a single valid JSON object only.
+Do not wrap the answer in markdown fences.
+Translate and rewrite every headline/summary into natural Korean.
+Keep facts; do not invent details; do not give investment advice.
+Return schema:
+{"items":[{"id":"string","title":"string","summary":"string or null"}]}
+""".strip()
+
+    for start in range(0, len(pending_indices), max(1, batch_size)):
+        batch_indices = pending_indices[start : start + max(1, batch_size)]
+        payload_items = []
+        for idx in batch_indices:
+            raw_title = df.at[idx, TITLE_COL] if TITLE_COL in df.columns else ""
+            raw_summary = df.at[idx, BODY_SUMMARY_COL] if BODY_SUMMARY_COL in df.columns else ""
+            title = "" if pd.isna(raw_title) else str(raw_title).strip()
+            summary = "" if pd.isna(raw_summary) else str(raw_summary).strip()
+            payload_items.append(
+                {
+                    "id": str(idx),
+                    "title": _truncate_for_localize(title),
+                    "summary": _truncate_for_localize(summary) if summary else None,
+                }
+            )
+
+        try:
+            result = client.generate_json(
+                system_prompt,
+                "뉴스 카드용 텍스트입니다. 각 항목의 title/summary를 한국어로 번역·요약해 주세요.\n"
+                f"입력: {payload_items}",
+                temperature=0.2,
+            )
+            items = result.get("items") if isinstance(result, dict) else None
+            if not isinstance(items, list):
+                raise RuntimeError("invalid localize response: items missing")
+
+            by_id = {
+                str(item.get("id")): item
+                for item in items
+                if isinstance(item, dict) and item.get("id") is not None
+            }
+            for idx in batch_indices:
+                item = by_id.get(str(idx))
+                if not item:
+                    continue
+                title_ko = str(item.get("title") or "").strip()
+                summary_raw = item.get("summary")
+                summary_ko = None if summary_raw is None else str(summary_raw).strip()
+                if title_ko:
+                    df.at[idx, TITLE_KO_COL] = title_ko
+                if summary_ko:
+                    df.at[idx, BODY_SUMMARY_KO_COL] = summary_ko
+                elif summary_raw is None and not str(df.at[idx, BODY_SUMMARY_COL] or "").strip():
+                    df.at[idx, BODY_SUMMARY_KO_COL] = None
+        except Exception as error:
+            print(f"[LOCALIZE] WARN: batch localize failed ({start}-{start + len(batch_indices)}): {error}")
+
+    print("[LOCALIZE] Korean localization: complete")
+    return df
+
+
 def apply_unified_pipeline(
     df: pd.DataFrame,
     include_summarization: bool = True,
     include_encoding: bool = True,
     include_sentiment: bool = True,
     include_embeddings: bool = True,
+    include_korean_localization: bool = True,
 ) -> pd.DataFrame:
     """데이터프레임에 통합 후처리 파이프라인을 적용합니다.
 
     인자:
         df: 처리할 DataFrame.
-        include_*: 각 처리 단계(include_summarization, include_encoding, include_sentiment, include_embeddings)를 활성화하는 플래그.
+        include_*: 각 처리 단계 활성화 플래그.
 
     반환:
         처리된 DataFrame. 이 함수는 파일을 저장하지 않으며,
@@ -296,20 +431,24 @@ def apply_unified_pipeline(
     
     # 단계별 처리
     if include_summarization:
-        print("[UNIFIED] Step 1/4: Text Summarization")
+        print("[UNIFIED] Step 1/5: Text Summarization")
         df = apply_text_summarization(df)
     
     if include_encoding:
-        print("[UNIFIED] Step 2/4: One-hot Encoding")
+        print("[UNIFIED] Step 2/5: One-hot Encoding")
         df = apply_one_hot_encoding(df)
     
     if include_sentiment:
-        print("[UNIFIED] Step 3/4: Sentiment Analysis")
+        print("[UNIFIED] Step 3/5: Sentiment Analysis")
         df = apply_sentiment_analysis(df)
     
     if include_embeddings:
-        print("[UNIFIED] Step 4/4: Embeddings")
+        print("[UNIFIED] Step 4/5: Embeddings")
         df = apply_embeddings(df)
+
+    if include_korean_localization:
+        print("[UNIFIED] Step 5/5: Korean Localization")
+        df = apply_korean_localization(df)
     
     return df
 

@@ -182,7 +182,9 @@ public class PolicyFeedDto {
         private String docType;
         private String sector;
         private String title;
+        private String titleKo;
         private String bodySummary;
+        private String bodySummaryKo;
         private String bodyExcerpt;
         private String thumbnailUrl;
         private String link;
