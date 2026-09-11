@@ -8,7 +8,7 @@ import ast
 import hashlib
 import uuid
 from threading import Lock, Thread
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -26,6 +26,11 @@ from scheduler import build_scheduler
 from training.service import run_prediction_now
 from db.db import fetch_policy_feed_frame, fetch_user_watch_asset_names, init_db
 from llm.service import ArticleInsightGenerationService, HomeBriefingGenerationService
+from llm.newsroom_briefing_service import (
+    generate_and_store_ai_briefings,
+    generate_and_store_daily_summaries,
+    get_sector_briefings_bundle,
+)
 from llm.providers import build_llm_client
 from lstm_signal.runner import (
     SignalRunnerError,
@@ -879,6 +884,16 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
         )
         crawl_ok = crawl_result.get("status") == "success"
 
+        daily_summary_result = {"status": "skipped", "message": "crawl failed; daily summary skipped"}
+        if crawl_ok:
+            summary_date = parsed_target_date or datetime.utcnow().date()
+            try:
+                daily_summary_result = generate_and_store_daily_summaries(target_date=summary_date)
+            except Exception as error:
+                logger.warning("[Pipeline] daily summary failed: %s", error)
+                daily_summary_result = {"status": "failed", "message": str(error)}
+
+        ai_briefing_result = {"status": "skipped"}
         if not crawl_ok:
             predict_result = {
                 "status": "skipped",
@@ -923,6 +938,16 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
             elif policy_score < -threshold:
                 signal_payload["signal"] = "sell"
 
+            if predict_result.get("status") == "success":
+                try:
+                    ai_briefing_result = generate_and_store_ai_briefings(
+                        prediction_summary=summary or None,
+                        target_date=parsed_target_date,
+                    )
+                except Exception as error:
+                    logger.warning("[Pipeline] ai briefing failed: %s", error)
+                    ai_briefing_result = {"status": "failed", "message": str(error)}
+
             webhook_result = _send_signal_to_api_server(signal_payload)
 
         if crawl_result.get("status") != "success":
@@ -941,7 +966,9 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
             "warning": None if webhook_ok else "signal webhook 전송에 실패했습니다.",
             "trigger": trigger,
             "crawl": crawl_result,
+            "dailySummary": daily_summary_result,
             "predict": predict_result,
+            "aiBriefing": ai_briefing_result,
             "signal": signal_payload,
             "webhook": webhook_result,
             "executed_at": datetime.utcnow().isoformat() + "Z",
@@ -1130,6 +1157,54 @@ def get_home_briefings_endpoint(
     if result.get("status") == "empty":
         return _success_response(_remove_message_fields(result), message="브리핑 데이터가 없어 LLM 생성을 건너뜁니다.")
     return _success_response(_remove_message_fields(result), message="홈 브리핑 조회에 성공했습니다.")
+
+
+@app.get(f"{ML_PREFIX}/newsroom/sector-briefings")
+def get_newsroom_sector_briefings_endpoint(
+    sectors: str | None = None,
+    briefingDate: str | None = None,
+    windowDays: int = 1,
+):
+    sector_list = [part.strip() for part in str(sectors or "").split(",") if part.strip()]
+    result = get_sector_briefings_bundle(
+        sectors=sector_list,
+        briefing_date=briefingDate,
+        window_days=windowDays,
+    )
+    return _success_response(result, message="뉴스룸 섹터 브리핑 조회에 성공했습니다.")
+
+
+@app.post(f"{ML_PREFIX}/newsroom/daily-summaries/rebuild")
+async def rebuild_daily_summaries_endpoint(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    target_date = payload.get("date") or payload.get("briefingDate")
+    window_days = int(payload.get("windowDays") or 1)
+    sectors = payload.get("sectors")
+    result = generate_and_store_daily_summaries(
+        target_date=target_date,
+        window_days=window_days,
+        sectors=sectors,
+    )
+    return _success_response(result, message="일간 뉴스 요약 재생성에 성공했습니다.")
+
+
+@app.post(f"{ML_PREFIX}/newsroom/ai-briefings/rebuild")
+async def rebuild_ai_briefings_endpoint(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    target_date = payload.get("date") or payload.get("asOfDate")
+    sectors = payload.get("sectors")
+    result = generate_and_store_ai_briefings(
+        target_date=target_date,
+        sectors=sectors,
+        news_window_days=int(payload.get("newsWindowDays") or 5),
+    )
+    return _success_response(result, message="AI 브리핑 재생성에 성공했습니다.")
 
 
 def _policy_feed_response(payload: dict):

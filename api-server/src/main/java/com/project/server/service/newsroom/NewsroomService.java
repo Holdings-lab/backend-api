@@ -8,6 +8,7 @@ import com.project.server.exception.ApiException;
 import com.project.server.repository.AssetPositionRepository;
 import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.service.asset.AssetMetricsService;
+import com.project.server.service.integration.NewsroomBriefingProxyService;
 import com.project.server.service.integration.PolicyFeedProxyService;
 import com.project.server.service.integration.StockLogoService;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -56,6 +58,7 @@ public class NewsroomService {
     private final AssetMetricsService assetMetricsService;
     private final PolicyFeedProxyService policyFeedProxyService;
     private final StockLogoService stockLogoService;
+    private final NewsroomBriefingProxyService newsroomBriefingProxyService;
 
     public NewsroomDto.TabResponse getNewsroom(Long userId, String briefingDate) {
         validateUserId(userId);
@@ -80,12 +83,14 @@ public class NewsroomService {
         }
 
         stockLogoService.preloadLogos(holdings.stream().map(HoldingPosition::ticker).toList());
+        Map<String, NewsroomBriefingProxyService.SectorBriefing> sectorBriefings =
+                loadSectorBriefings(holdings, asOfDate);
 
         Set<String> heroTickers = resolveHeroTickers(holdings, cards);
 
         List<NewsroomDto.HoldingBriefing> briefings = new ArrayList<>();
         for (HoldingPosition holding : holdings) {
-            briefings.add(buildHoldingBriefing(holding, cards, heroTickers));
+            briefings.add(buildHoldingBriefing(holding, cards, heroTickers, sectorBriefings));
         }
 
         return NewsroomDto.TabResponse.builder()
@@ -148,18 +153,37 @@ public class NewsroomService {
                 .map(this::toSourceItem)
                 .toList();
 
+        Map<String, NewsroomBriefingProxyService.SectorBriefing> sectorBriefings =
+                loadSectorBriefings(List.of(holding), asOfDate);
+        NewsroomBriefingProxyService.SectorBriefing briefing =
+                sectorBriefings.get(toSectorKey(holding.ticker()));
+        NewsroomBriefingProxyService.DailySummary daily =
+                briefing == null ? null : briefing.dailySummary();
+        NewsroomBriefingProxyService.AiBriefing ai =
+                briefing == null ? null : briefing.aiBriefing();
+
         String headline = firstNonBlank(
+                daily == null ? null : daily.title(),
                 primary.getTitleKo(),
                 primary.getTitle(),
                 holding.name() + " 관련 소식");
         String summaryBody = firstNonBlank(
+                daily == null ? null : daily.content(),
                 primary.getBodySummaryKo(),
                 primary.getBodySummary(),
                 primary.getBodyExcerpt(),
                 headline);
-        List<String> findings = buildFindings(matched);
+        List<String> findings = buildFindingsFromDailyOrCards(
+                daily == null ? null : daily.content(),
+                matched);
 
-        String thumbnailUrl = resolveNewsThumbnail(matched);
+        String thumbnailUrl = firstNonBlank(
+                sanitizeMediaUrl(daily == null ? null : daily.imageUrl()),
+                resolveNewsThumbnail(matched));
+
+        String aiJudgement = firstNonBlank(
+                ai == null ? null : ai.reason(),
+                HARDCODED_AI_JUDGEMENT);
 
         return NewsroomDto.DetailResponse.builder()
                 .stock(NewsroomDto.StockMeta.builder()
@@ -172,7 +196,7 @@ public class NewsroomService {
                         .build())
                 .headline(headline)
                 .imageUrl(thumbnailUrl)
-                .aiJudgement(HARDCODED_AI_JUDGEMENT)
+                .aiJudgement(aiJudgement)
                 .summary(NewsroomDto.DetailSummary.builder()
                         .body(summaryBody)
                         .findings(findings)
@@ -188,7 +212,8 @@ public class NewsroomService {
     private NewsroomDto.HoldingBriefing buildHoldingBriefing(
             HoldingPosition holding,
             List<PolicyFeedDto.Card> cards,
-            Set<String> heroTickers
+            Set<String> heroTickers,
+            Map<String, NewsroomBriefingProxyService.SectorBriefing> sectorBriefings
     ) {
         List<PolicyFeedDto.Card> matched = findCardsForTicker(holding.ticker(), cards);
         boolean hasNews = !matched.isEmpty();
@@ -201,13 +226,20 @@ public class NewsroomService {
         BigDecimal totalAssetImpactPct = null;
         String detailPath = null;
 
+        NewsroomBriefingProxyService.SectorBriefing briefing =
+                sectorBriefings == null ? null : sectorBriefings.get(toSectorKey(holding.ticker()));
+        NewsroomBriefingProxyService.DailySummary daily =
+                briefing == null ? null : briefing.dailySummary();
+
         if (type == NewsroomDto.BriefingType.Hero) {
             PolicyFeedDto.Card primary = matched.get(0);
             headline = firstNonBlank(
+                    daily == null ? null : daily.title(),
                     primary.getTitleKo(),
                     primary.getTitle(),
                     holding.name() + " 관련 소식");
             summary = firstNonBlank(
+                    daily == null ? null : daily.content(),
                     primary.getBodySummaryKo(),
                     primary.getBodySummary(),
                     primary.getBodyExcerpt(),
@@ -218,6 +250,7 @@ public class NewsroomService {
         } else if (type == NewsroomDto.BriefingType.Compact) {
             PolicyFeedDto.Card primary = matched.get(0);
             headline = firstNonBlank(
+                    daily == null ? null : daily.title(),
                     primary.getBodySummaryKo(),
                     primary.getTitleKo(),
                     primary.getBodySummary(),
@@ -244,6 +277,26 @@ public class NewsroomService {
                 .summary(summary)
                 .detailPath(detailPath)
                 .build();
+    }
+
+    private Map<String, NewsroomBriefingProxyService.SectorBriefing> loadSectorBriefings(
+            List<HoldingPosition> holdings,
+            LocalDate asOfDate
+    ) {
+        Set<String> sectors = holdings.stream()
+                .map(HoldingPosition::ticker)
+                .map(this::toSectorKey)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(HashSet::new));
+        if (sectors.isEmpty()) {
+            return Map.of();
+        }
+        return newsroomBriefingProxyService.getSectorBriefings(sectors, asOfDate);
+    }
+
+    private String toSectorKey(String ticker) {
+        String normalized = normalizeTicker(ticker);
+        return normalized == null ? null : normalized.toLowerCase(Locale.ROOT);
     }
 
     /**
@@ -422,9 +475,39 @@ public class NewsroomService {
                 .title(firstNonBlank(card.getTitleKo(), card.getTitle(), "원문 기사"))
                 .publisher(firstNonBlank(card.getSource(), "Unknown"))
                 .publishedAt(publishedAt)
-                .thumbnailUrl(card.getThumbnailUrl())
+                .thumbnailUrl(sanitizeMediaUrl(card.getThumbnailUrl()))
                 .url(card.getLink())
                 .build();
+    }
+
+    private List<String> buildFindingsFromDailyOrCards(String dailyContent, List<PolicyFeedDto.Card> matched) {
+        List<String> fromDaily = splitFindings(dailyContent);
+        if (!fromDaily.isEmpty()) {
+            return fromDaily;
+        }
+        return buildFindings(matched);
+    }
+
+    private List<String> splitFindings(String content) {
+        List<String> findings = new ArrayList<>();
+        if (content == null || content.isBlank()) {
+            return findings;
+        }
+        String[] parts = content.split("(?<=[.!?。]|다\\.|요\\.|다\\!|요\\!)\\s+");
+        for (String part : parts) {
+            String trimmed = part == null ? "" : part.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            findings.add(trimmed);
+            if (findings.size() >= 3) {
+                break;
+            }
+        }
+        if (findings.isEmpty()) {
+            findings.add(content.trim());
+        }
+        return findings;
     }
 
     private List<String> buildFindings(List<PolicyFeedDto.Card> matched) {
@@ -450,11 +533,26 @@ public class NewsroomService {
 
     private String resolveNewsThumbnail(List<PolicyFeedDto.Card> matched) {
         for (PolicyFeedDto.Card card : matched) {
-            if (card.getThumbnailUrl() != null && !card.getThumbnailUrl().isBlank()) {
-                return card.getThumbnailUrl();
+            String url = sanitizeMediaUrl(card.getThumbnailUrl());
+            if (url != null) {
+                return url;
             }
         }
         return null;
+    }
+
+    private String sanitizeMediaUrl(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()
+                || "nan".equalsIgnoreCase(trimmed)
+                || "null".equalsIgnoreCase(trimmed)
+                || "none".equalsIgnoreCase(trimmed)) {
+            return null;
+        }
+        return trimmed;
     }
 
     private String detailPath(String ticker) {

@@ -888,3 +888,283 @@ def upsert_home_briefing(record: dict[str, Any]) -> int:
             row = cursor.fetchone()
         conn.commit()
         return int(row[0])
+
+
+def fetch_news_frame_for_sector(
+    sector: str,
+    date_from: date | str | None = None,
+    date_to: date | str | None = None,
+    limit: int | None = 100,
+) -> pd.DataFrame:
+    """섹터별 뉴스 프레임을 DB에서 조회한다. (daily summary / AI briefing 입력용)"""
+    if psycopg2 is None:
+        return pd.DataFrame()
+
+    sector_key = (_safe_str(sector, "") or "").lower()
+    if not sector_key:
+        return pd.DataFrame()
+
+    query = """
+        SELECT
+            LOWER(COALESCE(
+                NULLIF(TRIM(BOTH FROM d.raw_payload->>'sector'), ''),
+                NULLIF(TRIM(BOTH FROM f.feature_payload->>'sector'), ''),
+                ''
+            )) AS sector,
+            COALESCE(
+                d.published_date::text,
+                NULLIF(d.release_date, ''),
+                to_char(d.collected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+            ) AS release_date,
+            d.title,
+            COALESCE(NULLIF(TRIM(BOTH FROM f.title_ko), ''), d.title) AS title_ko,
+            COALESCE(f.body_summary, LEFT(COALESCE(d.body, ''), 280)) AS body_summary,
+            NULLIF(TRIM(BOTH FROM f.body_summary_ko), '') AS body_summary_ko,
+            d.url,
+            NULLIF(TRIM(BOTH FROM COALESCE(
+                d.raw_payload->>'thumbnail_url',
+                d.raw_payload->>'image',
+                f.feature_payload->>'thumbnail_url',
+                ''
+            )), '') AS image
+        FROM policy_documents d
+        LEFT JOIN policy_document_features f ON f.document_id = d.id
+        WHERE LOWER(COALESCE(
+                NULLIF(TRIM(BOTH FROM d.raw_payload->>'sector'), ''),
+                NULLIF(TRIM(BOTH FROM f.feature_payload->>'sector'), ''),
+                ''
+            )) = %(sector)s
+    """
+    params: dict[str, Any] = {"sector": sector_key}
+    if date_from:
+        query += " AND COALESCE(d.published_date, NULLIF(d.release_date, '')::date) >= %(date_from)s::date"
+        params["date_from"] = str(date_from)
+    if date_to:
+        query += " AND COALESCE(d.published_date, NULLIF(d.release_date, '')::date) <= %(date_to)s::date"
+        params["date_to"] = str(date_to)
+    query += " ORDER BY d.published_date DESC NULLS LAST, d.id DESC"
+    if limit is not None and limit > 0:
+        query += " LIMIT %(limit)s"
+        params["limit"] = int(limit)
+
+    with _connect(real_dict_cursor=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def list_distinct_sectors(limit: int = 50) -> list[str]:
+    if psycopg2 is None:
+        return []
+    query = """
+        SELECT DISTINCT LOWER(COALESCE(
+            NULLIF(TRIM(BOTH FROM d.raw_payload->>'sector'), ''),
+            NULLIF(TRIM(BOTH FROM f.feature_payload->>'sector'), ''),
+            ''
+        )) AS sector
+        FROM policy_documents d
+        LEFT JOIN policy_document_features f ON f.document_id = d.id
+        WHERE COALESCE(
+            NULLIF(TRIM(BOTH FROM d.raw_payload->>'sector'), ''),
+            NULLIF(TRIM(BOTH FROM f.feature_payload->>'sector'), ''),
+            ''
+        ) <> ''
+        ORDER BY sector
+        LIMIT %(limit)s
+    """
+    with _connect(real_dict_cursor=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, {"limit": int(limit)})
+            rows = cursor.fetchall()
+    return [str(row["sector"]).strip().lower() for row in rows if row.get("sector")]
+
+
+def upsert_sector_daily_summary(record: dict[str, Any]) -> int:
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    payload = _row_to_dict(record)
+    query = """
+        INSERT INTO sector_daily_summaries (
+            sector, release_date, window_days, title, content, image_url,
+            source_count, llm_provider, llm_model, summary_payload, updated_at
+        ) VALUES (
+            %(sector)s, %(release_date)s, %(window_days)s, %(title)s, %(content)s, %(image_url)s,
+            %(source_count)s, %(llm_provider)s, %(llm_model)s, %(summary_payload)s, NOW()
+        )
+        ON CONFLICT (sector, release_date, window_days) DO UPDATE SET
+            title = EXCLUDED.title,
+            content = EXCLUDED.content,
+            image_url = EXCLUDED.image_url,
+            source_count = EXCLUDED.source_count,
+            llm_provider = EXCLUDED.llm_provider,
+            llm_model = EXCLUDED.llm_model,
+            summary_payload = EXCLUDED.summary_payload,
+            updated_at = NOW()
+        RETURNING id
+    """
+    params = {
+        "sector": (_safe_str(payload.get("sector"), "") or "").lower(),
+        "release_date": _safe_date(payload.get("release_date")) or datetime.utcnow().date(),
+        "window_days": _safe_int(payload.get("window_days"), 1),
+        "title": _safe_str(payload.get("title"), "") or "",
+        "content": _safe_str(payload.get("content"), "") or "",
+        "image_url": _safe_str(payload.get("image_url") or payload.get("image"), None),
+        "source_count": _safe_int(payload.get("source_count"), 0),
+        "llm_provider": _safe_str(payload.get("llm_provider"), "anthropic") or "anthropic",
+        "llm_model": _safe_str(payload.get("llm_model"), "") or "",
+        "summary_payload": _json_param(payload.get("summary_payload") or payload),
+    }
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+        conn.commit()
+        return int(row[0])
+
+
+def fetch_sector_daily_summaries(
+    sectors: list[str] | None = None,
+    release_date: date | str | None = None,
+    window_days: int = 1,
+) -> pd.DataFrame:
+    if psycopg2 is None:
+        return pd.DataFrame()
+
+    query = [
+        """
+        SELECT
+            id, sector, release_date, window_days, title, content, image_url,
+            source_count, llm_provider, llm_model, summary_payload
+        FROM sector_daily_summaries
+        WHERE window_days = %(window_days)s
+        """
+    ]
+    params: dict[str, Any] = {"window_days": int(window_days)}
+    if release_date:
+        query.append("AND release_date = %(release_date)s::date")
+        params["release_date"] = str(release_date)
+    if sectors:
+        normalized = [str(s).strip().lower() for s in sectors if str(s).strip()]
+        if normalized:
+            query.append("AND sector = ANY(%(sectors)s)")
+            params["sectors"] = normalized
+    query.append("ORDER BY release_date DESC, sector ASC")
+
+    with _connect(real_dict_cursor=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("\n".join(query), params)
+            rows = cursor.fetchall()
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def upsert_sector_ai_briefing(record: dict[str, Any]) -> int:
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    payload = _row_to_dict(record)
+    query = """
+        INSERT INTO sector_ai_briefings (
+            sector, as_of_date, horizon_days, title, headline, reason, alignment,
+            used_news_urls, disclaimer, llm_provider, llm_model, briefing_payload, updated_at
+        ) VALUES (
+            %(sector)s, %(as_of_date)s, %(horizon_days)s, %(title)s, %(headline)s, %(reason)s, %(alignment)s,
+            %(used_news_urls)s, %(disclaimer)s, %(llm_provider)s, %(llm_model)s, %(briefing_payload)s, NOW()
+        )
+        ON CONFLICT (sector, as_of_date, horizon_days) DO UPDATE SET
+            title = EXCLUDED.title,
+            headline = EXCLUDED.headline,
+            reason = EXCLUDED.reason,
+            alignment = EXCLUDED.alignment,
+            used_news_urls = EXCLUDED.used_news_urls,
+            disclaimer = EXCLUDED.disclaimer,
+            llm_provider = EXCLUDED.llm_provider,
+            llm_model = EXCLUDED.llm_model,
+            briefing_payload = EXCLUDED.briefing_payload,
+            updated_at = NOW()
+        RETURNING id
+    """
+    params = {
+        "sector": (_safe_str(payload.get("sector"), "") or "").lower(),
+        "as_of_date": _safe_date(payload.get("as_of_date") or payload.get("prediction_date")) or datetime.utcnow().date(),
+        "horizon_days": _safe_int(payload.get("horizon_days"), 0),
+        "title": _safe_str(payload.get("title"), "AI는 이렇게 판단했어요") or "AI는 이렇게 판단했어요",
+        "headline": _safe_str(payload.get("headline"), "") or "",
+        "reason": _safe_str(payload.get("reason"), "") or "",
+        "alignment": _safe_str(payload.get("alignment"), None),
+        "used_news_urls": _json_param(payload.get("used_news_urls") or payload.get("used_news_url") or []),
+        "disclaimer": _safe_str(payload.get("disclaimer"), "본 내용은 투자 판단의 근거가 아닙니다."),
+        "llm_provider": _safe_str(payload.get("llm_provider"), "anthropic") or "anthropic",
+        "llm_model": _safe_str(payload.get("llm_model"), "") or "",
+        "briefing_payload": _json_param(payload.get("briefing_payload") or payload),
+    }
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+        conn.commit()
+        return int(row[0])
+
+
+def fetch_sector_ai_briefings(
+    sectors: list[str] | None = None,
+    as_of_date: date | str | None = None,
+) -> pd.DataFrame:
+    if psycopg2 is None:
+        return pd.DataFrame()
+
+    query = [
+        """
+        SELECT
+            id, sector, as_of_date, horizon_days, title, headline, reason, alignment,
+            used_news_urls, disclaimer, llm_provider, llm_model, briefing_payload
+        FROM sector_ai_briefings
+        WHERE 1 = 1
+        """
+    ]
+    params: dict[str, Any] = {}
+    if as_of_date:
+        query.append("AND as_of_date = %(as_of_date)s::date")
+        params["as_of_date"] = str(as_of_date)
+    if sectors:
+        normalized = [str(s).strip().lower() for s in sectors if str(s).strip()]
+        if normalized:
+            query.append("AND sector = ANY(%(sectors)s)")
+            params["sectors"] = normalized
+    query.append("ORDER BY as_of_date DESC, sector ASC")
+
+    with _connect(real_dict_cursor=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("\n".join(query), params)
+            rows = cursor.fetchall()
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def fetch_latest_prediction_summary() -> dict[str, Any]:
+    if psycopg2 is None:
+        return {}
+    query = """
+        SELECT summary_payload, metadata_payload, model_target, best_horizon_days, created_at
+        FROM policy_prediction_runs
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+    """
+    with _connect(real_dict_cursor=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query)
+            row = cursor.fetchone()
+    if not row:
+        return {}
+    summary = row.get("summary_payload") or {}
+    if isinstance(summary, str):
+        try:
+            summary = json.loads(summary)
+        except Exception:
+            summary = {}
+    if not isinstance(summary, dict):
+        summary = {}
+    summary = dict(summary)
+    summary.setdefault("targetTicker", row.get("model_target"))
+    summary.setdefault("bestHorizonDays", row.get("best_horizon_days"))
+    return summary

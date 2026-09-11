@@ -107,3 +107,45 @@ CREATE TABLE IF NOT EXISTS pca_artifacts (
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS sector_daily_summaries (
+    id BIGSERIAL PRIMARY KEY,
+    sector TEXT NOT NULL,
+    release_date DATE NOT NULL,
+    window_days INTEGER NOT NULL DEFAULT 1,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    image_url TEXT,
+    source_count INTEGER NOT NULL DEFAULT 0,
+    llm_provider TEXT,
+    llm_model TEXT,
+    summary_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (sector, release_date, window_days)
+);
+
+CREATE INDEX IF NOT EXISTS sector_daily_summaries_date_idx
+    ON sector_daily_summaries(release_date DESC, sector);
+
+CREATE TABLE IF NOT EXISTS sector_ai_briefings (
+    id BIGSERIAL PRIMARY KEY,
+    sector TEXT NOT NULL,
+    as_of_date DATE NOT NULL,
+    horizon_days INTEGER NOT NULL DEFAULT 0,
+    title TEXT NOT NULL,
+    headline TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    alignment TEXT,
+    used_news_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
+    disclaimer TEXT,
+    llm_provider TEXT,
+    llm_model TEXT,
+    briefing_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (sector, as_of_date, horizon_days)
+);
+
+CREATE INDEX IF NOT EXISTS sector_ai_briefings_date_idx
+    ON sector_ai_briefings(as_of_date DESC, sector);
