@@ -1067,9 +1067,16 @@ def on_startup():
     scheduler_instance = build_scheduler(_scheduled_job)
 
     if RUN_PIPELINE_ON_STARTUP:
-        startup_result = run_pipeline(trigger="startup")
-        if startup_result.get("status") != "success":
-            logger.warning("startup pipeline result: %s", startup_result)
+        def _startup_pipeline():
+            try:
+                startup_result = run_pipeline(trigger="startup")
+                if startup_result.get("status") != "success":
+                    logger.warning("startup pipeline result: %s", startup_result)
+            except Exception as error:
+                logger.exception("[Startup] pipeline failed: %s", error)
+
+        Thread(target=_startup_pipeline, name="startup-pipeline", daemon=True).start()
+        logger.info("[Startup] pipeline started in background (health endpoint available)")
 
 
 @app.on_event("shutdown")
