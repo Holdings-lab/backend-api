@@ -22,7 +22,6 @@ from fastapi.responses import JSONResponse, Response
 from crawler.service import run_crawl_now
 from crawler.postprocessing import sentiment_score as sentiment_score_module
 from scheduler import build_scheduler
-from training.service import run_prediction_now
 from db.db import fetch_policy_feed_frame, fetch_user_watch_asset_names, init_db
 from llm.service import ArticleInsightGenerationService, HomeBriefingGenerationService
 from llm.newsroom_briefing_service import (
@@ -32,10 +31,12 @@ from llm.newsroom_briefing_service import (
 )
 from llm.providers import build_llm_client
 from lstm_signal.runner import (
+    DEFAULT_SIGNAL_TICKERS,
     SignalRunnerError,
     load_latest_signal,
     parse_signal_request,
-    run_signal,
+    run_signals_for_tickers,
+    signal_to_prediction_summary,
 )
 
 
@@ -63,9 +64,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 ML_PREFIX = "/ml"
 BASE_DIR = Path(__file__).resolve().parent
-TRAINING_DIR = BASE_DIR / "training"
-MODEL_METADATA_PATH = TRAINING_DIR / "qqq_model_metadata.json"
-TRAINING_SUMMARY_PATH = TRAINING_DIR / "qqq_training_summary.json"
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://localhost:8080/api/internal/webhooks/events")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
@@ -147,15 +145,6 @@ def _safe_float(value, default=0.0):
         return float(value)
     except Exception:
         return float(default)
-
-
-def _safe_json_load(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
 
 
 def _success_response(result=None, message="요청에 성공했습니다.", code="SUCCESS-200"):
@@ -346,7 +335,14 @@ def _build_asset_impact_score(impact: float) -> int:
     return 1
 
 
-def _build_model_asset_signal(horizon_days: int, predicted_log_return: float, confidence: float, cluster_label: str, global_signal: str) -> dict:
+def _build_model_asset_signal(
+    horizon_days: int,
+    predicted_log_return: float,
+    confidence: float,
+    cluster_label: str,
+    global_signal: str,
+    ticker: str = "QQQ",
+) -> dict:
     impact = round(min(1.0, max(0.25, abs(predicted_log_return) * 20.0 + confidence * 0.2)), 2)
     model_payload = {
         "confidence": round(max(0.0, min(0.99, confidence)), 2),
@@ -355,13 +351,43 @@ def _build_model_asset_signal(horizon_days: int, predicted_log_return: float, co
         "clusterLabel": cluster_label,
     }
     return {
-        "ticker": "QQQ",
+        "ticker": str(ticker or "QQQ").upper(),
         "direction": global_signal,
         "impact": impact,
         "impactScore": _build_asset_impact_score(impact),
         "provenance": "model",
         "model": model_payload,
     }
+
+
+def _load_ticker_model_signals() -> list[dict]:
+    """QQQ/XLE/XLF latest signal JSON 을 읽어 카드용 model assetSignals 를 만든다."""
+    signals: list[dict] = []
+    for ticker in DEFAULT_SIGNAL_TICKERS:
+        try:
+            raw = load_latest_signal(ticker)
+        except Exception:
+            continue
+        summary = signal_to_prediction_summary(raw, ticker)
+        metrics = summary.get("metrics") or {}
+        predicted_log_return = _safe_float(metrics.get("policyScore"), 0.0)
+        confidence = _safe_float(metrics.get("topLabelProbability"), 0.6)
+        direction = str(summary.get("signal") or "hold").lower()
+        if direction not in {"buy", "sell", "hold"}:
+            direction = "hold"
+        cluster_label = str((summary.get("clusterPrediction") or {}).get("topLabel") or direction)
+        horizon_days = int(summary.get("bestHorizonDays") or 15)
+        signals.append(
+            _build_model_asset_signal(
+                horizon_days=horizon_days,
+                predicted_log_return=predicted_log_return,
+                confidence=confidence,
+                cluster_label=cluster_label,
+                global_signal=direction,
+                ticker=ticker,
+            )
+        )
+    return signals
 
 
 def _build_keyword_asset_signals(keywords: list[str], source_text: str) -> list[dict]:
@@ -390,7 +416,7 @@ def _build_keyword_asset_signals(keywords: list[str], source_text: str) -> list[
     ]
 
     asset_signals: list[dict] = []
-    seen_tickers = {"QQQ"}
+    seen_tickers = set()
 
     for rule in rules:
         if not any(term in keyword_text for term in rule["match"]):
@@ -646,13 +672,27 @@ def _build_policy_feed_stats(payload: dict) -> dict:
     }
 
 
+def _load_ticker_signal_summaries() -> dict[str, dict]:
+    """티커별 predict_signal 결과를 summary 형태로 모은다."""
+    out: dict[str, dict] = {}
+    for ticker in DEFAULT_SIGNAL_TICKERS:
+        try:
+            raw = load_latest_signal(ticker)
+        except Exception:
+            continue
+        out[str(ticker).upper()] = signal_to_prediction_summary(raw, ticker)
+    return out
+
+
 def _build_policy_feed(payload: dict) -> dict:
     limit = int(payload.get("limit") or 20)
     df = _read_policy_feed_frame(payload)
     logger.info(f"[PolicyFeed] _build_policy_feed payload: {payload}")
 
-    metadata = _safe_json_load(MODEL_METADATA_PATH)
-    summary = _safe_json_load(TRAINING_SUMMARY_PATH)
+    signal_summaries = _load_ticker_signal_summaries()
+    model_asset_signals = _load_ticker_model_signals()
+    qqq_summary = signal_summaries.get("QQQ") or {}
+    qqq_metrics = qqq_summary.get("metrics") or {}
 
     if df.empty:
         return {
@@ -660,8 +700,8 @@ def _build_policy_feed(payload: dict) -> dict:
             "generatedAt": datetime.utcnow().isoformat() + "Z",
             "source": {
                 "dataset": "policy_updates_features",
-                "modelTarget": "QQQ",
-                "modelVersion": summary.get("modelVersion", "policy-rule-v1"),
+                "modelTargets": list(DEFAULT_SIGNAL_TICKERS),
+                "modelVersion": qqq_summary.get("modelVersion", "predict-signal-v1"),
             },
             "summary": {
                 "totalCount": 0,
@@ -672,10 +712,18 @@ def _build_policy_feed(payload: dict) -> dict:
                 "overallSentimentScore": 0.0,
             },
             "model": {
-                "targetTicker": metadata.get("target_ticker", "QQQ"),
-                "bestHorizonDays": summary.get("bestHorizonDays", 15),
-                "bestFeatures": metadata.get("best_features", []),
-                "metrics": summary.get("metrics", {}),
+                "targetTickers": list(DEFAULT_SIGNAL_TICKERS),
+                "byTicker": {
+                    ticker: {
+                        "bestHorizonDays": summary.get("bestHorizonDays", 15),
+                        "metrics": summary.get("metrics") or {},
+                        "signal": summary.get("signal"),
+                    }
+                    for ticker, summary in signal_summaries.items()
+                },
+                "targetTicker": "QQQ",
+                "bestHorizonDays": qqq_summary.get("bestHorizonDays", 15),
+                "metrics": qqq_metrics,
             },
             "cards": [],
         }
@@ -687,22 +735,21 @@ def _build_policy_feed(payload: dict) -> dict:
     negative_count = int((score_series < -0.15).sum())
     neutral_count = int(len(df) - positive_count - negative_count)
 
+    qqq_model = next((item for item in model_asset_signals if item.get("ticker") == "QQQ"), None)
+    best_horizon = int((qqq_model or {}).get("model", {}).get("horizonDays") or qqq_summary.get("bestHorizonDays") or 15)
+    predicted_log_return = _safe_float(qqq_metrics.get("policyScore"), 0.0)
+    confidence = _safe_float(qqq_metrics.get("topLabelProbability"), 0.6)
+    cluster_top_label = _safe_str((qqq_summary.get("clusterPrediction") or {}).get("topLabel"), "flat")
+    global_signal = _safe_str(qqq_summary.get("signal"), "hold")
+    threshold = float(qqq_summary.get("bestThreshold") or 0.004)
+    if qqq_model:
+        model_meta = qqq_model.get("model") or {}
+        predicted_log_return = _safe_float(model_meta.get("predictedReturnPct"), predicted_log_return * 100.0) / 100.0
+        confidence = _safe_float(model_meta.get("confidence"), confidence)
+        cluster_top_label = _safe_str(model_meta.get("clusterLabel"), cluster_top_label)
+        global_signal = _safe_str(qqq_model.get("direction"), global_signal)
+
     cards = []
-    best_horizon = int(summary.get("bestHorizonDays", 15) or 15)
-    threshold = float(summary.get("bestThreshold", 0.004) or 0.004)
-    metrics = summary.get("metrics") or {}
-    cluster_prediction = summary.get("clusterPrediction") or {}
-    predicted_log_return = _safe_float(metrics.get("policyScore"), 0.0)
-    confidence = _safe_float(metrics.get("topLabelProbability"), _safe_float(metrics.get("directionAccuracy"), 0.6))
-    cluster_top_label = _safe_str(cluster_prediction.get("topLabel"), "flat")
-
-    if predicted_log_return > threshold:
-        global_signal = "buy"
-    elif predicted_log_return < -threshold:
-        global_signal = "sell"
-    else:
-        global_signal = "hold"
-
     for idx, row in df.head(limit).iterrows():
         row_source = _safe_str(row.get("source"), _safe_str(row.get("category")))
         row_category = _safe_str(row.get("category"), row_source)
@@ -714,13 +761,7 @@ def _build_policy_feed(payload: dict) -> dict:
             source_text=" ".join([row_category, row_source, _safe_str(row.get("title")), row_body]),
         )
         asset_signals = [
-            _build_model_asset_signal(
-                horizon_days=best_horizon,
-                predicted_log_return=predicted_log_return,
-                confidence=confidence,
-                cluster_label=cluster_top_label,
-                global_signal=global_signal,
-            ),
+            *model_asset_signals,
             *keyword_signals,
         ]
 
@@ -754,8 +795,18 @@ def _build_policy_feed(payload: dict) -> dict:
                     "thresholdUsed": threshold,
                     "confidence": round(max(0.5, min(0.99, confidence)), 2),
                     "clusterLabel": cluster_top_label,
+                    "byTicker": {
+                        ticker: {
+                            "signal": (signal_summaries.get(ticker) or {}).get("signal"),
+                            "predictedReturnPct": _safe_float(
+                                ((signal_summaries.get(ticker) or {}).get("metrics") or {}).get("predictedReturnPct"),
+                                0.0,
+                            ),
+                        }
+                        for ticker in DEFAULT_SIGNAL_TICKERS
+                        if ticker in signal_summaries
+                    },
                 },
-                # LLM metadata
                 "bodySummarySource": (
                     row.get("body_summary_source")
                     or (row.get("feature_payload") or {}).get("llm_summary_meta", {}).get("status")
@@ -780,8 +831,8 @@ def _build_policy_feed(payload: dict) -> dict:
         "generatedAt": datetime.utcnow().isoformat() + "Z",
         "source": {
             "dataset": "policy_updates_features",
-            "modelTarget": metadata.get("target_ticker", "QQQ"),
-            "modelVersion": summary.get("modelVersion", "policy-rule-v1"),
+            "modelTargets": list(DEFAULT_SIGNAL_TICKERS),
+            "modelVersion": qqq_summary.get("modelVersion", "predict-signal-v1"),
         },
         "summary": {
             "totalCount": int(len(df)),
@@ -792,10 +843,18 @@ def _build_policy_feed(payload: dict) -> dict:
             "overallSentimentScore": round(_safe_float(score_series.mean()), 6),
         },
         "model": {
-            "targetTicker": metadata.get("target_ticker", "QQQ"),
-            "bestHorizonDays": summary.get("bestHorizonDays", 15),
-            "bestFeatures": metadata.get("best_features", []),
-            "metrics": summary.get("metrics", {}),
+            "targetTickers": list(DEFAULT_SIGNAL_TICKERS),
+            "byTicker": {
+                ticker: {
+                    "bestHorizonDays": summary.get("bestHorizonDays", 15),
+                    "metrics": summary.get("metrics") or {},
+                    "signal": summary.get("signal"),
+                }
+                for ticker, summary in signal_summaries.items()
+            },
+            "targetTicker": "QQQ",
+            "bestHorizonDays": best_horizon,
+            "metrics": qqq_metrics,
         },
         "cards": cards,
     }
@@ -899,48 +958,74 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
                 },
             }
         else:
-            predict_result = run_prediction_now()
+            # 일일 예측: train_regression 제외, QQQ/XLE/XLF predict_signal 만 실행
+            try:
+                predict_result = run_signals_for_tickers(
+                    tickers=list(DEFAULT_SIGNAL_TICKERS),
+                    refresh_features=False,
+                    target_date=parsed_target_date,
+                )
+            except Exception as error:
+                logger.warning("[Pipeline] multi-ticker signal failed: %s", error)
+                predict_result = {
+                    "status": "failed",
+                    "message": str(error),
+                    "executed_at": datetime.utcnow().isoformat() + "Z",
+                }
+
+            by_ticker = predict_result.get("byTicker") or {}
+            qqq_signal = by_ticker.get("QQQ") or {}
+            qqq_summary = signal_to_prediction_summary(qqq_signal, "QQQ") if qqq_signal else {}
+
+            signal_name = str(qqq_summary.get("signal") or "hold").lower()
+            if signal_name not in {"buy", "sell", "hold"}:
+                signal_name = "hold"
 
             signal_payload = {
                 "trigger": trigger,
-                "status": "ok" if predict_result.get("status") in {"success", "skipped"} else "failed",
-                "signal": "hold",
+                "status": "ok" if predict_result.get("status") in {"success", "partial", "skipped"} else "failed",
+                "signal": signal_name,
                 "generatedAt": datetime.utcnow().isoformat() + "Z",
                 "details": {
                     "crawlStatus": crawl_result.get("status"),
                     "predictStatus": predict_result.get("status"),
+                    "tickers": predict_result.get("tickers") or list(DEFAULT_SIGNAL_TICKERS),
+                    "signalErrors": predict_result.get("errors") or [],
                 },
             }
 
-            summary = _safe_json_load(TRAINING_SUMMARY_PATH)
-            metrics = summary.get("metrics") or {}
-            policy_score = _safe_float(metrics.get("policyScore"), 0.0)
-            threshold = float(summary.get("bestThreshold", 0.004) or 0.004)
-            if policy_score > threshold:
-                signal_payload["signal"] = "buy"
-            elif policy_score < -threshold:
-                signal_payload["signal"] = "sell"
-
-            if predict_result.get("status") == "success":
-                try:
-                    ai_briefing_result = generate_and_store_ai_briefings(
-                        prediction_summary=summary or None,
-                        target_date=parsed_target_date,
-                    )
-                except Exception as error:
-                    logger.warning("[Pipeline] ai briefing failed: %s", error)
-                    ai_briefing_result = {"status": "failed", "message": str(error)}
+            if predict_result.get("status") in {"success", "partial"} and by_ticker:
+                briefing_stored = []
+                briefing_errors = []
+                for ticker, raw_signal in by_ticker.items():
+                    try:
+                        one = generate_and_store_ai_briefings(
+                            prediction_summary=signal_to_prediction_summary(raw_signal, ticker),
+                            target_date=parsed_target_date,
+                            sectors=[str(ticker).lower()],
+                        )
+                        briefing_stored.extend(one.get("stored") or [])
+                        briefing_errors.extend(one.get("errors") or [])
+                    except Exception as error:
+                        logger.warning("[Pipeline] ai briefing failed ticker=%s: %s", ticker, error)
+                        briefing_errors.append({"sector": str(ticker).lower(), "error": str(error)})
+                ai_briefing_result = {
+                    "status": "success" if briefing_stored else "failed",
+                    "stored_count": len(briefing_stored),
+                    "stored": briefing_stored,
+                    "errors": briefing_errors,
+                }
 
             webhook_result = _send_signal_to_api_server(signal_payload)
 
         if crawl_result.get("status") != "success":
             logger.warning("[Pipeline] crawl failed: %s", crawl_result)
-        if predict_result.get("status") not in {"success", "skipped"}:
+        if predict_result.get("status") not in {"success", "partial", "skipped"}:
             logger.warning("[Pipeline] prediction failed: %s", predict_result)
         if not webhook_result.get("success"):
             logger.warning("[Pipeline] webhook failed: %s", webhook_result)
 
-        predict_ok = predict_result.get("status") in {"success", "skipped"}
+        predict_ok = predict_result.get("status") in {"success", "partial", "skipped"}
         webhook_ok = bool(webhook_result.get("success"))
         status = "success" if crawl_ok and predict_ok else "failed"
         return {
@@ -1033,23 +1118,61 @@ def run_crawl_endpoint():
 
 @app.post(f"{ML_PREFIX}/predictions/run")
 def run_predict_endpoint():
+    """일일 파이프라인과 동일하게 QQQ/XLE/XLF predict_signal 을 실행한다."""
     if not run_lock.acquire(blocking=False):
         return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_PREDICT_BUSY", status_code=409)
     try:
-        result = run_prediction_now()
-        if result.get("status") == "success":
-            return _success_response(_remove_message_fields(result), message="예측 실행에 성공했습니다.")
-        return _error_response(message="예측 실행에 실패했습니다.", code="ML_PREDICT_FAILED", status_code=500)
+        result = run_signals_for_tickers(
+            tickers=list(DEFAULT_SIGNAL_TICKERS),
+            refresh_features=False,
+        )
+        if result.get("status") in {"success", "partial"}:
+            return _success_response(result, message="예측 실행에 성공했습니다.")
+        return _error_response(
+            message="예측 실행에 실패했습니다.",
+            code="ML_PREDICT_FAILED",
+            status_code=500,
+            details=result,
+        )
     finally:
         run_lock.release()
 
 
 @app.get(f"{ML_PREFIX}/predictions/latest")
-def get_predict_result_endpoint():
-    summary = _safe_json_load(TRAINING_SUMMARY_PATH)
-    if not summary:
-        return _error_response("예측 결과가 존재하지 않습니다.", code="ML_PREDICT_RESULT_NOT_FOUND", status_code=404)
-    return _success_response(summary, message="예측 연산 결과를 성공적으로 불러왔습니다.")
+def get_predict_result_endpoint(ticker: str | None = None):
+    """티커별 최신 predict_signal 결과. ticker 생략 시 QQQ/XLE/XLF 전부."""
+    requested = (ticker or "").strip().upper()
+    tickers = [requested] if requested else list(DEFAULT_SIGNAL_TICKERS)
+    by_ticker: dict[str, dict] = {}
+    errors: list[dict[str, str]] = []
+    for item in tickers:
+        try:
+            raw = load_latest_signal(item)
+            by_ticker[item] = signal_to_prediction_summary(raw, item)
+        except SignalRunnerError as error:
+            errors.append({"ticker": item, "error": error.message, "code": error.code})
+        except Exception as error:
+            errors.append({"ticker": item, "error": str(error), "code": "ML_PREDICT_RESULT_NOT_FOUND"})
+
+    if not by_ticker:
+        return _error_response(
+            "예측 결과가 존재하지 않습니다.",
+            code="ML_PREDICT_RESULT_NOT_FOUND",
+            status_code=404,
+            details={"errors": errors},
+        )
+
+    if requested:
+        return _success_response(by_ticker[requested], message="예측 연산 결과를 성공적으로 불러왔습니다.")
+
+    return _success_response(
+        {
+            "tickers": list(DEFAULT_SIGNAL_TICKERS),
+            "byTicker": by_ticker,
+            "errors": errors,
+        },
+        message="예측 연산 결과를 성공적으로 불러왔습니다.",
+    )
 
 
 @app.post(f"{ML_PREFIX}/signal/run")
@@ -1068,8 +1191,15 @@ async def run_signal_endpoint(request: Request, date: str | None = None):
             payload = {**payload, "targetDate": date}
         try:
             params = parse_signal_request(payload)
-            result = run_signal(**params)
-            return _success_response(result, message="시그널 예측에 성공했습니다.")
+            result = run_signals_for_tickers(**params)
+            if result.get("status") in {"success", "partial"}:
+                return _success_response(result, message="시그널 예측에 성공했습니다.")
+            return _error_response(
+                message="시그널 예측에 실패했습니다.",
+                code="ML_SIGNAL_FAILED",
+                status_code=500,
+                details=result,
+            )
         except SignalRunnerError as error:
             status_code = 400
             if error.code in {"ML_SIGNAL_TIMEOUT"}:
@@ -1099,13 +1229,38 @@ async def run_signal_endpoint(request: Request, date: str | None = None):
 
 
 @app.get(f"{ML_PREFIX}/signal/latest")
-def get_latest_signal_endpoint(ticker: str = "QQQ"):
-    try:
-        result = load_latest_signal(ticker=ticker)
-        return _success_response(result, message="최신 시그널 조회에 성공했습니다.")
-    except SignalRunnerError as error:
-        status_code = 404 if error.code == "ML_SIGNAL_RESULT_NOT_FOUND" else 500
-        return _error_response(message=error.message, code=error.code, status_code=status_code)
+def get_latest_signal_endpoint(ticker: str | None = None):
+    requested = (ticker or "").strip().upper()
+    tickers = [requested] if requested else list(DEFAULT_SIGNAL_TICKERS)
+    by_ticker: dict[str, dict] = {}
+    errors: list[dict[str, str]] = []
+    for item in tickers:
+        try:
+            by_ticker[item] = load_latest_signal(ticker=item)
+        except SignalRunnerError as error:
+            errors.append({"ticker": item, "error": error.message, "code": error.code})
+        except Exception as error:
+            errors.append({"ticker": item, "error": str(error), "code": "ML_SIGNAL_RESULT_NOT_FOUND"})
+
+    if not by_ticker:
+        return _error_response(
+            message="최신 시그널이 없습니다.",
+            code="ML_SIGNAL_RESULT_NOT_FOUND",
+            status_code=404,
+            details={"errors": errors},
+        )
+
+    if requested:
+        return _success_response(by_ticker[requested], message="최신 시그널 조회에 성공했습니다.")
+
+    return _success_response(
+        {
+            "tickers": list(DEFAULT_SIGNAL_TICKERS),
+            "byTicker": by_ticker,
+            "errors": errors,
+        },
+        message="최신 시그널 조회에 성공했습니다.",
+    )
 
 
 @app.get(f"{ML_PREFIX}/llm/article-insights")

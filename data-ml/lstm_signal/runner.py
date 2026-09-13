@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ML_WORKER_ROOT = Path("/opt/riseai/apps/ml-worker")
 DEFAULT_PREDICTIONS_DIR = Path("/opt/riseai/data/predictions")
-DEFAULT_NEWS_FEATURES_PATH = Path("/opt/riseai/data/features/qqq/news_event_features.csv")
-DEFAULT_MARKET_FEATURES_PATH = Path("/opt/riseai/data/features/qqq/market_long_features.csv")
+DEFAULT_FEATURES_ROOT = Path("/opt/riseai/data/features")
+DEFAULT_SIGNAL_TICKERS = ("QQQ", "XLE", "XLF")
 DEFAULT_TIMEOUT_SEC = 120
 
 
@@ -69,25 +69,26 @@ def _predict_env(worker_root: Path) -> dict[str, str]:
 
 
 def _predictions_dir() -> Path:
-    env_value = os.getenv("SIGNAL_PREDICTIONS_DIR")
-    if env_value:
-        return Path(env_value)
     return DEFAULT_PREDICTIONS_DIR
 
 
+def _features_root() -> Path:
+    return DEFAULT_FEATURES_ROOT
+
+
 def _default_output_path(ticker: str) -> Path:
-    env_value = os.getenv("SIGNAL_OUTPUT_PATH")
-    if env_value and _ticker_slug(ticker) == "qqq":
-        return Path(env_value)
+    # /opt/riseai/data/predictions/{qqq|xle|xlf}_latest_signal.json
     return _predictions_dir() / f"{_ticker_slug(ticker)}_latest_signal.json"
 
 
-def _news_features_path() -> Path:
-    return Path(os.getenv("SIGNAL_NEWS_FEATURES_PATH", str(DEFAULT_NEWS_FEATURES_PATH)))
+def _news_features_path(ticker: str = "QQQ") -> Path:
+    # /opt/riseai/data/features/{ticker}/news_event_features.csv
+    return _features_root() / _ticker_slug(ticker) / "news_event_features.csv"
 
 
-def _market_features_path() -> Path:
-    return Path(os.getenv("SIGNAL_MARKET_FEATURES_PATH", str(DEFAULT_MARKET_FEATURES_PATH)))
+def _market_features_path(ticker: str = "QQQ") -> Path:
+    # /opt/riseai/data/features/{ticker}/market_long_features.csv
+    return _features_root() / _ticker_slug(ticker) / "market_long_features.csv"
 
 
 def _timeout_sec() -> int:
@@ -163,9 +164,9 @@ def load_latest_signal(ticker: str = "QQQ") -> dict[str, Any]:
     return _read_signal_json(_default_output_path(ticker))
 
 
-def prepare_features_existing() -> dict[str, Any]:
-    news_features_path = _news_features_path()
-    market_features_path = _market_features_path()
+def prepare_features_existing(ticker: str = "QQQ") -> dict[str, Any]:
+    news_features_path = _news_features_path(ticker)
+    market_features_path = _market_features_path(ticker)
     if not news_features_path.exists():
         raise SignalRunnerError(
             f"뉴스 feature 파일이 없습니다: {news_features_path}",
@@ -177,11 +178,13 @@ def prepare_features_existing() -> dict[str, Any]:
             code="ML_SIGNAL_FEATURES_NOT_FOUND",
         )
     logger.info(
-        "[Signal] using existing feature CSVs (news=%s, market=%s)",
+        "[Signal] using existing feature CSVs ticker=%s news=%s market=%s",
+        ticker,
         news_features_path,
         market_features_path,
     )
     return {
+        "ticker": _ticker_slug(ticker).upper(),
         "news_features_path": str(news_features_path),
         "market_features_path": str(market_features_path),
     }
@@ -196,7 +199,7 @@ def prepare_features_from_crawl(
 ) -> dict[str, Any]:
     """
     1) env 의 policy_monitor.py 실행 (CSV 출력은 해당 스크립트가 담당)
-    2) 기존 news_event/market_long feature CSV 를 predict_signal 입력으로 반환
+    2) 티커별 news_event/market_long feature CSV 경로를 반환
     """
     from crawler.external import ExternalCrawlerError, run_apps_crawler_policy_monitor
 
@@ -211,8 +214,7 @@ def prepare_features_from_crawl(
     except ExternalCrawlerError as error:
         raise SignalRunnerError(error.message, code=error.code, details=error.details) from error
 
-    prepared = prepare_features_existing()
-    return prepared
+    return prepare_features_existing(ticker=ticker)
 
 
 def prepare_features(
@@ -225,7 +227,7 @@ def prepare_features(
 ) -> dict[str, Any]:
     """
     feature 준비 진입점.
-    - 기본(True): 크롤 → policy→news_event/market_long 변환
+    - 기본(True): 크롤 후 티커별 feature CSV 경로 반환
     - False: 기존 고정 CSV만 검증/사용
     """
     if bool(refresh_features):
@@ -235,7 +237,7 @@ def prepare_features(
             sleep_sec=sleep_sec,
             ticker=ticker,
         )
-    return prepare_features_existing()
+    return prepare_features_existing(ticker=ticker)
 
 
 def run_signal(
@@ -353,26 +355,173 @@ def run_signal(
     return signal
 
 
+def signal_to_prediction_summary(signal: dict[str, Any] | None, ticker: str = "QQQ") -> dict[str, Any]:
+    """predict_signal.json 을 AI briefing / webhook 이 쓰는 summary 형태로 맞춘다."""
+    payload = dict(signal or {})
+    ticker_upper = (ticker or payload.get("ticker") or "QQQ")
+    ticker_upper = str(ticker_upper).strip().upper() or "QQQ"
+
+    direction = str(
+        payload.get("signal")
+        or payload.get("direction")
+        or (payload.get("prediction") or {}).get("direction")
+        or "hold"
+    ).strip().lower()
+    if direction in {"up", "buy", "long"}:
+        direction = "buy"
+    elif direction in {"down", "sell", "short"}:
+        direction = "sell"
+    else:
+        direction = "hold"
+
+    predicted_return_pct = payload.get("predictedReturnPct")
+    if predicted_return_pct is None:
+        predicted_return_pct = (payload.get("prediction") or {}).get("expected_return_pct")
+    if predicted_return_pct is None:
+        predicted_return_pct = (payload.get("metrics") or {}).get("predictedReturnPct")
+    try:
+        predicted_return_pct = float(predicted_return_pct or 0.0)
+    except Exception:
+        predicted_return_pct = 0.0
+
+    policy_score = predicted_return_pct / 100.0
+    confidence = payload.get("confidence")
+    if confidence is None:
+        confidence = (payload.get("metrics") or {}).get("confidence")
+    try:
+        confidence = float(confidence if confidence is not None else 0.6)
+    except Exception:
+        confidence = 0.6
+
+    horizon_days = payload.get("horizonDays") or payload.get("bestHorizonDays") or 15
+    try:
+        horizon_days = int(horizon_days)
+    except Exception:
+        horizon_days = 15
+
+    return {
+        "modelVersion": str(payload.get("modelVersion") or "predict-signal-v1"),
+        "targetTicker": ticker_upper,
+        "bestHorizonDays": horizon_days,
+        "bestThreshold": 0.004,
+        "metrics": {
+            "policyScore": policy_score,
+            "topLabelProbability": confidence,
+            "directionAccuracy": confidence,
+            "predictedReturnPct": predicted_return_pct,
+            "topLabel": direction,
+        },
+        "clusterPrediction": {
+            "topLabel": direction,
+            "topProbability": confidence,
+        },
+        "signal": direction,
+        "generatedAt": str(payload.get("generatedAt") or datetime.utcnow().isoformat() + "Z"),
+        "rawSignal": payload,
+    }
+
+
+def run_signals_for_tickers(
+    tickers: list[str] | tuple[str, ...] | None = None,
+    *,
+    refresh_features: bool = False,
+    target_date: date | str | None = None,
+    bis_max_pages: int | None = None,
+    sleep_sec: float | None = None,
+) -> dict[str, Any]:
+    """
+    QQQ/XLE/XLF 등 여러 티커에 대해 predict_signal.py 를 순차 실행한다.
+    refresh_features=True 이면 크롤은 1회만 수행한다.
+    """
+    ticker_list = [
+        str(t).strip().upper()
+        for t in (tickers or DEFAULT_SIGNAL_TICKERS)
+        if str(t).strip()
+    ]
+    if not ticker_list:
+        ticker_list = list(DEFAULT_SIGNAL_TICKERS)
+
+    if refresh_features:
+        # 크롤은 공유 1회, feature 경로는 티커별로 다름
+        prepare_features_from_crawl(
+            target_date=target_date,
+            bis_max_pages=bis_max_pages,
+            sleep_sec=sleep_sec,
+            ticker=ticker_list[0],
+        )
+
+    by_ticker: dict[str, Any] = {}
+    errors: list[dict[str, str]] = []
+    for ticker in ticker_list:
+        try:
+            by_ticker[ticker] = run_signal(
+                ticker,
+                refresh_features=False,
+                target_date=target_date,
+                bis_max_pages=bis_max_pages,
+                sleep_sec=sleep_sec,
+            )
+        except SignalRunnerError as error:
+            logger.warning("[Signal] ticker=%s failed: %s", ticker, error.message)
+            errors.append({"ticker": ticker, "error": error.message, "code": error.code})
+        except Exception as error:
+            logger.warning("[Signal] ticker=%s failed: %s", ticker, error)
+            errors.append({"ticker": ticker, "error": str(error), "code": "ML_SIGNAL_FAILED"})
+
+    stored_count = len(by_ticker)
+    if stored_count == 0:
+        status = "failed"
+    elif errors:
+        status = "partial"
+    else:
+        status = "success"
+
+    return {
+        "status": status,
+        "tickers": ticker_list,
+        "stored_count": stored_count,
+        "byTicker": by_ticker,
+        "errors": errors,
+        "executed_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 def parse_signal_request(payload: dict[str, Any] | None) -> dict[str, Any]:
     body = payload or {}
-    ticker = body.get("ticker") or body.get("Ticker") or "QQQ"
-    if isinstance(ticker, str):
-        ticker = ticker.strip() or "QQQ"
-    else:
-        ticker = "QQQ"
-    if not re.fullmatch(r"[A-Za-z0-9^._-]{1,32}", ticker):
-        raise SignalRunnerError("ticker 형식이 올바르지 않습니다.", code="ML_SIGNAL_BAD_REQUEST")
+
+    raw_tickers = body.get("tickers") or body.get("Tickers")
+    ticker = body.get("ticker") or body.get("Ticker")
+    tickers: list[str] | None = None
+    if isinstance(raw_tickers, str) and raw_tickers.strip():
+        if raw_tickers.strip().lower() in {"all", "*"}:
+            tickers = list(DEFAULT_SIGNAL_TICKERS)
+        else:
+            tickers = [part.strip().upper() for part in raw_tickers.split(",") if part.strip()]
+    elif isinstance(raw_tickers, (list, tuple)):
+        tickers = [str(part).strip().upper() for part in raw_tickers if str(part).strip()]
+    elif isinstance(ticker, str) and ticker.strip():
+        if ticker.strip().lower() in {"all", "*"}:
+            tickers = list(DEFAULT_SIGNAL_TICKERS)
+        else:
+            tickers = [ticker.strip().upper()]
+
+    if not tickers:
+        tickers = list(DEFAULT_SIGNAL_TICKERS)
+
+    for item in tickers:
+        if not re.fullmatch(r"[A-Za-z0-9^._-]{1,32}", item):
+            raise SignalRunnerError("ticker 형식이 올바르지 않습니다.", code="ML_SIGNAL_BAD_REQUEST")
 
     target_date = body.get("targetDate") or body.get("target_date") or body.get("date")
     _parse_target_date(target_date)
 
     refresh_features = _parse_bool(
         body.get("refreshFeatures", body.get("refresh_features")),
-        default=True,
+        default=False,
     )
 
     params: dict[str, Any] = {
-        "ticker": ticker,
+        "tickers": tickers,
         "refresh_features": refresh_features,
         "target_date": target_date,
     }
