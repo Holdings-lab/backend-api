@@ -258,6 +258,11 @@ public class NewsroomService {
                     holding.name() + " 관련 소식");
             summary = null;
             detailPath = detailPath(holding.ticker());
+        } else if (daily != null && daily.title() != null && !daily.title().isBlank()) {
+            // 카드 매칭은 없지만 섹터 daily summary 가 있으면 Quiet 플레이스홀더 대신 요약 사용
+            headline = daily.title();
+            summary = firstNonBlank(daily.content(), QUIET_SUMMARY);
+            detailPath = detailPath(holding.ticker());
         } else {
             int quietDays = quietDaysFor(holding.ticker());
             headline = quietDays + "일째 특이사항 없음";
@@ -420,6 +425,7 @@ public class NewsroomService {
                 if (signal.getTicker() == null || !tickerUpper.equalsIgnoreCase(signal.getTicker())) {
                     continue;
                 }
+                // 전역 model 시그널은 카드마다 주입되므로 매칭에 쓰지 않는다.
                 String provenance = signal.getProvenance();
                 if (provenance != null && "model".equalsIgnoreCase(provenance.trim())) {
                     continue;
@@ -434,9 +440,35 @@ public class NewsroomService {
                 }
             }
         }
-        String haystack = ((card.getTitle() == null ? "" : card.getTitle()) + " "
-                + (card.getBodySummary() == null ? "" : card.getBodySummary())).toUpperCase(Locale.ROOT);
+        if (containsTicker(card.getMatchedKeywords(), tickerUpper)
+                || containsTicker(card.getMatchedKeywordGroups(), tickerUpper)) {
+            return true;
+        }
+        // title/body(+ko) · keywords 에 티커 문자열이 있으면 매칭 (daily summary 와 동일 취지)
+        String haystack = String.join(" ",
+                nullToEmpty(card.getTitle()),
+                nullToEmpty(card.getTitleKo()),
+                nullToEmpty(card.getBodySummary()),
+                nullToEmpty(card.getBodySummaryKo()),
+                nullToEmpty(card.getBodyExcerpt())
+        ).toUpperCase(Locale.ROOT);
         return haystack.contains(tickerUpper);
+    }
+
+    private boolean containsTicker(List<String> values, String tickerUpper) {
+        if (values == null || values.isEmpty()) {
+            return false;
+        }
+        for (String value : values) {
+            if (value != null && value.toUpperCase(Locale.ROOT).contains(tickerUpper)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private NewsroomDto.BriefingType resolveBriefingType(boolean hasNews, boolean isHero) {
