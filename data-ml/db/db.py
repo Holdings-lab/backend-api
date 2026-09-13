@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import date, datetime
 from pathlib import Path
@@ -8,6 +9,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 try:
     import psycopg2
@@ -1168,3 +1171,138 @@ def fetch_latest_prediction_summary() -> dict[str, Any]:
     summary.setdefault("targetTicker", row.get("model_target"))
     summary.setdefault("bestHorizonDays", row.get("best_horizon_days"))
     return summary
+
+
+def resolve_policy_features_csv_path(csv_path: str | Path | None = None) -> Path | None:
+    """크롤 features CSV 경로를 찾는다. env / prod 볼륨 / data-ml 로컬 순."""
+    if csv_path is not None:
+        path = Path(csv_path)
+        return path if path.exists() and path.stat().st_size > 0 else None
+
+    candidates: list[Path] = []
+    env_path = (_env("POLICY_FEATURES_CSV") or "").strip()
+    if env_path:
+        candidates.append(Path(env_path))
+
+    candidates.extend(
+        [
+            Path("/opt/riseai/data/crawler/features/policy_updates_features.csv"),
+            Path("/opt/riseai/data/crawler/policy_updates_features.csv"),
+            Path("/opt/riseai/data/features/policy_updates_features.csv"),
+        ]
+    )
+
+    try:
+        from crawler.support_legacy.data_paths import feature_csv_path
+
+        candidates.append(Path(feature_csv_path("policy_updates_features.csv")))
+    except Exception:
+        candidates.append(PROJECT_ROOT / "data" / "crawler" / "features" / "policy_updates_features.csv")
+
+    for candidate in candidates:
+        try:
+            if candidate.exists() and candidate.stat().st_size > 0:
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def sync_policy_features_csv_to_db(
+    csv_path: str | Path | None = None,
+    *,
+    chunksize: int = 500,
+) -> dict[str, Any]:
+    """
+    policy_updates_features.csv 를 스캔해 policy_documents / features 에 upsert 한다.
+    크롤 성공 직후 호출해 CSV 최신이 DB에 반영되도록 한다.
+    """
+    init_db()
+    resolved = resolve_policy_features_csv_path(csv_path)
+    if resolved is None:
+        return {
+            "status": "skipped",
+            "message": "policy features csv not found",
+            "csvPath": None,
+            "scanned": 0,
+            "upserted": 0,
+            "skipped": 0,
+            "errors": [],
+        }
+
+    if psycopg2 is None:
+        return {
+            "status": "failed",
+            "message": "psycopg2 is not installed",
+            "csvPath": str(resolved),
+            "scanned": 0,
+            "upserted": 0,
+            "skipped": 0,
+            "errors": ["psycopg2 is not installed"],
+        }
+
+    scanned = 0
+    upserted = 0
+    skipped = 0
+    errors: list[str] = []
+
+    logger.info("[DbSync] syncing policy features csv=%s", resolved)
+    try:
+        reader = pd.read_csv(resolved, encoding="utf-8-sig", chunksize=max(1, int(chunksize)))
+    except Exception as error:
+        return {
+            "status": "failed",
+            "message": f"csv read failed: {error}",
+            "csvPath": str(resolved),
+            "scanned": 0,
+            "upserted": 0,
+            "skipped": 0,
+            "errors": [str(error)],
+        }
+
+    for chunk in reader:
+        if chunk is None or chunk.empty:
+            continue
+        for _, row in chunk.iterrows():
+            scanned += 1
+            record = row.to_dict()
+            url = _safe_str(record.get("url") or record.get("link"), "") or ""
+            if not url:
+                skipped += 1
+                continue
+            if "url" not in record or not _safe_str(record.get("url"), ""):
+                record["url"] = url
+            try:
+                document_id = upsert_policy_document(record)
+                upsert_policy_document_features(document_id, record)
+                upserted += 1
+            except Exception as error:
+                skipped += 1
+                if len(errors) < 20:
+                    errors.append(f"url={url}: {error}")
+                logger.warning("[DbSync] upsert failed url=%s err=%s", url, error)
+
+    status = "success"
+    if scanned == 0:
+        status = "skipped"
+    elif upserted == 0 and errors:
+        status = "failed"
+    elif errors:
+        status = "partial"
+
+    result = {
+        "status": status,
+        "csvPath": str(resolved),
+        "scanned": scanned,
+        "upserted": upserted,
+        "skipped": skipped,
+        "errors": errors,
+    }
+    logger.info(
+        "[DbSync] done status=%s scanned=%s upserted=%s skipped=%s",
+        status,
+        scanned,
+        upserted,
+        skipped,
+    )
+    return result

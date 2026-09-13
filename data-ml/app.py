@@ -20,7 +20,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from crawler.service import run_crawl_now
-from crawler.support_legacy.data_paths import feature_csv_path
 from crawler.postprocessing import sentiment_score as sentiment_score_module
 from scheduler import build_scheduler
 from training.service import run_prediction_now
@@ -65,10 +64,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 ML_PREFIX = "/ml"
 BASE_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
-POLICY_FEED_CANDIDATES = [
-    feature_csv_path("policy_updates_features.csv"),
-    feature_csv_path("daily_news_features.csv"),
-]
 MODEL_METADATA_PATH = TRAINING_DIR / "qqq_model_metadata.json"
 TRAINING_SUMMARY_PATH = TRAINING_DIR / "qqq_training_summary.json"
 
@@ -274,12 +269,24 @@ def _start_pipeline_job(trigger: str, bis_max_pages: int | None = None, sleep_se
     return _get_pipeline_job_snapshot()
 
 
-def _resolve_policy_feed_csv_path() -> Path | None:
-    for candidate in POLICY_FEED_CANDIDATES:
-        candidate_path = Path(candidate)
-        if candidate_path.exists():
-            return candidate_path
-    return None
+def _normalize_policy_feed_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame is None or frame.empty:
+        return pd.DataFrame()
+    out = frame.copy()
+    if "date" not in out.columns:
+        if "release_date" in out.columns:
+            out["date"] = out["release_date"]
+        elif "published_date" in out.columns:
+            out["date"] = out["published_date"]
+        elif "collected_at" in out.columns:
+            out["date"] = out["collected_at"]
+        else:
+            out["date"] = ""
+    if "link" not in out.columns and "url" in out.columns:
+        out["link"] = out["url"]
+    if "url" not in out.columns and "link" in out.columns:
+        out["url"] = out["link"]
+    return out
 
 
 def _split_value_list(value) -> list[str]:
@@ -514,62 +521,38 @@ def _read_policy_feed_frame(payload: dict, apply_limit: bool = True) -> pd.DataF
     date_to = _safe_str(payload.get("dateTo"), "")
     user_id = payload.get("userId")
     limit = int(payload.get("limit") or 20)
-    db_limit = None if user_id is not None else (limit if apply_limit else None)
+    db_limit = None if (user_id is not None or not apply_limit) else (limit if apply_limit else None)
 
+    frame = pd.DataFrame()
     try:
-        db_frame = fetch_policy_feed_frame(
+        frame = fetch_policy_feed_frame(
             category=category,
             date_from=date_from,
             date_to=date_to,
             limit=db_limit,
         )
-        if not db_frame.empty:
-            logger.info("[PolicyFeed] using database-backed policy feed: %s rows", len(db_frame))
-            frame = db_frame
-        else:
-            frame = pd.DataFrame()
+        if not frame.empty:
+            logger.info("[PolicyFeed] using database-backed policy feed: %s rows", len(frame))
     except Exception as error:
         logger.warning("[PolicyFeed] database feed lookup failed: %s", error)
-
         frame = pd.DataFrame()
 
     if frame.empty:
-        csv_path = _resolve_policy_feed_csv_path()
-        if csv_path is None:
-            logger.warning("[PolicyFeed] policy feed csv not found. candidates=%s", [str(path) for path in POLICY_FEED_CANDIDATES])
-            return pd.DataFrame()
+        return frame
 
-        if Path(csv_path).stat().st_size == 0:
-            logger.warning("[PolicyFeed] policy feed csv is empty: %s", csv_path)
-            return pd.DataFrame()
+    logger.info(
+        "[PolicyFeed] Initial rows: %s, category: %s, dateFrom: %s, dateTo: %s",
+        len(frame),
+        category,
+        date_from,
+        date_to,
+    )
 
-        logger.info("[PolicyFeed] using policy feed csv path: %s", csv_path)
-        try:
-            frame = pd.read_csv(csv_path)
-        except pd.errors.EmptyDataError:
-            logger.warning("[PolicyFeed] policy feed csv has no parseable rows: %s", csv_path)
-            return pd.DataFrame()
-        if frame.empty:
-            return frame
-
-    logger.info(f"[PolicyFeed] Initial rows: {len(frame)}, category: {category}, dateFrom: {date_from}, dateTo: {date_to}")
-    
     if category.lower() != "all" and "category" in frame.columns:
         frame = frame[frame["category"].astype(str).str.lower() == category.lower()]
         logger.info(f"[PolicyFeed] After category filter: {len(frame)} rows")
 
-    if "date" not in frame.columns:
-        if "release_date" in frame.columns:
-            frame["date"] = frame["release_date"]
-        elif "published_date" in frame.columns:
-            frame["date"] = frame["published_date"]
-        elif "collected_at" in frame.columns:
-            frame["date"] = frame["collected_at"]
-        else:
-            frame["date"] = ""
-
-    if "link" not in frame.columns and "url" in frame.columns:
-        frame["link"] = frame["url"]
+    frame = _normalize_policy_feed_columns(frame)
 
     if "date" in frame.columns and (date_from or date_to):
         date_series = pd.to_datetime(frame["date"], errors="coerce")

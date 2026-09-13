@@ -238,15 +238,40 @@ def generate_and_store_daily_summaries(
 
     for sector in sector_list:
         try:
+            lookback = max(0, int(window_days))
             news_df = fetch_news_frame_for_sector(
                 sector=sector,
-                date_from=as_of - timedelta(days=max(0, int(window_days))),
+                date_from=as_of - timedelta(days=lookback),
                 date_to=as_of,
                 limit=100,
             )
+            used_as_of = as_of
+            # 지정일 구간에 없으면 DB 최신 뉴스 날짜로 폴백
+            if news_df is None or news_df.empty:
+                recent = fetch_news_frame_for_sector(sector=sector, date_from=None, date_to=None, limit=100)
+                if recent is None or recent.empty:
+                    raise ValueError("news_df가 비어 있습니다")
+                recent_dates = pd.to_datetime(recent["release_date"], errors="coerce").dropna()
+                if recent_dates.empty:
+                    raise ValueError("news_df가 비어 있습니다")
+                used_as_of = recent_dates.max().date()
+                news_df = recent[
+                    (pd.to_datetime(recent["release_date"], errors="coerce") >= pd.Timestamp(used_as_of - timedelta(days=lookback)))
+                    & (pd.to_datetime(recent["release_date"], errors="coerce") <= pd.Timestamp(used_as_of))
+                ].copy()
+                if news_df.empty:
+                    news_df = recent.head(20).copy()
+                logger.info(
+                    "[DailySummary] sector=%s requested=%s fallback_as_of=%s rows=%s",
+                    sector,
+                    as_of.isoformat(),
+                    used_as_of.isoformat(),
+                    len(news_df),
+                )
+
             summary = _call_daily_news_summary(
                 sector=sector,
-                as_of=as_of,
+                as_of=used_as_of,
                 window_days=window_days,
                 news_df=news_df,
                 model=model,
@@ -254,7 +279,15 @@ def generate_and_store_daily_summaries(
             if not summary.get("title") or not summary.get("content"):
                 raise ValueError("요약 결과에 title/content가 비어 있습니다.")
             summary_id = upsert_sector_daily_summary(summary)
-            stored.append({"sector": sector, "id": summary_id, "title": summary.get("title")})
+            stored.append(
+                {
+                    "sector": sector,
+                    "id": summary_id,
+                    "title": summary.get("title"),
+                    "release_date": summary.get("release_date") or used_as_of.isoformat(),
+                    "requested_date": as_of.isoformat(),
+                }
+            )
         except Exception as error:
             logger.warning("[DailySummary] sector=%s failed: %s", sector, error)
             errors.append({"sector": sector, "error": str(error)})

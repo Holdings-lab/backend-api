@@ -12,6 +12,7 @@ if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
 from crawler.external import ExternalCrawlerError, run_apps_crawler_policy_monitor
+from db.db import sync_policy_features_csv_to_db
 
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def run_crawl_now(
     """
     env 의 policy_monitor.py 를 한 사이클 실행한다.
 
-    CSV 출력은 policy_monitor.py 가 담당한다.
+    성공 시 features CSV → DB 동기화를 수행한다.
     """
     if keyword_config_path is not None or doc_types is not None:
         logger.info(
@@ -64,8 +65,34 @@ def run_crawl_now(
             "details": error.details,
         }
 
+    db_sync: dict = {"status": "skipped"}
+    try:
+        db_sync = sync_policy_features_csv_to_db()
+        if db_sync.get("status") not in {"success", "skipped", "partial"}:
+            logger.warning("[crawl] db sync failed: %s", db_sync)
+        elif db_sync.get("status") == "partial":
+            logger.warning("[crawl] db sync partial: %s", db_sync)
+        else:
+            logger.info(
+                "[crawl] db sync ok upserted=%s scanned=%s path=%s",
+                db_sync.get("upserted"),
+                db_sync.get("scanned"),
+                db_sync.get("csvPath"),
+            )
+    except Exception as error:
+        logger.warning("[crawl] db sync raised: %s", error)
+        db_sync = {
+            "status": "failed",
+            "message": str(error),
+            "scanned": 0,
+            "upserted": 0,
+            "skipped": 0,
+            "errors": [str(error)],
+        }
+
     return {
+        **crawl,
         "status": "success",
         "message": "policy_monitor.py 실행을 완료했습니다.",
-        **crawl,
+        "dbSync": db_sync,
     }
