@@ -899,13 +899,25 @@ def fetch_news_frame_for_sector(
     date_to: date | str | None = None,
     limit: int | None = 100,
 ) -> pd.DataFrame:
-    """섹터별 뉴스 프레임을 DB에서 조회한다. (daily summary / AI briefing 입력용)"""
+    """
+    티커/섹터 관련 뉴스 프레임을 DB에서 조회한다. (daily summary / AI briefing 입력용)
+
+    뉴스룸 sources 매칭과 동일하게:
+    - sector 필드 일치
+    - title / body_summary / body 에 티커 포함
+    - matched_keywords / keyword groups 에 티커 포함
+    - feature/raw payload 의 assetSignals / targetAssets
+    """
     if psycopg2 is None:
         return pd.DataFrame()
 
     sector_key = (_safe_str(sector, "") or "").lower()
+    ticker = sector_key.upper()
     if not sector_key:
         return pd.DataFrame()
+
+    ticker_like = f"%{ticker}%"
+    fetch_limit = None if limit is None else max(int(limit) * 8, 200)
 
     query = """
         SELECT
@@ -929,16 +941,30 @@ def fetch_news_frame_for_sector(
                 d.raw_payload->>'image',
                 f.feature_payload->>'thumbnail_url',
                 ''
-            )), '') AS image
+            )), '') AS image,
+            d.body,
+            d.matched_keywords,
+            d.matched_keyword_groups,
+            d.raw_payload,
+            f.feature_payload
         FROM policy_documents d
         LEFT JOIN policy_document_features f ON f.document_id = d.id
-        WHERE LOWER(COALESCE(
+        WHERE (
+            LOWER(COALESCE(
                 NULLIF(TRIM(BOTH FROM d.raw_payload->>'sector'), ''),
                 NULLIF(TRIM(BOTH FROM f.feature_payload->>'sector'), ''),
                 ''
             )) = %(sector)s
+            OR UPPER(COALESCE(d.title, '')) LIKE %(ticker_like)s
+            OR UPPER(COALESCE(f.body_summary, '')) LIKE %(ticker_like)s
+            OR UPPER(COALESCE(d.body, '')) LIKE %(ticker_like)s
+            OR UPPER(COALESCE(d.matched_keywords, '')) LIKE %(ticker_like)s
+            OR UPPER(COALESCE(d.matched_keyword_groups, '')) LIKE %(ticker_like)s
+            OR UPPER(COALESCE(d.raw_payload::text, '')) LIKE %(ticker_like)s
+            OR UPPER(COALESCE(f.feature_payload::text, '')) LIKE %(ticker_like)s
+        )
     """
-    params: dict[str, Any] = {"sector": sector_key}
+    params: dict[str, Any] = {"sector": sector_key, "ticker_like": ticker_like}
     if date_from:
         query += " AND COALESCE(d.published_date, NULLIF(d.release_date, '')::date) >= %(date_from)s::date"
         params["date_from"] = str(date_from)
@@ -946,15 +972,85 @@ def fetch_news_frame_for_sector(
         query += " AND COALESCE(d.published_date, NULLIF(d.release_date, '')::date) <= %(date_to)s::date"
         params["date_to"] = str(date_to)
     query += " ORDER BY d.published_date DESC NULLS LAST, d.id DESC"
-    if limit is not None and limit > 0:
+    if fetch_limit is not None and fetch_limit > 0:
         query += " LIMIT %(limit)s"
-        params["limit"] = int(limit)
+        params["limit"] = int(fetch_limit)
 
     with _connect(real_dict_cursor=True) as conn:
         with conn.cursor() as cursor:
             cursor.execute(query, params)
             rows = cursor.fetchall()
-    return pd.DataFrame(rows) if rows else pd.DataFrame()
+    if not rows:
+        return pd.DataFrame()
+
+    frame = pd.DataFrame(rows)
+    matched_mask = frame.apply(lambda row: _news_row_matches_ticker(row, ticker), axis=1)
+    frame = frame.loc[matched_mask].copy()
+    drop_cols = [c for c in ("body", "matched_keywords", "matched_keyword_groups", "raw_payload", "feature_payload") if c in frame.columns]
+    if drop_cols:
+        frame = frame.drop(columns=drop_cols)
+    if limit is not None and limit > 0:
+        frame = frame.head(int(limit))
+    return frame.reset_index(drop=True)
+
+
+def _news_row_matches_ticker(row: Any, ticker_upper: str) -> bool:
+    """NewsroomService.cardMatchesTicker 와 같은 기준 (model provenance 제외)."""
+    ticker = (ticker_upper or "").upper()
+    if not ticker:
+        return False
+
+    sector = str(row.get("sector") or "").strip().upper()
+    if sector == ticker:
+        return True
+
+    haystack = " ".join(
+        [
+            str(row.get("title") or ""),
+            str(row.get("body_summary") or ""),
+            str(row.get("body") or "")[:2000],
+            str(row.get("matched_keywords") or ""),
+            str(row.get("matched_keyword_groups") or ""),
+        ]
+    ).upper()
+    if ticker in haystack:
+        return True
+
+    for payload in (row.get("feature_payload"), row.get("raw_payload")):
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = None
+        if not isinstance(payload, dict):
+            continue
+
+        payload_sector = str(payload.get("sector") or "").strip().upper()
+        if payload_sector == ticker:
+            return True
+
+        impact = payload.get("impact") if isinstance(payload.get("impact"), dict) else {}
+        targets = impact.get("targetAssets") or payload.get("targetAssets") or []
+        if isinstance(targets, (list, tuple)):
+            for asset in targets:
+                if str(asset or "").strip().upper() == ticker:
+                    return True
+
+        signals = payload.get("assetSignals")
+        if isinstance(signals, dict):
+            signals = [signals]
+        if isinstance(signals, (list, tuple)):
+            for signal in signals:
+                if not isinstance(signal, dict):
+                    continue
+                if str(signal.get("ticker") or "").strip().upper() != ticker:
+                    continue
+                provenance = str(signal.get("provenance") or "").strip().lower()
+                if provenance == "model":
+                    continue
+                return True
+
+    return False
 
 
 def list_distinct_sectors(limit: int = 50) -> list[str]:

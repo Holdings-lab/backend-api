@@ -93,6 +93,66 @@ def _clean_url(value: object) -> str:
     return str(value or "").strip().strip("<>").strip()
 
 
+def _fetch_matched_news_for_ticker(
+    sector: str,
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int = 100,
+) -> pd.DataFrame:
+    """뉴스룸 sources와 같은 기준으로 티커 매칭 뉴스를 가져온다."""
+    return fetch_news_frame_for_sector(
+        sector=sector,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+    )
+
+
+def _resolve_news_window_for_summary(
+    sector: str,
+    as_of: date,
+    window_days: int,
+    limit: int = 100,
+) -> tuple[pd.DataFrame, date]:
+    """
+    요청일 구간 매칭 뉴스를 쓰고, 없으면 최신 매칭 뉴스 날짜로 폴백한다.
+    반환: (news_df, used_as_of)
+    """
+    lookback = max(0, int(window_days))
+    news_df = _fetch_matched_news_for_ticker(
+        sector,
+        date_from=as_of - timedelta(days=lookback),
+        date_to=as_of,
+        limit=limit,
+    )
+    if news_df is not None and not news_df.empty:
+        return news_df, as_of
+
+    recent = _fetch_matched_news_for_ticker(sector, date_from=None, date_to=None, limit=limit)
+    if recent is None or recent.empty:
+        raise ValueError("news_df가 비어 있습니다")
+    recent_dates = pd.to_datetime(recent["release_date"], errors="coerce").dropna()
+    if recent_dates.empty:
+        raise ValueError("news_df가 비어 있습니다")
+    used_as_of = recent_dates.max().date()
+    windowed = recent[
+        (pd.to_datetime(recent["release_date"], errors="coerce") >= pd.Timestamp(used_as_of - timedelta(days=lookback)))
+        & (pd.to_datetime(recent["release_date"], errors="coerce") <= pd.Timestamp(used_as_of))
+    ].copy()
+    if windowed.empty:
+        windowed = recent.head(min(20, len(recent))).copy()
+    logger.info(
+        "[DailySummary] sector=%s requested=%s fallback_as_of=%s rows=%s urls=%s",
+        sector,
+        as_of.isoformat(),
+        used_as_of.isoformat(),
+        len(windowed),
+        [str(u) for u in windowed.get("url", pd.Series(dtype=str)).head(5).tolist()],
+    )
+    return windowed, used_as_of
+
+
 def _normalize_prediction_for_apps(prediction: dict[str, Any], sector: str, as_of: date) -> dict[str, Any]:
     """policy_prediction_runs / 테스트 JSON을 apps ai_analysis 입력 형태로 맞춘다."""
     if "prediction" in prediction and ("asset" in prediction or "prediction_date" in prediction):
@@ -238,37 +298,12 @@ def generate_and_store_daily_summaries(
 
     for sector in sector_list:
         try:
-            lookback = max(0, int(window_days))
-            news_df = fetch_news_frame_for_sector(
+            news_df, used_as_of = _resolve_news_window_for_summary(
                 sector=sector,
-                date_from=as_of - timedelta(days=lookback),
-                date_to=as_of,
+                as_of=as_of,
+                window_days=window_days,
                 limit=100,
             )
-            used_as_of = as_of
-            # 지정일 구간에 없으면 DB 최신 뉴스 날짜로 폴백
-            if news_df is None or news_df.empty:
-                recent = fetch_news_frame_for_sector(sector=sector, date_from=None, date_to=None, limit=100)
-                if recent is None or recent.empty:
-                    raise ValueError("news_df가 비어 있습니다")
-                recent_dates = pd.to_datetime(recent["release_date"], errors="coerce").dropna()
-                if recent_dates.empty:
-                    raise ValueError("news_df가 비어 있습니다")
-                used_as_of = recent_dates.max().date()
-                news_df = recent[
-                    (pd.to_datetime(recent["release_date"], errors="coerce") >= pd.Timestamp(used_as_of - timedelta(days=lookback)))
-                    & (pd.to_datetime(recent["release_date"], errors="coerce") <= pd.Timestamp(used_as_of))
-                ].copy()
-                if news_df.empty:
-                    news_df = recent.head(20).copy()
-                logger.info(
-                    "[DailySummary] sector=%s requested=%s fallback_as_of=%s rows=%s",
-                    sector,
-                    as_of.isoformat(),
-                    used_as_of.isoformat(),
-                    len(news_df),
-                )
-
             summary = _call_daily_news_summary(
                 sector=sector,
                 as_of=used_as_of,
@@ -278,14 +313,31 @@ def generate_and_store_daily_summaries(
             )
             if not summary.get("title") or not summary.get("content"):
                 raise ValueError("요약 결과에 title/content가 비어 있습니다.")
+            # LLM이 본문 날짜를 넣더라도, 저장 키는 실제 사용한 as_of 로 맞춘다.
+            summary["release_date"] = used_as_of.isoformat()
+            summary["sector"] = sector
+            # 매칭에 쓴 원문 URL을 남겨 디버깅/추적용으로 보관
+            matched_urls = [
+                _clean_url(url)
+                for url in (news_df.get("url").tolist() if "url" in news_df.columns else [])
+                if _clean_url(url)
+            ]
+            payload = summary.get("summary_payload")
+            if isinstance(payload, dict):
+                payload = dict(payload)
+                payload["matched_news_urls"] = matched_urls[:20]
+                summary["summary_payload"] = payload
+
             summary_id = upsert_sector_daily_summary(summary)
             stored.append(
                 {
                     "sector": sector,
                     "id": summary_id,
                     "title": summary.get("title"),
-                    "release_date": summary.get("release_date") or used_as_of.isoformat(),
+                    "release_date": used_as_of.isoformat(),
                     "requested_date": as_of.isoformat(),
+                    "matched_news_count": len(news_df),
+                    "matched_news_urls": matched_urls[:10],
                 }
             )
         except Exception as error:
@@ -337,12 +389,14 @@ def generate_and_store_ai_briefings(
 
     for sector in sector_list:
         try:
-            news_df = fetch_news_frame_for_sector(
-                sector=sector,
+            news_df = _fetch_matched_news_for_ticker(
+                sector,
                 date_from=as_of - timedelta(days=max(0, int(news_window_days))),
                 date_to=as_of,
                 limit=100,
             )
+            if news_df is None or news_df.empty:
+                news_df = _fetch_matched_news_for_ticker(sector, date_from=None, date_to=None, limit=100)
             briefing = _call_ai_analysis(
                 sector=sector,
                 as_of=as_of,

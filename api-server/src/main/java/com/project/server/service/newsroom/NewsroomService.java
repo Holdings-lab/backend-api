@@ -417,9 +417,14 @@ public class NewsroomService {
         }
         if (card.getAssetSignals() != null) {
             for (PolicyFeedDto.AssetSignal signal : card.getAssetSignals()) {
-                if (signal.getTicker() != null && tickerUpper.equalsIgnoreCase(signal.getTicker())) {
-                    return true;
+                if (signal.getTicker() == null || !tickerUpper.equalsIgnoreCase(signal.getTicker())) {
+                    continue;
                 }
+                String provenance = signal.getProvenance();
+                if (provenance != null && "model".equalsIgnoreCase(provenance.trim())) {
+                    continue;
+                }
+                return true;
             }
         }
         if (card.getImpact() != null && card.getImpact().getTargetAssets() != null) {
