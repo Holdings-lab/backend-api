@@ -27,6 +27,60 @@ logger = logging.getLogger(__name__)
 DEFAULT_DAILY_WINDOW = 1
 DEFAULT_AI_NEWS_WINDOW = 5
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+# sectors 미지정 시 최소로 돌릴 기본 티커 (DB sector 태그가 비어도 전부 리빌드되게)
+DEFAULT_REBUILD_SECTORS = ("qqq", "xle", "xlf")
+
+
+def _parse_sectors_arg(sectors: list[str] | str | None) -> list[str]:
+    """요청 sectors 를 정규화한다. 비어 있으면 [] (호출측에서 '전부'로 해석)."""
+    if sectors is None:
+        return []
+    if isinstance(sectors, str):
+        raw_items = re.split(r"[,/\s]+", sectors)
+    elif isinstance(sectors, (list, tuple, set)):
+        raw_items = []
+        for item in sectors:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if not text:
+                continue
+            if "," in text:
+                raw_items.extend(re.split(r"[,/\s]+", text))
+            else:
+                raw_items.append(text)
+    else:
+        return []
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        key = str(item or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def resolve_rebuild_sectors(sectors: list[str] | str | None = None) -> list[str]:
+    """
+    sectors 가 비어 있거나 미지정이면 DB distinct + 기본 티커 전부.
+    명시되면 그 목록만.
+    """
+    explicit = _parse_sectors_arg(sectors)
+    if explicit:
+        return explicit
+
+    merged: list[str] = []
+    seen: set[str] = set()
+    for item in [*DEFAULT_REBUILD_SECTORS, *list_distinct_sectors(limit=100)]:
+        key = str(item or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append(key)
+    return merged
 
 
 def _as_date(value: date | datetime | str | None, fallback: date | None = None) -> date:
@@ -292,9 +346,21 @@ def generate_and_store_daily_summaries(
     model: str = DEFAULT_MODEL,
 ) -> dict[str, Any]:
     as_of = _as_date(target_date, fallback=datetime.utcnow().date() - timedelta(days=1))
-    sector_list = [s.lower() for s in (sectors or list_distinct_sectors()) if str(s).strip()]
+    sector_list = resolve_rebuild_sectors(sectors)
     stored: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
+
+    if not sector_list:
+        return {
+            "status": "failed",
+            "release_date": as_of.isoformat(),
+            "window_days": int(window_days),
+            "crawlerAppRoot": str(_crawler_app_root()),
+            "stored_count": 0,
+            "stored": [],
+            "errors": [{"sector": "*", "error": "rebuild 대상 sector 가 없습니다"}],
+            "sectors": [],
+        }
 
     for sector in sector_list:
         try:
@@ -349,6 +415,7 @@ def generate_and_store_daily_summaries(
         "release_date": as_of.isoformat(),
         "window_days": int(window_days),
         "crawlerAppRoot": str(_crawler_app_root()),
+        "sectors": sector_list,
         "stored_count": len(stored),
         "stored": stored,
         "errors": errors,
@@ -379,7 +446,7 @@ def generate_and_store_ai_briefings(
                 as_of = _as_date(prediction.get(key), fallback=as_of)
                 break
 
-    sector_list = [s.lower() for s in (sectors or list_distinct_sectors()) if str(s).strip()]
+    sector_list = resolve_rebuild_sectors(sectors)
     target_ticker = str(prediction.get("targetTicker") or prediction.get("asset") or "").strip().lower()
     if target_ticker and target_ticker not in sector_list:
         sector_list = [target_ticker, *sector_list]
@@ -423,6 +490,7 @@ def generate_and_store_ai_briefings(
         "as_of_date": as_of.isoformat(),
         "news_window_days": int(news_window_days),
         "crawlerAppRoot": str(_crawler_app_root()),
+        "sectors": sector_list,
         "stored_count": len(stored),
         "stored": stored,
         "errors": errors,
