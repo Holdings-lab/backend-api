@@ -15,9 +15,11 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -118,8 +120,30 @@ public class NewsroomBriefingProxyService {
         return new AiBriefing(
                 text(node.get("title")),
                 text(node.get("headline")),
-                text(node.get("reason"))
+                text(node.get("reason")),
+                readUrlList(node.get("usedNewsUrls"))
         );
+    }
+
+    private List<String> readUrlList(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return List.of();
+        }
+        if (node.isTextual()) {
+            String one = sanitizeUrl(node.asText(null));
+            return one == null ? List.of() : List.of(one);
+        }
+        if (!node.isArray()) {
+            return List.of();
+        }
+        List<String> urls = new ArrayList<>();
+        for (JsonNode item : node) {
+            String url = sanitizeUrl(text(item));
+            if (url != null && !urls.contains(url)) {
+                urls.add(url);
+            }
+        }
+        return List.copyOf(urls);
     }
 
     private static String text(JsonNode node) {
@@ -161,6 +185,9 @@ public class NewsroomBriefingProxyService {
     public record DailySummary(String title, String content, String imageUrl) {
     }
 
-    public record AiBriefing(String title, String headline, String reason) {
+    public record AiBriefing(String title, String headline, String reason, List<String> usedNewsUrls) {
+        public AiBriefing {
+            usedNewsUrls = usedNewsUrls == null ? List.of() : List.copyOf(usedNewsUrls);
+        }
     }
 }

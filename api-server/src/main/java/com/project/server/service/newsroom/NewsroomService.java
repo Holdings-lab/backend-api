@@ -139,19 +139,6 @@ public class NewsroomService {
         }
 
         List<PolicyFeedDto.Card> matched = findCardsForTicker(normalizedTicker, cards);
-        if (matched.isEmpty()) {
-            throw ApiException.notFound(
-                    "해당 종목의 상세 브리핑이 없습니다.", "NEWSROOM_DETAIL_NOT_FOUND");
-        }
-
-        PolicyFeedDto.Card primary = matched.get(0);
-        BigDecimal dailyChangePct = resolveDailyChangePct(primary);
-        BigDecimal totalAssetImpactPct = resolveTotalAssetImpactPct(dailyChangePct, holding.weightPct());
-
-        List<NewsroomDto.SourceItem> sources = matched.stream()
-                .limit(5)
-                .map(this::toSourceItem)
-                .toList();
 
         Map<String, NewsroomBriefingProxyService.SectorBriefing> sectorBriefings =
                 loadSectorBriefings(List.of(holding), asOfDate);
@@ -162,16 +149,30 @@ public class NewsroomService {
         NewsroomBriefingProxyService.AiBriefing ai =
                 briefing == null ? null : briefing.aiBriefing();
 
+        boolean hasDaily = daily != null && firstNonBlank(daily.title(), daily.content()) != null;
+        boolean hasAi = ai != null && firstNonBlank(ai.reason(), ai.headline(), ai.title()) != null;
+        if (matched.isEmpty() && !hasDaily && !hasAi) {
+            throw ApiException.notFound(
+                    "해당 종목의 상세 브리핑이 없습니다.", "NEWSROOM_DETAIL_NOT_FOUND");
+        }
+
+        PolicyFeedDto.Card primary = matched.isEmpty() ? null : matched.get(0);
+        BigDecimal dailyChangePct = primary == null ? null : resolveDailyChangePct(primary);
+        BigDecimal totalAssetImpactPct = resolveTotalAssetImpactPct(dailyChangePct, holding.weightPct());
+
+        // sources 는 ai_analysis used_news_url 만 사용 (피드 매칭 기사로 채우지 않음)
+        List<NewsroomDto.SourceItem> sources = buildSourcesFromAiBriefing(ai, cards);
+
         String headline = firstNonBlank(
                 daily == null ? null : daily.title(),
-                primary.getTitleKo(),
-                primary.getTitle(),
+                primary == null ? null : primary.getTitleKo(),
+                primary == null ? null : primary.getTitle(),
                 holding.name() + " 관련 소식");
         String summaryBody = firstNonBlank(
                 daily == null ? null : daily.content(),
-                primary.getBodySummaryKo(),
-                primary.getBodySummary(),
-                primary.getBodyExcerpt(),
+                primary == null ? null : primary.getBodySummaryKo(),
+                primary == null ? null : primary.getBodySummary(),
+                primary == null ? null : primary.getBodyExcerpt(),
                 headline);
         List<String> findings = buildFindingsFromDailyOrCards(
                 daily == null ? null : daily.content(),
@@ -515,6 +516,66 @@ public class NewsroomService {
                 .thumbnailUrl(sanitizeMediaUrl(card.getThumbnailUrl()))
                 .url(card.getLink())
                 .build();
+    }
+
+    /**
+     * 상세 sources 는 ai_analysis used_news_url 만 채운다.
+     * 메타(제목/출처 등)는 같은 URL 의 policy-feed 카드가 있으면 보강한다.
+     */
+    private List<NewsroomDto.SourceItem> buildSourcesFromAiBriefing(
+            NewsroomBriefingProxyService.AiBriefing ai,
+            List<PolicyFeedDto.Card> feedCards
+    ) {
+        if (ai == null || ai.usedNewsUrls() == null || ai.usedNewsUrls().isEmpty()) {
+            return List.of();
+        }
+        Map<String, PolicyFeedDto.Card> cardByUrl = new LinkedHashMap<>();
+        if (feedCards != null) {
+            for (PolicyFeedDto.Card card : feedCards) {
+                String link = normalizeSourceUrl(card.getLink());
+                if (link != null && !cardByUrl.containsKey(link)) {
+                    cardByUrl.put(link, card);
+                }
+            }
+        }
+
+        List<NewsroomDto.SourceItem> sources = new ArrayList<>();
+        for (String rawUrl : ai.usedNewsUrls()) {
+            String url = normalizeSourceUrl(rawUrl);
+            if (url == null) {
+                continue;
+            }
+            PolicyFeedDto.Card card = cardByUrl.get(url);
+            if (card != null) {
+                sources.add(toSourceItem(card));
+            } else {
+                sources.add(NewsroomDto.SourceItem.builder()
+                        .newsId(url)
+                        .title("원문 기사")
+                        .publisher("Unknown")
+                        .publishedAt(null)
+                        .thumbnailUrl(null)
+                        .url(url)
+                        .build());
+            }
+            if (sources.size() >= 5) {
+                break;
+            }
+        }
+        return sources;
+    }
+
+    private String normalizeSourceUrl(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim().replaceAll("^<|>$", "");
+        if (trimmed.isEmpty()
+                || "nan".equalsIgnoreCase(trimmed)
+                || "null".equalsIgnoreCase(trimmed)) {
+            return null;
+        }
+        return trimmed;
     }
 
     private List<String> buildFindingsFromDailyOrCards(String dailyContent, List<PolicyFeedDto.Card> matched) {
