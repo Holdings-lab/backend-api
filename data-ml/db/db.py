@@ -1280,7 +1280,8 @@ def fetch_latest_prediction_summary() -> dict[str, Any]:
 
 
 def resolve_policy_features_csv_path(csv_path: str | Path | None = None) -> Path | None:
-    """크롤 features CSV 경로를 찾는다. env / prod 볼륨 / data-ml 로컬 순."""
+    """크롤 features CSV 경로를 찾는다. csv_path / env POLICY_FEATURES_CSV / data-ml 상대 feature_csv_path."""
+
     if csv_path is not None:
         path = Path(csv_path)
         return path if path.exists() and path.stat().st_size > 0 else None
@@ -1289,14 +1290,6 @@ def resolve_policy_features_csv_path(csv_path: str | Path | None = None) -> Path
     env_path = (_env("POLICY_FEATURES_CSV") or "").strip()
     if env_path:
         candidates.append(Path(env_path))
-
-    candidates.extend(
-        [
-            Path("/opt/riseai/data/crawler/features/policy_updates_features.csv"),
-            Path("/opt/riseai/data/crawler/policy_updates_features.csv"),
-            Path("/opt/riseai/data/features/policy_updates_features.csv"),
-        ]
-    )
 
     try:
         from crawler.support_legacy.data_paths import feature_csv_path
