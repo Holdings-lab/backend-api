@@ -1307,6 +1307,114 @@ def resolve_policy_features_csv_path(csv_path: str | Path | None = None) -> Path
     return None
 
 
+def fetch_news_frame_for_sector_from_csv(
+    sector: str,
+    date_from: date | str | None = None,
+    date_to: date | str | None = None,
+    limit: int | None = 100,
+    csv_path: str | Path | None = None,
+) -> pd.DataFrame:
+    """
+    policy_updates_features.csv 에서 sector/날짜로 뉴스를 읽는다.
+    DB url UNIQUE 로 sector 가 덮인 경우에도 CSV (sector,url) 행을 그대로 쓸 수 있다.
+    """
+    sector_key = (_safe_str(sector, "") or "").lower()
+    ticker = sector_key.upper()
+    if not sector_key:
+        return pd.DataFrame()
+
+    resolved = resolve_policy_features_csv_path(csv_path)
+    if resolved is None:
+        return pd.DataFrame()
+
+    try:
+        frame = pd.read_csv(resolved, encoding="utf-8-sig")
+    except Exception as error:
+        logger.warning("[CsvNews] read failed path=%s err=%s", resolved, error)
+        return pd.DataFrame()
+    if frame is None or frame.empty:
+        return pd.DataFrame()
+
+    out = frame.copy()
+    if "url" not in out.columns and "link" in out.columns:
+        out["url"] = out["link"]
+    if "release_date" not in out.columns:
+        if "published_date" in out.columns:
+            out["release_date"] = out["published_date"]
+        elif "date" in out.columns:
+            out["release_date"] = out["date"]
+        else:
+            out["release_date"] = ""
+
+    if "sector" in out.columns:
+        sector_series = out["sector"].astype(str).str.strip().str.lower()
+    else:
+        sector_series = pd.Series([""] * len(out), index=out.index)
+
+    # CSV 는 (sector,url) 단위이므로 sector 일치 우선. 제목/본문에 티커가 있으면 보조 매칭.
+    title_col = out["title"] if "title" in out.columns else pd.Series([""] * len(out), index=out.index)
+    body_col = (
+        out["body_summary"]
+        if "body_summary" in out.columns
+        else (out["body"] if "body" in out.columns else pd.Series([""] * len(out), index=out.index))
+    )
+    haystack = (title_col.fillna("").astype(str) + " " + body_col.fillna("").astype(str)).str.upper()
+    matched = (sector_series == sector_key) | haystack.str.contains(ticker, regex=False, na=False)
+    out = out.loc[matched].copy()
+    if out.empty:
+        return pd.DataFrame()
+
+    release_ts = pd.to_datetime(out["release_date"], errors="coerce")
+    mask = release_ts.notna()
+    if date_from is not None:
+        from_d = _safe_date(date_from)
+        if from_d is not None:
+            mask &= release_ts >= pd.Timestamp(from_d)
+    if date_to is not None:
+        to_d = _safe_date(date_to)
+        if to_d is not None:
+            mask &= release_ts <= pd.Timestamp(to_d)
+    out = out.loc[mask].copy()
+    if out.empty:
+        return pd.DataFrame()
+
+    out["sector"] = sector_key
+    out["release_date"] = pd.to_datetime(out["release_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    out = out.sort_values("release_date", ascending=False, na_position="last")
+    if limit is not None and limit > 0:
+        out = out.head(int(limit))
+
+    keep = [
+        c
+        for c in (
+            "sector",
+            "release_date",
+            "title",
+            "title_ko",
+            "body_summary",
+            "body_summary_ko",
+            "url",
+            "image",
+            "thumbnail_url",
+            "matched_keywords",
+            "matched_keyword_groups",
+        )
+        if c in out.columns
+    ]
+    if "url" not in keep and "url" in out.columns:
+        keep.append("url")
+    result = out[keep].reset_index(drop=True) if keep else out.reset_index(drop=True)
+    logger.info(
+        "[CsvNews] sector=%s from=%s to=%s rows=%s path=%s",
+        sector_key,
+        date_from,
+        date_to,
+        len(result),
+        resolved,
+    )
+    return result
+
+
 def sync_policy_features_csv_to_db(
     csv_path: str | Path | None = None,
     *,

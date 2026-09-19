@@ -15,6 +15,7 @@ import pandas as pd
 from db.db import (
     fetch_latest_prediction_summary,
     fetch_news_frame_for_sector,
+    fetch_news_frame_for_sector_from_csv,
     fetch_sector_ai_briefings,
     fetch_sector_daily_summaries,
     list_distinct_sectors,
@@ -29,6 +30,8 @@ DEFAULT_AI_NEWS_WINDOW = 5
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 # sectors 미지정 시 최소로 돌릴 기본 티커 (DB sector 태그가 비어도 전부 리빌드되게)
 DEFAULT_REBUILD_SECTORS = ("qqq", "xle", "xlf")
+# 요청일 구간에 뉴스가 없을 때, 이보다 오래된 날짜로 폴백하지 않는다 (QQQ 08.28 고착 방지)
+MAX_NEWS_FALLBACK_DAYS = 3
 
 
 def _parse_sectors_arg(sectors: list[str] | str | None) -> list[str]:
@@ -154,7 +157,19 @@ def _fetch_matched_news_for_ticker(
     date_to: date | None = None,
     limit: int = 100,
 ) -> pd.DataFrame:
-    """뉴스룸 sources와 같은 기준으로 티커 매칭 뉴스를 가져온다."""
+    """
+    티커 매칭 뉴스.
+    1) POLICY_FEATURES_CSV (policy_updates_features.csv) — sector+url 유지, 예측/크롤과 동일 소스
+    2) DB fallback — CSV 없거나 비었을 때만
+    """
+    csv_df = fetch_news_frame_for_sector_from_csv(
+        sector=sector,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+    )
+    if csv_df is not None and not csv_df.empty:
+        return csv_df
     return fetch_news_frame_for_sector(
         sector=sector,
         date_from=date_from,
@@ -170,8 +185,9 @@ def _resolve_news_window_for_summary(
     limit: int = 100,
 ) -> tuple[pd.DataFrame, date]:
     """
-    요청일 구간 매칭 뉴스를 쓰고, 없으면 최신 매칭 뉴스 날짜로 폴백한다.
-    반환: (news_df, used_as_of)
+    요청일 구간 매칭 뉴스를 쓴다.
+    없을 때만 최대 MAX_NEWS_FALLBACK_DAYS 이내 최신일로 폴백한다.
+    (예전처럼 수 주 전 날짜로 떨어져 QQQ 08.28 고착되는 것을 막는다.)
     """
     lookback = max(0, int(window_days))
     news_df = _fetch_matched_news_for_ticker(
@@ -183,9 +199,18 @@ def _resolve_news_window_for_summary(
     if news_df is not None and not news_df.empty:
         return news_df, as_of
 
-    recent = _fetch_matched_news_for_ticker(sector, date_from=None, date_to=None, limit=limit)
+    fallback_from = as_of - timedelta(days=max(lookback, MAX_NEWS_FALLBACK_DAYS))
+    recent = _fetch_matched_news_for_ticker(
+        sector,
+        date_from=fallback_from,
+        date_to=as_of,
+        limit=limit,
+    )
     if recent is None or recent.empty:
-        raise ValueError("news_df가 비어 있습니다")
+        raise ValueError(
+            f"news_df가 비어 있습니다 (sector={sector}, as_of={as_of.isoformat()}, "
+            f"lookback={lookback}, fallback_days={MAX_NEWS_FALLBACK_DAYS})"
+        )
     recent_dates = pd.to_datetime(recent["release_date"], errors="coerce").dropna()
     if recent_dates.empty:
         raise ValueError("news_df가 비어 있습니다")
@@ -197,12 +222,11 @@ def _resolve_news_window_for_summary(
     if windowed.empty:
         windowed = recent.head(min(20, len(recent))).copy()
     logger.info(
-        "[DailySummary] sector=%s requested=%s fallback_as_of=%s rows=%s urls=%s",
+        "[DailySummary] sector=%s requested=%s near_fallback_as_of=%s rows=%s",
         sector,
         as_of.isoformat(),
         used_as_of.isoformat(),
         len(windowed),
-        [str(u) for u in windowed.get("url", pd.Series(dtype=str)).head(5).tolist()],
     )
     return windowed, used_as_of
 
@@ -463,7 +487,17 @@ def generate_and_store_ai_briefings(
                 limit=100,
             )
             if news_df is None or news_df.empty:
-                news_df = _fetch_matched_news_for_ticker(sector, date_from=None, date_to=None, limit=100)
+                # 무제한 과거 폴백 금지 — 최근 MAX_NEWS_FALLBACK_DAYS 만
+                news_df = _fetch_matched_news_for_ticker(
+                    sector,
+                    date_from=as_of - timedelta(days=max(int(news_window_days), MAX_NEWS_FALLBACK_DAYS)),
+                    date_to=as_of,
+                    limit=100,
+                )
+            if news_df is None or news_df.empty:
+                raise ValueError(
+                    f"news_df가 비어 있습니다 (sector={sector}, as_of={as_of.isoformat()})"
+                )
             briefing = _call_ai_analysis(
                 sector=sector,
                 as_of=as_of,
