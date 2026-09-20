@@ -170,20 +170,19 @@ public class NewsroomService {
                 primary == null ? null : primary.getTitle(),
                 holding.name() + " 관련 소식");
         String summaryBody = firstNonBlank(
+                ai == null ? null : ai.reason(),
                 hasSameDayDaily ? daily.content() : null,
-                primary == null ? null : primary.getBodySummaryKo(),
-                primary == null ? null : primary.getBodySummary(),
-                primary == null ? null : primary.getBodyExcerpt(),
                 headline);
         List<String> findings = buildFindingsFromDailyOrCards(
                 hasSameDayDaily ? daily.content() : null,
-                matched);
+                List.of());
 
         String thumbnailUrl = firstNonBlank(
                 hasSameDayDaily ? sanitizeMediaUrl(daily.imageUrl()) : null,
                 resolveNewsThumbnail(matched));
 
         String aiJudgement = firstNonBlank(
+                ai == null ? null : ai.headline(),
                 ai == null ? null : ai.reason(),
                 HARDCODED_AI_JUDGEMENT);
 
