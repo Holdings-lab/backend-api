@@ -28,6 +28,8 @@ from llm.newsroom_briefing_service import (
     generate_and_store_ai_briefings,
     generate_and_store_daily_summaries,
     get_sector_briefings_bundle,
+    preview_ai_briefings,
+    preview_daily_summaries,
 )
 from llm.providers import build_llm_client
 from lstm_signal.runner import (
@@ -1336,6 +1338,23 @@ async def rebuild_daily_summaries_endpoint(request: Request):
     return _success_response(result, message="일간 뉴스 요약 재생성에 성공했습니다.")
 
 
+@app.post(f"{ML_PREFIX}/newsroom/daily-summaries/preview")
+async def preview_daily_summaries_endpoint(request: Request):
+    """daily_news_summary.py 결과 미리보기 (DB 미저장). sectors 생략 시 5종목."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    result = preview_daily_summaries(
+        target_date=payload.get("date") or payload.get("briefingDate"),
+        window_days=int(payload.get("windowDays") or 1),
+        sectors=payload.get("sectors"),
+    )
+    return _success_response(result, message="일간 뉴스 요약 미리보기에 성공했습니다.")
+
+
 @app.post(f"{ML_PREFIX}/newsroom/ai-briefings/rebuild")
 async def rebuild_ai_briefings_endpoint(request: Request):
     try:
@@ -1350,6 +1369,23 @@ async def rebuild_ai_briefings_endpoint(request: Request):
         news_window_days=int(payload.get("newsWindowDays") or 5),
     )
     return _success_response(result, message="AI 브리핑 재생성에 성공했습니다.")
+
+
+@app.post(f"{ML_PREFIX}/newsroom/ai-briefings/preview")
+async def preview_ai_briefings_endpoint(request: Request):
+    """ai_analysis.py 결과 미리보기 (DB 미저장). sectors 생략 시 5종목."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    result = preview_ai_briefings(
+        target_date=payload.get("date") or payload.get("asOfDate"),
+        sectors=payload.get("sectors"),
+        news_window_days=int(payload.get("newsWindowDays") or 5),
+    )
+    return _success_response(result, message="AI 브리핑 미리보기에 성공했습니다.")
 
 
 def _policy_feed_response(payload: dict):

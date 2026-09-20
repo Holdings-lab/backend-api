@@ -28,9 +28,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_DAILY_WINDOW = 1
 DEFAULT_AI_NEWS_WINDOW = 5
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
-# sectors 미지정 시 최소로 돌릴 기본 티커 (DB sector 태그가 비어도 전부 리빌드되게)
-DEFAULT_REBUILD_SECTORS = ("qqq", "xle", "xlf")
-# 요청일 구간에 뉴스가 없을 때, 이보다 오래된 날짜로 폴백하지 않는다 (QQQ 08.28 고착 방지)
+# sectors 미지정 시 기본 5종목
+DEFAULT_SECTORS = ("qqq", "xle", "xlf", "xlv", "xlp")
 MAX_NEWS_FALLBACK_DAYS = 3
 
 
@@ -77,13 +76,21 @@ def resolve_rebuild_sectors(sectors: list[str] | str | None = None) -> list[str]
 
     merged: list[str] = []
     seen: set[str] = set()
-    for item in [*DEFAULT_REBUILD_SECTORS, *list_distinct_sectors(limit=100)]:
+    for item in [*DEFAULT_SECTORS, *list_distinct_sectors(limit=100)]:
         key = str(item or "").strip().lower()
         if not key or key in seen:
             continue
         seen.add(key)
         merged.append(key)
     return merged
+
+
+def resolve_preview_sectors(sectors: list[str] | str | None = None) -> list[str]:
+    """preview 전용: 미지정 시 DEFAULT_SECTORS(5종목)."""
+    explicit = _parse_sectors_arg(sectors)
+    if explicit:
+        return explicit
+    return list(DEFAULT_SECTORS)
 
 
 def _as_date(value: date | datetime | str | None, fallback: date | None = None) -> date:
@@ -527,6 +534,149 @@ def generate_and_store_ai_briefings(
         "sectors": sector_list,
         "stored_count": len(stored),
         "stored": stored,
+        "errors": errors,
+    }
+
+
+def preview_daily_summaries(
+    target_date: date | datetime | str | None = None,
+    window_days: int = DEFAULT_DAILY_WINDOW,
+    sectors: list[str] | None = None,
+    model: str = DEFAULT_MODEL,
+) -> dict[str, Any]:
+    """daily_news_summary.py 결과만 반환. DB 저장 없음."""
+    as_of = _as_date(target_date, fallback=datetime.utcnow().date() - timedelta(days=1))
+    sector_list = resolve_preview_sectors(sectors)
+    results: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+
+    for sector in sector_list:
+        try:
+            news_df, used_as_of = _resolve_news_window_for_summary(
+                sector=sector,
+                as_of=as_of,
+                window_days=window_days,
+                limit=100,
+            )
+            summary = _call_daily_news_summary(
+                sector=sector,
+                as_of=used_as_of,
+                window_days=window_days,
+                news_df=news_df,
+                model=model,
+            )
+            results.append(
+                {
+                    "sector": sector,
+                    "release_date": str(summary.get("release_date") or used_as_of.isoformat()),
+                    "requested_date": as_of.isoformat(),
+                    "title": summary.get("title"),
+                    "content": summary.get("content"),
+                    "image_url": summary.get("image_url"),
+                    "matched_news_count": len(news_df),
+                    "raw": summary,
+                }
+            )
+        except Exception as error:
+            logger.warning("[DailySummaryPreview] sector=%s failed: %s", sector, error)
+            errors.append({"sector": sector, "error": str(error)})
+
+    return {
+        "status": "success" if results else "failed",
+        "persisted": False,
+        "release_date": as_of.isoformat(),
+        "window_days": int(window_days),
+        "crawlerAppRoot": str(_crawler_app_root()),
+        "sectors": sector_list,
+        "result_count": len(results),
+        "results": results,
+        "errors": errors,
+    }
+
+
+def preview_ai_briefings(
+    prediction_summary: dict[str, Any] | None = None,
+    target_date: date | datetime | str | None = None,
+    news_window_days: int = DEFAULT_AI_NEWS_WINDOW,
+    sectors: list[str] | None = None,
+    model: str = DEFAULT_MODEL,
+) -> dict[str, Any]:
+    """ai_analysis.py 결과만 반환. DB 저장 없음."""
+    prediction = prediction_summary or fetch_latest_prediction_summary()
+    if not prediction:
+        return {
+            "status": "skipped",
+            "persisted": False,
+            "message": "prediction summary not found",
+            "result_count": 0,
+            "results": [],
+            "errors": [],
+        }
+
+    as_of = _as_date(target_date)
+    if target_date is None:
+        for key in ("as_of_date", "asOfDate", "prediction_date", "generatedAt"):
+            if prediction.get(key):
+                as_of = _as_date(prediction.get(key), fallback=as_of)
+                break
+
+    sector_list = resolve_preview_sectors(sectors)
+    results: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+
+    for sector in sector_list:
+        try:
+            news_df = _fetch_matched_news_for_ticker(
+                sector,
+                date_from=as_of - timedelta(days=max(0, int(news_window_days))),
+                date_to=as_of,
+                limit=100,
+            )
+            if news_df is None or news_df.empty:
+                news_df = _fetch_matched_news_for_ticker(
+                    sector,
+                    date_from=as_of - timedelta(days=max(int(news_window_days), MAX_NEWS_FALLBACK_DAYS)),
+                    date_to=as_of,
+                    limit=100,
+                )
+            if news_df is None or news_df.empty:
+                raise ValueError(
+                    f"news_df가 비어 있습니다 (sector={sector}, as_of={as_of.isoformat()})"
+                )
+            briefing = _call_ai_analysis(
+                sector=sector,
+                as_of=as_of,
+                news_window_days=news_window_days,
+                news_df=news_df,
+                prediction=prediction,
+                model=model,
+            )
+            results.append(
+                {
+                    "sector": sector,
+                    "as_of_date": briefing.get("as_of_date"),
+                    "title": briefing.get("title"),
+                    "headline": briefing.get("headline"),
+                    "reason": briefing.get("reason"),
+                    "alignment": briefing.get("alignment"),
+                    "used_news_urls": briefing.get("used_news_urls") or [],
+                    "disclaimer": briefing.get("disclaimer"),
+                    "raw": briefing,
+                }
+            )
+        except Exception as error:
+            logger.warning("[AiBriefingPreview] sector=%s failed: %s", sector, error)
+            errors.append({"sector": sector, "error": str(error)})
+
+    return {
+        "status": "success" if results else "failed",
+        "persisted": False,
+        "as_of_date": as_of.isoformat(),
+        "news_window_days": int(news_window_days),
+        "crawlerAppRoot": str(_crawler_app_root()),
+        "sectors": sector_list,
+        "result_count": len(results),
+        "results": results,
         "errors": errors,
     }
 
