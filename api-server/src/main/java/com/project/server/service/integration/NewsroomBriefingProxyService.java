@@ -109,7 +109,8 @@ public class NewsroomBriefingProxyService {
         return new DailySummary(
                 text(node.get("title")),
                 text(node.get("content")),
-                sanitizeUrl(text(node.get("imageUrl")))
+                sanitizeUrl(text(node.get("imageUrl"))),
+                text(node.get("releaseDate"))
         );
     }
 
@@ -182,7 +183,7 @@ public class NewsroomBriefingProxyService {
     public record SectorBriefing(DailySummary dailySummary, AiBriefing aiBriefing) {
     }
 
-    public record DailySummary(String title, String content, String imageUrl) {
+    public record DailySummary(String title, String content, String imageUrl, String releaseDate) {
     }
 
     public record AiBriefing(String title, String headline, String reason, List<String> usedNewsUrls) {
