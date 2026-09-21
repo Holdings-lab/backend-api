@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -263,6 +264,29 @@ public class AssetSyncService {
             totalAssetValue = evaluationAmount.add(cashBalance);
         }
 
+        BigDecimal dailyGainLoss = BigDecimal.ZERO;
+        if (snapshot.positions() != null) {
+            for (KisApiClient.KisPosition position : snapshot.positions()) {
+                if (position.dailyChangePct() == null || position.krw() == null) {
+                    continue;
+                }
+                BigDecimal valuation = defaultDecimal(position.krw().valuationAmount());
+                if (valuation.compareTo(BigDecimal.ZERO) == 0) {
+                    continue;
+                }
+                dailyGainLoss = dailyGainLoss.add(
+                        valuation.multiply(position.dailyChangePct())
+                                .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP));
+            }
+        }
+        BigDecimal dailyGainLossRate = BigDecimal.ZERO;
+        if (evaluationAmount.compareTo(BigDecimal.ZERO) > 0) {
+            dailyGainLossRate = dailyGainLoss
+                    .divide(evaluationAmount, 6, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100))
+                    .setScale(4, RoundingMode.HALF_UP);
+        }
+
         LocalDate asOfDate = AppTime.today();
         LocalDateTime syncedAt = AppTime.now();
         AccountBalanceEntity balance = accountBalanceRepository
@@ -279,8 +303,8 @@ public class AssetSyncService {
         balance.setEvaluationAmount(evaluationAmount);
         balance.setGainLoss(gainLoss);
         balance.setGainLossRate(gainLossRate);
-        balance.setDailyGainLoss(BigDecimal.ZERO);
-        balance.setDailyGainLossRate(BigDecimal.ZERO);
+        balance.setDailyGainLoss(dailyGainLoss.setScale(2, RoundingMode.HALF_UP));
+        balance.setDailyGainLossRate(dailyGainLossRate);
         balance.setCurrencyCode("KRW");
         balance.setFxRates(copyFxRates(snapshot.fxRates()));
         balance.setAsOfDate(asOfDate);
@@ -325,6 +349,7 @@ public class AssetSyncService {
                     .currentValue(krw == null ? BigDecimal.ZERO : defaultDecimal(krw.valuationAmount()))
                     .gainLoss(krw == null ? BigDecimal.ZERO : defaultDecimal(krw.gainLoss()))
                     .gainLossRate(defaultDecimal(position.profitRate()))
+                    .dailyChangePct(position.dailyChangePct())
                     .currencyCode(defaultString(position.currencyCode(), "USD"))
                     .fxRate(defaultDecimal(position.fxRate()))
                     .lastSyncedAt(AppTime.now())

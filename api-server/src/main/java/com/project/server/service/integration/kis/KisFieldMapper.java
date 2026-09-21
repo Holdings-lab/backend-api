@@ -146,6 +146,8 @@ public final class KisFieldMapper {
             profitRate = nativeGain.divide(nativePurchase, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"));
         }
 
+        String exchangeCode = text(row, "ovrs_excg_cd", "excg_cd", "ovrs_excg", "tr_mket_cd");
+
         return new KisApiClient.KisPosition(
                 itemCode,
                 defaultString(text(row, "prdt_name", "ovrs_item_name", "item_name"), itemCode),
@@ -157,7 +159,80 @@ public final class KisFieldMapper {
                 "Y",
                 fxRate,
                 new KisApiClient.NativeQuote(nativeAvg, nativePrice, nativePurchase, nativeValuation, nativeGain),
-                new KisApiClient.KrwQuote(krwPurchase, krwValuation, krwGain));
+                new KisApiClient.KrwQuote(krwPurchase, krwValuation, krwGain),
+                blankToNull(exchangeCode),
+                null);
+    }
+
+    public static KisApiClient.KisPosition withExchangeCode(
+            KisApiClient.KisPosition position, String exchangeCode) {
+        if (position == null) {
+            return null;
+        }
+        return new KisApiClient.KisPosition(
+                position.itemCode(),
+                position.itemName(),
+                position.productType(),
+                position.productCode(),
+                position.quantity(),
+                position.profitRate(),
+                position.currencyCode(),
+                position.overseasYn(),
+                position.fxRate(),
+                position.nativeQuote(),
+                position.krw(),
+                blankToNull(exchangeCode),
+                position.dailyChangePct());
+    }
+
+    public static KisApiClient.KisPosition withDailyChangePct(
+            KisApiClient.KisPosition position, BigDecimal dailyChangePct) {
+        if (position == null) {
+            return null;
+        }
+        return new KisApiClient.KisPosition(
+                position.itemCode(),
+                position.itemName(),
+                position.productType(),
+                position.productCode(),
+                position.quantity(),
+                position.profitRate(),
+                position.currencyCode(),
+                position.overseasYn(),
+                position.fxRate(),
+                position.nativeQuote(),
+                position.krw(),
+                position.exchangeCode(),
+                dailyChangePct);
+    }
+
+    public static KisApiClient.OverseasPriceQuote toOverseasPriceQuote(
+            String priceExcd, String symbol, JsonNode output) {
+        if (output == null || output.isMissingNode() || output.isNull()) {
+            return null;
+        }
+        JsonNode rateNode = output.path("rate");
+        if (rateNode.isMissingNode() || rateNode.isNull()) {
+            return null;
+        }
+        String rateText = rateNode.asText("").trim();
+        if (rateText.isEmpty()) {
+            return null;
+        }
+        BigDecimal rate;
+        try {
+            rate = new BigDecimal(rateText.replace(",", ""));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+        BigDecimal last = firstDecimal(output, "last");
+        BigDecimal base = firstDecimal(output, "base");
+        return new KisApiClient.OverseasPriceQuote(
+                blankToNull(priceExcd),
+                blankToNull(symbol),
+                isZero(last) ? null : last,
+                isZero(base) ? null : base,
+                rate);
     }
 
     private static List<KisApiClient.KisPosition> applyFxAndKrw(
@@ -195,7 +270,9 @@ public final class KisFieldMapper {
                 position.overseasYn(),
                 isZero(fxRate) ? BigDecimal.ZERO : fxRate,
                 nativeQuote,
-                krw);
+                krw,
+                position.exchangeCode(),
+                position.dailyChangePct());
     }
 
     private static KisApiClient.KrwQuote rebuildKrw(
@@ -417,5 +494,12 @@ public final class KisFieldMapper {
 
     private static String defaultString(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 }

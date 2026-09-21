@@ -33,6 +33,10 @@ public interface KisApiClient {
             BigDecimal gainLoss) {
     }
 
+    /**
+     * @param exchangeCode 잔고 API 거래소 코드 (NASD/NYSE/AMEX 등). 시세 EXCD 매핑에 사용.
+     * @param dailyChangePct 당일 등락률(%). 해외 현재가 API {@code rate}. 없으면 null.
+     */
     record KisPosition(
             String itemCode,
             String itemName,
@@ -44,7 +48,9 @@ public interface KisApiClient {
             String overseasYn,
             BigDecimal fxRate,
             NativeQuote nativeQuote,
-            KrwQuote krw) {
+            KrwQuote krw,
+            String exchangeCode,
+            BigDecimal dailyChangePct) {
     }
 
     record KisBalanceSnapshot(
@@ -61,7 +67,23 @@ public interface KisApiClient {
             List<KisPosition> positions) {
     }
 
+    record OverseasPriceQuote(
+            String exchangeCode,
+            String symbol,
+            BigDecimal last,
+            BigDecimal base,
+            BigDecimal rate) {
+    }
+
     KisBalanceSnapshot fetchBalance(KisCredential credential);
 
     KisBalanceSnapshot fetchBalance(KisCredential credential, boolean allowExchangeFallback);
+
+    /**
+     * 해외주식 현재가. 실패 시 null (호출측에서 티커 단위로 스킵).
+     *
+     * @param priceExcd 시세용 EXCD (NAS/NYS/AMS 등)
+     * @param symbol    티커
+     */
+    OverseasPriceQuote fetchOverseasPrice(KisCredential credential, String priceExcd, String symbol);
 }

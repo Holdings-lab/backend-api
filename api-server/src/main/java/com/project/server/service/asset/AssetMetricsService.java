@@ -1,6 +1,7 @@
 package com.project.server.service.asset;
 
 import com.project.server.domain.AccountBalanceEntity;
+import com.project.server.domain.AssetPositionEntity;
 import com.project.server.domain.BrokerAccountEntity;
 import com.project.server.domain.asset.AssetSnapshotType;
 import com.project.server.domain.asset.Status;
@@ -11,6 +12,7 @@ import com.project.server.domain.asset.UserInvestmentProfileEntity;
 import com.project.server.config.AssetProperties;
 import com.project.server.exception.ApiException;
 import com.project.server.repository.AccountBalanceRepository;
+import com.project.server.repository.AssetPositionRepository;
 import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.repository.asset.UserAssetAthRepository;
 import com.project.server.repository.asset.UserAssetSnapshotRepository;
@@ -32,6 +34,7 @@ public class AssetMetricsService {
 
     private final BrokerAccountRepository brokerAccountRepository;
     private final AccountBalanceRepository accountBalanceRepository;
+    private final AssetPositionRepository assetPositionRepository;
     private final UserAssetAthRepository userAssetAthRepository;
     private final UserAssetSnapshotRepository userAssetSnapshotRepository;
     private final UserInvestmentProfileRepository userInvestmentProfileRepository;
@@ -89,7 +92,16 @@ public class AssetMetricsService {
         return total;
     }
 
+    /**
+     * 우선: KIS 해외 현재가 rate 기반 종목 등락 (평가금액 가중).
+     * 없으면: PREVIOUS_DAY 스냅샷 대비 총자산 변화율.
+     * 둘 다 없으면: 0.0
+     */
     private BigDecimal calculateDailyChangePct(Long userId, BigDecimal currentTotal) {
+        BigDecimal fromKis = calculateKisDailyChangePct(userId);
+        if (fromKis != null) {
+            return fromKis;
+        }
         return userAssetSnapshotRepository
                 .findTopByUserIdAndSnapshotTypeOrderBySnapshotDateDesc(userId, AssetSnapshotType.PREVIOUS_DAY)
                 .map(UserAssetSnapshotEntity::getAssetTotal)
@@ -99,6 +111,33 @@ public class AssetMetricsService {
                         .multiply(BigDecimal.valueOf(100))
                         .setScale(1, RoundingMode.HALF_UP))
                 .orElse(BigDecimal.ZERO.setScale(1, RoundingMode.HALF_UP));
+    }
+
+    private BigDecimal calculateKisDailyChangePct(Long userId) {
+        BigDecimal weightedSum = BigDecimal.ZERO;
+        BigDecimal weight = BigDecimal.ZERO;
+
+        for (BrokerAccountEntity account : getConnectedAccounts(userId)) {
+            for (AssetPositionEntity position : assetPositionRepository.findByAccountId(account.getId())) {
+                if (position.getDailyChangePct() == null) {
+                    continue;
+                }
+                BigDecimal value = position.getCurrentValue() != null
+                        ? position.getCurrentValue()
+                        : BigDecimal.ZERO;
+                if (value.compareTo(BigDecimal.ZERO) <= 0) {
+                    continue;
+                }
+                weightedSum = weightedSum.add(position.getDailyChangePct().multiply(value));
+                weight = weight.add(value);
+            }
+        }
+
+        if (weight.compareTo(BigDecimal.ZERO) <= 0) {
+            return null;
+        }
+        return weightedSum.divide(weight, 6, RoundingMode.HALF_UP)
+                .setScale(1, RoundingMode.HALF_UP);
     }
 
     private BigDecimal calculateDrawdownPct(Long userId, BigDecimal currentTotal) {

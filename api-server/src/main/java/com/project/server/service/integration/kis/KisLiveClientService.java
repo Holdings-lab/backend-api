@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -31,11 +32,29 @@ public class KisLiveClientService implements KisApiClient {
 
     private static final String OVERSEAS_PRESENT_PATH = "/uapi/overseas-stock/v1/trading/inquire-present-balance";
     private static final String OVERSEAS_BALANCE_PATH = "/uapi/overseas-stock/v1/trading/inquire-balance";
+    private static final String OVERSEAS_PRICE_PATH = "/uapi/overseas-price/v1/quotations/price";
 
     private static final String OVERSEAS_PRESENT_PAPER_TR = "VTRP6504R";
     private static final String OVERSEAS_PRESENT_REAL_TR = "CTRP6504R";
     private static final String OVERSEAS_BALANCE_PAPER_TR = "VTTS3012R";
     private static final String OVERSEAS_BALANCE_REAL_TR = "TTTS3012R";
+    /** 해외주식 현재가 — 실전/모의 동일 TR */
+    private static final String OVERSEAS_PRICE_TR = "HHDFS00000300";
+
+    /** 잔고 OVRS_EXCG_CD → 시세 EXCD */
+    private static final Map<String, String> BALANCE_TO_PRICE_EXCD = Map.of(
+            "NASD", "NAS",
+            "NAS", "NAS",
+            "NYSE", "NYS",
+            "NYS", "NYS",
+            "AMEX", "AMS",
+            "AMS", "AMS",
+            "SEHK", "HKS",
+            "SHAA", "SHS",
+            "SZAA", "SZS",
+            "TKSE", "TSE");
+
+    private static final List<String> US_PRICE_EXCDS = List.of("NAS", "NYS", "AMS");
 
     /**
      * 모의는 NASD가 나스닥만, 실전은 미국전체. NYSE/AMEX도 따로 조회한다.
@@ -72,10 +91,100 @@ public class KisLiveClientService implements KisApiClient {
         validateCredential(credential);
         long startedAt = System.currentTimeMillis();
         OverseasHoldings overseas = fetchOverseasHoldings(credential, allowExchangeFallback);
+        List<KisPosition> enriched = enrichDailyChangePct(credential, overseas.positions());
         log.info("[KIS] fetchBalance cano={} positions={} elapsedMs={}",
-                credential.cano(), overseas.positions().size(), System.currentTimeMillis() - startedAt);
+                credential.cano(), enriched.size(), System.currentTimeMillis() - startedAt);
         return KisFieldMapper.toOverseasSnapshot(
-                credential, overseas.positions(), overseas.output2(), overseas.output3());
+                credential, enriched, overseas.output2(), overseas.output3());
+    }
+
+    @Override
+    public OverseasPriceQuote fetchOverseasPrice(KisCredential credential, String priceExcd, String symbol) {
+        if (credential == null || isBlank(priceExcd) || isBlank(symbol)) {
+            return null;
+        }
+        try {
+            Map<String, String> query = new LinkedHashMap<>();
+            query.put("AUTH", "");
+            query.put("EXCD", priceExcd.trim().toUpperCase());
+            query.put("SYMB", symbol.trim().toUpperCase());
+            JsonNode root = callGet(
+                    credential,
+                    OVERSEAS_PRICE_PATH,
+                    OVERSEAS_PRICE_TR,
+                    query,
+                    true,
+                    false);
+            return KisFieldMapper.toOverseasPriceQuote(
+                    priceExcd, symbol, root.path("output"));
+        } catch (ApiException e) {
+            log.warn("[KIS] overseas price skipped {}/{}: {}", priceExcd, symbol, e.getMessage());
+            return null;
+        } catch (Exception e) {
+            log.warn("[KIS] overseas price skipped {}/{}", priceExcd, symbol, e);
+            return null;
+        }
+    }
+
+    private List<KisPosition> enrichDailyChangePct(KisCredential credential, List<KisPosition> positions) {
+        if (positions == null || positions.isEmpty()) {
+            return List.of();
+        }
+        List<KisPosition> enriched = new ArrayList<>(positions.size());
+        for (int i = 0; i < positions.size(); i++) {
+            KisPosition position = positions.get(i);
+            BigDecimal dailyChangePct = null;
+            try {
+                dailyChangePct = resolveDailyChangePct(credential, position);
+            } catch (Exception e) {
+                log.warn("[KIS] daily change enrichment failed for {}: {}",
+                        position.itemCode(), e.getMessage());
+            }
+            enriched.add(KisFieldMapper.withDailyChangePct(position, dailyChangePct));
+            if (i < positions.size() - 1) {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.warn("[KIS] daily change enrichment interrupted");
+                    break;
+                }
+            }
+        }
+        return enriched;
+    }
+
+    private BigDecimal resolveDailyChangePct(KisCredential credential, KisPosition position) {
+        if (position == null || isBlank(position.itemCode())) {
+            return null;
+        }
+        List<String> candidates = resolvePriceExcds(position.exchangeCode());
+        for (int i = 0; i < candidates.size(); i++) {
+            String priceExcd = candidates.get(i);
+            OverseasPriceQuote quote = fetchOverseasPrice(credential, priceExcd, position.itemCode());
+            if (quote != null && quote.rate() != null) {
+                return quote.rate();
+            }
+            if (i < candidates.size() - 1) {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static List<String> resolvePriceExcds(String balanceExchangeCode) {
+        if (balanceExchangeCode != null && !balanceExchangeCode.isBlank()) {
+            String mapped = BALANCE_TO_PRICE_EXCD.get(balanceExchangeCode.trim().toUpperCase());
+            if (mapped != null) {
+                return List.of(mapped);
+            }
+        }
+        return US_PRICE_EXCDS;
     }
 
     private OverseasHoldings fetchOverseasHoldings(KisCredential credential, boolean allowExchangeFallback) {
@@ -187,7 +296,9 @@ public class KisLiveClientService implements KisApiClient {
             try {
                 JsonNode node = fetchOverseasBalanceForMarket(credential, market);
                 for (KisPosition position : KisFieldMapper.toOverseasBalancePositions(node.path("output1"))) {
-                    byCode.putIfAbsent(position.itemCode(), position);
+                    byCode.putIfAbsent(
+                            position.itemCode(),
+                            KisFieldMapper.withExchangeCode(position, market.exchange()));
                 }
                 Thread.sleep(100);
             } catch (InterruptedException e) {

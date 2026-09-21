@@ -158,7 +158,7 @@ public class NewsroomService {
         }
 
         PolicyFeedDto.Card primary = matched.isEmpty() ? null : matched.get(0);
-        BigDecimal dailyChangePct = primary == null ? null : resolveDailyChangePct(primary);
+        BigDecimal dailyChangePct = scaleDailyChangePct(holding.dailyChangePct());
         BigDecimal totalAssetImpactPct = resolveTotalAssetImpactPct(dailyChangePct, holding.weightPct());
 
         // sources 는 ai_analysis used_news_url 만 사용 (피드 매칭 기사로 채우지 않음)
@@ -230,8 +230,8 @@ public class NewsroomService {
 
         String headline;
         String summary;
-        BigDecimal dailyChangePct = null;
-        BigDecimal totalAssetImpactPct = null;
+        BigDecimal dailyChangePct = scaleDailyChangePct(holding.dailyChangePct());
+        BigDecimal totalAssetImpactPct = resolveTotalAssetImpactPct(dailyChangePct, holding.weightPct());
         String detailPath = null;
 
         if (type == NewsroomDto.BriefingType.Hero) {
@@ -247,8 +247,6 @@ public class NewsroomService {
                     primary == null ? null : primary.getBodySummary(),
                     primary == null ? null : primary.getBodyExcerpt(),
                     headline);
-            dailyChangePct = primary == null ? null : resolveDailyChangePct(primary);
-            totalAssetImpactPct = resolveTotalAssetImpactPct(dailyChangePct, holding.weightPct());
             detailPath = detailPath(holding.ticker());
         } else if (type == NewsroomDto.BriefingType.Compact) {
             PolicyFeedDto.Card primary = matched.isEmpty() ? null : matched.get(0);
@@ -410,16 +408,22 @@ public class NewsroomService {
                 if (ticker == null || ticker.isBlank()) {
                     continue;
                 }
+                BigDecimal value = nullToZero(position.getCurrentValue());
+                BigDecimal dailyChangePct = position.getDailyChangePct();
                 aggregated.merge(
                         ticker.toUpperCase(Locale.ROOT),
                         new AggregatedPosition(
                                 ticker.toUpperCase(Locale.ROOT),
                                 position.getItemName(),
-                                nullToZero(position.getCurrentValue())),
+                                value,
+                                dailyChangePct == null ? BigDecimal.ZERO : dailyChangePct.multiply(value),
+                                dailyChangePct == null ? BigDecimal.ZERO : value),
                         (left, right) -> new AggregatedPosition(
                                 left.ticker(),
                                 left.name() != null ? left.name() : right.name(),
-                                left.value().add(right.value())));
+                                left.value().add(right.value()),
+                                left.dailyChangeWeightedSum().add(right.dailyChangeWeightedSum()),
+                                left.dailyChangeWeight().add(right.dailyChangeWeight())));
             }
         }
 
@@ -433,7 +437,8 @@ public class NewsroomService {
                 .map(position -> new HoldingPosition(
                         position.ticker(),
                         position.name() != null ? position.name() : position.ticker(),
-                        toWeightPct(position.value(), assetTotal)))
+                        toWeightPct(position.value(), assetTotal),
+                        position.resolvedDailyChangePct()))
                 .toList();
     }
 
@@ -513,13 +518,11 @@ public class NewsroomService {
         return isHero ? NewsroomDto.BriefingType.Hero : NewsroomDto.BriefingType.Compact;
     }
 
-    private BigDecimal resolveDailyChangePct(PolicyFeedDto.Card card) {
-        if (card.getModelSignal() != null && card.getModelSignal().getPredictedReturnPct() != null) {
-            return BigDecimal.valueOf(card.getModelSignal().getPredictedReturnPct())
-                    .setScale(1, RoundingMode.HALF_UP);
+    private BigDecimal scaleDailyChangePct(BigDecimal dailyChangePct) {
+        if (dailyChangePct == null) {
+            return null;
         }
-        // 종목별 당일 등락 시세가 없어 모델 신호가 없으면 하드코딩 플레이스홀더
-        return BigDecimal.valueOf(-0.6).setScale(1, RoundingMode.HALF_UP);
+        return dailyChangePct.setScale(1, RoundingMode.HALF_UP);
     }
 
     private BigDecimal resolveTotalAssetImpactPct(BigDecimal dailyChangePct, BigDecimal weightPct) {
@@ -759,10 +762,27 @@ public class NewsroomService {
         }
     }
 
-    private record AggregatedPosition(String ticker, String name, BigDecimal value) {
+    private record AggregatedPosition(
+            String ticker,
+            String name,
+            BigDecimal value,
+            BigDecimal dailyChangeWeightedSum,
+            BigDecimal dailyChangeWeight
+    ) {
+        BigDecimal resolvedDailyChangePct() {
+            if (dailyChangeWeight == null || dailyChangeWeight.compareTo(BigDecimal.ZERO) <= 0) {
+                return null;
+            }
+            return dailyChangeWeightedSum.divide(dailyChangeWeight, 4, RoundingMode.HALF_UP);
+        }
     }
 
-    private record HoldingPosition(String ticker, String name, BigDecimal weightPct) {
+    private record HoldingPosition(
+            String ticker,
+            String name,
+            BigDecimal weightPct,
+            BigDecimal dailyChangePct
+    ) {
     }
 
     /**

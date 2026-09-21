@@ -71,6 +71,9 @@ public class AssetPositionEntity {
 
     @Column(name = "gain_loss_rate", precision = 10, scale = 4)
     private BigDecimal gainLossRate;
+    
+    @Column(name = "daily_change_pct", precision = 10, scale = 4)
+    private BigDecimal dailyChangePct;
 
     @Column(name = "currency_code", length = 3)
     private String currencyCode;
