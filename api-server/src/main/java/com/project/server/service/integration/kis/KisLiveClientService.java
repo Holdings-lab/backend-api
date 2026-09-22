@@ -20,8 +20,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @Slf4j
@@ -54,7 +56,24 @@ public class KisLiveClientService implements KisApiClient {
             "SZAA", "SZS",
             "TKSE", "TSE");
 
+    /**
+     * 보유 ETF 시세 EXCD 고정 (잔고에 거래소가 없을 때 추측 실패 방지).
+     * Select Sector SPDR 은 NYSE Arca → NYS.
+     */
+    private static final Map<String, String> TICKER_TO_PRICE_EXCD = Map.of(
+            "QQQ", "NAS",
+            "XLE", "NYS",
+            "XLF", "NYS",
+            "XLV", "NYS",
+            "XLP", "NYS");
+
     private static final List<String> US_PRICE_EXCDS = List.of("NAS", "NYS", "AMS");
+
+    /** 해외시세 ~1 TPS 대응 */
+    private static final long PRICE_CALL_GAP_MS = 400L;
+
+    /** 성공한 symbol → EXCD (프로세스 수명) */
+    private final ConcurrentHashMap<String, String> priceExcdBySymbol = new ConcurrentHashMap<>();
 
     /**
      * 모의는 NASD가 나스닥만, 실전은 미국전체. NYSE/AMEX도 따로 조회한다.
@@ -142,13 +161,7 @@ public class KisLiveClientService implements KisApiClient {
             }
             enriched.add(KisFieldMapper.withDailyChangePct(position, dailyChangePct));
             if (i < positions.size() - 1) {
-                try {
-                    Thread.sleep(100);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    log.warn("[KIS] daily change enrichment interrupted");
-                    break;
-                }
+                sleepQuietly(PRICE_CALL_GAP_MS);
             }
         }
         return enriched;
@@ -158,33 +171,63 @@ public class KisLiveClientService implements KisApiClient {
         if (position == null || isBlank(position.itemCode())) {
             return null;
         }
-        List<String> candidates = resolvePriceExcds(position.exchangeCode());
+        String symbol = position.itemCode().trim().toUpperCase();
+        List<String> candidates = resolvePriceExcds(symbol, position.exchangeCode());
         for (int i = 0; i < candidates.size(); i++) {
             String priceExcd = candidates.get(i);
-            OverseasPriceQuote quote = fetchOverseasPrice(credential, priceExcd, position.itemCode());
+            OverseasPriceQuote quote = fetchOverseasPriceWithRetry(credential, priceExcd, symbol);
             if (quote != null && quote.rate() != null) {
+                priceExcdBySymbol.put(symbol, priceExcd);
+                log.info("[KIS] daily change {} excd={} rate={}", symbol, priceExcd, quote.rate());
                 return quote.rate();
             }
+            log.warn("[KIS] daily change miss {} excd={}", symbol, priceExcd);
             if (i < candidates.size() - 1) {
-                try {
-                    Thread.sleep(100);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return null;
-                }
+                sleepQuietly(PRICE_CALL_GAP_MS);
             }
         }
         return null;
     }
 
-    private static List<String> resolvePriceExcds(String balanceExchangeCode) {
-        if (balanceExchangeCode != null && !balanceExchangeCode.isBlank()) {
+    private OverseasPriceQuote fetchOverseasPriceWithRetry(
+            KisCredential credential, String priceExcd, String symbol) {
+        OverseasPriceQuote quote = fetchOverseasPrice(credential, priceExcd, symbol);
+        if (quote != null && quote.rate() != null) {
+            return quote;
+        }
+        sleepQuietly(PRICE_CALL_GAP_MS);
+        return fetchOverseasPrice(credential, priceExcd, symbol);
+    }
+
+    /**
+     * 우선순위: 캐시 → 잔고 거래소 → 티커 고정맵 → US NAS/NYS/AMS.
+     */
+    private List<String> resolvePriceExcds(String symbol, String balanceExchangeCode) {
+        LinkedHashSet<String> ordered = new LinkedHashSet<>();
+        String cached = priceExcdBySymbol.get(symbol);
+        if (!isBlank(cached)) {
+            ordered.add(cached.trim().toUpperCase());
+        }
+        if (!isBlank(balanceExchangeCode)) {
             String mapped = BALANCE_TO_PRICE_EXCD.get(balanceExchangeCode.trim().toUpperCase());
             if (mapped != null) {
-                return List.of(mapped);
+                ordered.add(mapped);
             }
         }
-        return US_PRICE_EXCDS;
+        String byTicker = TICKER_TO_PRICE_EXCD.get(symbol);
+        if (byTicker != null) {
+            ordered.add(byTicker);
+        }
+        ordered.addAll(US_PRICE_EXCDS);
+        return new ArrayList<>(ordered);
+    }
+
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private OverseasHoldings fetchOverseasHoldings(KisCredential credential, boolean allowExchangeFallback) {
