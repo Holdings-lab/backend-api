@@ -122,6 +122,7 @@ public class NewsroomBriefingProxyService {
                 text(node.get("title")),
                 text(node.get("headline")),
                 text(node.get("reason")),
+                text(node.get("asOfDate")),
                 readUrlList(node.get("usedNewsUrls"))
         );
     }
@@ -186,7 +187,13 @@ public class NewsroomBriefingProxyService {
     public record DailySummary(String title, String content, String imageUrl, String releaseDate) {
     }
 
-    public record AiBriefing(String title, String headline, String reason, List<String> usedNewsUrls) {
+    public record AiBriefing(
+            String title,
+            String headline,
+            String reason,
+            String asOfDate,
+            List<String> usedNewsUrls
+    ) {
         public AiBriefing {
             usedNewsUrls = usedNewsUrls == null ? List.of() : List.copyOf(usedNewsUrls);
         }

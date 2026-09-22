@@ -52,6 +52,8 @@ public class NewsroomService {
     private static final String HARDCODED_AI_JUDGEMENT =
             "공급망 다변화는 장기 이슈라서 단일 보도만으로 단기 방향을 판단하기는 어려워요.";
     private static final String QUIET_SUMMARY = "계속 지켜보고 있어요";
+    private static final String QUIET_HEADLINE = "특이사항 없음";
+    private static final int NEWS_FRESHNESS_DAYS = 3;
 
     private final BrokerAccountRepository brokerAccountRepository;
     private final AssetPositionRepository assetPositionRepository;
@@ -72,9 +74,10 @@ public class NewsroomService {
 
         List<PolicyFeedDto.Card> cards;
         try {
-            // briefingDate 당일 기사만 가져와 hasNews / Hero·Quiet 판정에 사용
-            String day = asOfDate.toString();
-            cards = policyFeedProxyService.getCards(null, 100, null, day, day);
+            // asOf 포함 최근 NEWS_FRESHNESS_DAYS 일 기사로 hasNews / Hero·Quiet 판정
+            String dateTo = asOfDate.toString();
+            String dateFrom = asOfDate.minusDays(NEWS_FRESHNESS_DAYS).toString();
+            cards = policyFeedProxyService.getCards(null, 100, null, dateFrom, dateTo);
         } catch (Exception ex) {
             log.warn("뉴스룸 정책 피드 조회 실패: userId={}, message={}", userId, ex.getMessage());
             throw new NewsroomUnavailableException(
@@ -130,8 +133,9 @@ public class NewsroomService {
 
         List<PolicyFeedDto.Card> cards;
         try {
-            String day = asOfDate.toString();
-            cards = policyFeedProxyService.getCards(null, 100, null, day, day);
+            String dateTo = asOfDate.toString();
+            String dateFrom = asOfDate.minusDays(NEWS_FRESHNESS_DAYS).toString();
+            cards = policyFeedProxyService.getCards(null, 100, null, dateFrom, dateTo);
         } catch (Exception ex) {
             log.warn("뉴스룸 상세 정책 피드 조회 실패: userId={}, ticker={}, message={}",
                     userId, normalizedTicker, ex.getMessage());
@@ -150,9 +154,9 @@ public class NewsroomService {
         NewsroomBriefingProxyService.AiBriefing ai =
                 briefing == null ? null : briefing.aiBriefing();
 
-        boolean hasSameDayDaily = isSameDayDaily(daily, asOfDate);
-        boolean hasAi = ai != null && firstNonBlank(ai.reason(), ai.headline(), ai.title()) != null;
-        if (matched.isEmpty() && !hasSameDayDaily && !hasAi) {
+        boolean hasFreshDaily = isFreshDaily(daily, asOfDate);
+        boolean hasFreshAi = isFreshAi(ai, asOfDate);
+        if (matched.isEmpty() && !hasFreshDaily && !hasFreshAi) {
             throw ApiException.notFound(
                     "해당 종목의 상세 브리핑이 없습니다.", "NEWSROOM_DETAIL_NOT_FOUND");
         }
@@ -165,20 +169,20 @@ public class NewsroomService {
         List<NewsroomDto.SourceItem> sources = buildSourcesFromAiBriefing(ai, cards);
 
         String headline = firstNonBlank(
-                hasSameDayDaily ? daily.title() : null,
+                hasFreshDaily ? daily.title() : null,
                 primary == null ? null : primary.getTitleKo(),
                 primary == null ? null : primary.getTitle(),
                 holding.name() + " 관련 소식");
         String summaryBody = firstNonBlank(
                 ai == null ? null : ai.reason(),
-                hasSameDayDaily ? daily.content() : null,
+                hasFreshDaily ? daily.content() : null,
                 headline);
         List<String> findings = buildFindingsFromDailyOrCards(
-                hasSameDayDaily ? daily.content() : null,
+                hasFreshDaily ? daily.content() : null,
                 List.of());
 
         String thumbnailUrl = firstNonBlank(
-                hasSameDayDaily ? sanitizeMediaUrl(daily.imageUrl()) : null,
+                hasFreshDaily ? sanitizeMediaUrl(daily.imageUrl()) : null,
                 resolveNewsThumbnail(matched));
 
         String aiJudgement = firstNonBlank(
@@ -223,8 +227,8 @@ public class NewsroomService {
         NewsroomBriefingProxyService.DailySummary daily =
                 briefing == null ? null : briefing.dailySummary();
 
-        // 당일 뉴스: policy-feed 당일 카드 매칭 또는 당일 daily summary
-        boolean hasNews = !matched.isEmpty() || isSameDayDaily(daily, asOfDate);
+        // 최근 NEWS_FRESHNESS_DAYS 일 이내 카드 또는 daily
+        boolean hasNews = !matched.isEmpty() || isFreshDaily(daily, asOfDate);
         NewsroomDto.BriefingType type = resolveBriefingType(
                 hasNews, heroTickers.contains(holding.ticker()));
 
@@ -237,12 +241,12 @@ public class NewsroomService {
         if (type == NewsroomDto.BriefingType.Hero) {
             PolicyFeedDto.Card primary = matched.isEmpty() ? null : matched.get(0);
             headline = firstNonBlank(
-                    isSameDayDaily(daily, asOfDate) ? daily.title() : null,
+                    isFreshDaily(daily, asOfDate) ? daily.title() : null,
                     primary == null ? null : primary.getTitleKo(),
                     primary == null ? null : primary.getTitle(),
                     holding.name() + " 관련 소식");
             summary = firstNonBlank(
-                    isSameDayDaily(daily, asOfDate) ? daily.content() : null,
+                    isFreshDaily(daily, asOfDate) ? daily.content() : null,
                     primary == null ? null : primary.getBodySummaryKo(),
                     primary == null ? null : primary.getBodySummary(),
                     primary == null ? null : primary.getBodyExcerpt(),
@@ -251,7 +255,7 @@ public class NewsroomService {
         } else if (type == NewsroomDto.BriefingType.Compact) {
             PolicyFeedDto.Card primary = matched.isEmpty() ? null : matched.get(0);
             headline = firstNonBlank(
-                    isSameDayDaily(daily, asOfDate) ? daily.title() : null,
+                    isFreshDaily(daily, asOfDate) ? daily.title() : null,
                     primary == null ? null : primary.getBodySummaryKo(),
                     primary == null ? null : primary.getTitleKo(),
                     primary == null ? null : primary.getBodySummary(),
@@ -259,14 +263,13 @@ public class NewsroomService {
                     holding.name() + " 관련 소식");
             summary = null;
             detailPath = detailPath(holding.ticker());
-        } else if (isSameDayDaily(daily, asOfDate)) {
-            // Quiet 이지만 당일 daily 가 있으면(카드만 없는 경우) 요약 표시 — 보통 hasNews=true 로 Hero/Compact
+        } else if (isFreshDaily(daily, asOfDate)) {
+            // Quiet 이지만 fresh daily 가 있으면(카드만 없는 경우) 요약 표시
             headline = daily.title();
             summary = firstNonBlank(daily.content(), QUIET_SUMMARY);
             detailPath = detailPath(holding.ticker());
         } else {
-            int quietDays = quietDaysFor(holding.ticker());
-            headline = quietDays + "일째 특이사항 없음";
+            headline = quietHeadline(daily, asOfDate);
             summary = QUIET_SUMMARY;
         }
 
@@ -306,8 +309,7 @@ public class NewsroomService {
     }
 
     /**
-     * 당일 뉴스가 있는 보유 종목 중 비중 상위 {@link #HERO_TOP_N}개 티커를 Hero로 선정한다.
-     * holdings는 이미 비중 내림차순이므로 순서대로 스캔한다.
+     * 최근 {@link #NEWS_FRESHNESS_DAYS}일 이내 뉴스가 있는 보유 종목 중 비중 상위 {@link #HERO_TOP_N}개.
      */
     private Set<String> resolveHeroTickers(
             List<HoldingPosition> holdings,
@@ -324,16 +326,16 @@ public class NewsroomService {
                     sectorBriefings == null ? null : sectorBriefings.get(toSectorKey(holding.ticker()));
             NewsroomBriefingProxyService.DailySummary daily =
                     briefing == null ? null : briefing.dailySummary();
-            boolean hasSameDayNews = !findCardsForTicker(holding.ticker(), cards).isEmpty()
-                    || isSameDayDaily(daily, asOfDate);
-            if (hasSameDayNews) {
+            boolean hasFreshNews = !findCardsForTicker(holding.ticker(), cards).isEmpty()
+                    || isFreshDaily(daily, asOfDate);
+            if (hasFreshNews) {
                 heroTickers.add(holding.ticker());
             }
         }
         return heroTickers;
     }
 
-    private boolean isSameDayDaily(
+    private boolean isFreshDaily(
             NewsroomBriefingProxyService.DailySummary daily,
             LocalDate asOfDate
     ) {
@@ -343,15 +345,59 @@ public class NewsroomService {
         if (daily.title() == null || daily.title().isBlank()) {
             return false;
         }
-        String releaseDate = daily.releaseDate();
-        if (releaseDate == null || releaseDate.isBlank()) {
+        return isFreshDate(parseFlexibleDate(daily.releaseDate()), asOfDate);
+    }
+
+    private boolean isFreshAi(
+            NewsroomBriefingProxyService.AiBriefing ai,
+            LocalDate asOfDate
+    ) {
+        if (ai == null || asOfDate == null) {
             return false;
         }
+        if (firstNonBlank(ai.reason(), ai.headline(), ai.title()) == null) {
+            return false;
+        }
+        LocalDate aiDate = parseFlexibleDate(ai.asOfDate());
+        // asOfDate 없으면 내용만 있으면 fresh로 보지 않음 (오래된 AI 오픈 방지) — 날짜 있을 때만
+        if (aiDate == null) {
+            return false;
+        }
+        return isFreshDate(aiDate, asOfDate);
+    }
+
+    private boolean isFreshDate(LocalDate date, LocalDate asOfDate) {
+        if (date == null || asOfDate == null) {
+            return false;
+        }
+        LocalDate from = asOfDate.minusDays(NEWS_FRESHNESS_DAYS);
+        return !date.isBefore(from) && !date.isAfter(asOfDate);
+    }
+
+    private LocalDate parseFlexibleDate(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String trimmed = raw.trim();
         try {
-            return asOfDate.equals(LocalDate.parse(releaseDate.trim().substring(0, Math.min(10, releaseDate.trim().length()))));
+            return LocalDate.parse(trimmed.substring(0, Math.min(10, trimmed.length())));
         } catch (DateTimeParseException | StringIndexOutOfBoundsException ex) {
-            return false;
+            return null;
         }
+    }
+
+    private String quietHeadline(
+            NewsroomBriefingProxyService.DailySummary daily,
+            LocalDate asOfDate
+    ) {
+        LocalDate lastRelease = daily == null ? null : parseFlexibleDate(daily.releaseDate());
+        if (lastRelease != null && asOfDate != null && lastRelease.isBefore(asOfDate)) {
+            long days = java.time.temporal.ChronoUnit.DAYS.between(lastRelease, asOfDate);
+            if (days > 0) {
+                return days + "일째 특이사항 없음";
+            }
+        }
+        return QUIET_HEADLINE;
     }
 
     private NewsroomDto.TabResponse emptyTabResponse(String asOfAt) {
@@ -692,11 +738,6 @@ public class NewsroomService {
 
     private String detailPath(String ticker) {
         return "/api/newsroom/" + ticker;
-    }
-
-    private int quietDaysFor(String ticker) {
-        int hash = Math.abs(Objects.hash(ticker) % 20);
-        return Math.max(1, hash);
     }
 
     private LocalDate resolveBriefingDate(String briefingDate) {
