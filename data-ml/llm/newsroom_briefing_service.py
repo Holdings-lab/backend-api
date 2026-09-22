@@ -470,12 +470,8 @@ def generate_and_store_ai_briefings(
             "errors": [],
         }
 
-    as_of = _as_date(target_date)
-    if target_date is None:
-        for key in ("as_of_date", "asOfDate", "prediction_date", "generatedAt"):
-            if prediction.get(key):
-                as_of = _as_date(prediction.get(key), fallback=as_of)
-                break
+    as_of = _as_date(target_date, fallback=datetime.utcnow().date())
+    # body/target_date 없으면 실행일 사용. prediction payload 의 옛 as_of는 무시
 
     sector_list = resolve_rebuild_sectors(sectors)
     target_ticker = str(prediction.get("targetTicker") or prediction.get("asset") or "").strip().lower()
@@ -613,12 +609,8 @@ def preview_ai_briefings(
             "errors": [],
         }
 
-    as_of = _as_date(target_date)
-    if target_date is None:
-        for key in ("as_of_date", "asOfDate", "prediction_date", "generatedAt"):
-            if prediction.get(key):
-                as_of = _as_date(prediction.get(key), fallback=as_of)
-                break
+    as_of = _as_date(target_date, fallback=datetime.utcnow().date())
+    # body/target_date 없으면 실행일 사용. prediction 의 옛 as_of 는 무시.
 
     sector_list = resolve_preview_sectors(sectors)
     results: list[dict[str, Any]] = []
