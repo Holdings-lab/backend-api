@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_ML_WORKER_ROOT = Path("/opt/riseai/apps/ml-worker")
 DEFAULT_PREDICTIONS_DIR = Path("/opt/riseai/data/predictions")
 DEFAULT_FEATURES_ROOT = Path("/opt/riseai/data/features")
-DEFAULT_SIGNAL_TICKERS = ("QQQ", "XLE", "XLF")
+DEFAULT_SIGNAL_TICKERS = ("QQQ", "XLE", "XLF", "XLV")
 DEFAULT_TIMEOUT_SEC = 120
 
 
@@ -77,7 +77,7 @@ def _features_root() -> Path:
 
 
 def _default_output_path(ticker: str) -> Path:
-    # /opt/riseai/data/predictions/{qqq|xle|xlf}_latest_signal.json
+    # /opt/riseai/data/predictions/{qqq|xle|xlf|xlv}_latest_signal.json
     return _predictions_dir() / f"{_ticker_slug(ticker)}_latest_signal.json"
 
 
@@ -399,11 +399,27 @@ def signal_to_prediction_summary(signal: dict[str, Any] | None, ticker: str = "Q
     except Exception:
         horizon_days = 15
 
+    generated_at = str(payload.get("generatedAt") or datetime.utcnow().isoformat() + "Z")
+    as_of = (
+        payload.get("as_of_date")
+        or payload.get("asOfDate")
+        or payload.get("as-of-date")
+        or payload.get("prediction_date")
+        or payload.get("predictionDate")
+    )
+    as_of_date = _parse_target_date(as_of)
+    if as_of_date is None:
+        as_of_date = _parse_target_date(generated_at)
+    if as_of_date is None:
+        as_of_date = datetime.utcnow().date()
+
     return {
         "modelVersion": str(payload.get("modelVersion") or "predict-signal-v1"),
         "targetTicker": ticker_upper,
         "bestHorizonDays": horizon_days,
         "bestThreshold": 0.004,
+        "as_of_date": as_of_date.isoformat(),
+        "prediction_date": as_of_date.isoformat(),
         "metrics": {
             "policyScore": policy_score,
             "topLabelProbability": confidence,
@@ -416,7 +432,7 @@ def signal_to_prediction_summary(signal: dict[str, Any] | None, ticker: str = "Q
             "topProbability": confidence,
         },
         "signal": direction,
-        "generatedAt": str(payload.get("generatedAt") or datetime.utcnow().isoformat() + "Z"),
+        "generatedAt": generated_at,
         "rawSignal": payload,
     }
 

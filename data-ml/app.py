@@ -363,7 +363,7 @@ def _build_model_asset_signal(
 
 
 def _load_ticker_model_signals() -> list[dict]:
-    """QQQ/XLE/XLF latest signal JSON 을 읽어 카드용 model assetSignals 를 만든다."""
+    """QQQ/XLE/XLF/XLV latest signal JSON 을 읽어 카드용 model assetSignals 를 만든다."""
     signals: list[dict] = []
     for ticker in DEFAULT_SIGNAL_TICKERS:
         try:
@@ -960,7 +960,7 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
                 },
             }
         else:
-            # 일일 예측: train_regression 제외, QQQ/XLE/XLF predict_signal 만 실행
+            # 일일 예측: train_regression 제외, QQQ/XLE/XLF/XLV predict_signal 만 실행
             try:
                 predict_result = run_signals_for_tickers(
                     tickers=list(DEFAULT_SIGNAL_TICKERS),
@@ -1127,7 +1127,7 @@ def run_crawl_endpoint():
 
 @app.post(f"{ML_PREFIX}/predictions/run")
 def run_predict_endpoint():
-    """일일 파이프라인과 동일하게 QQQ/XLE/XLF predict_signal 을 실행한다."""
+    """일일 파이프라인과 동일하게 QQQ/XLE/XLF/XLV predict_signal 을 실행한다."""
     if not run_lock.acquire(blocking=False):
         return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_PREDICT_BUSY", status_code=409)
     try:
@@ -1149,7 +1149,7 @@ def run_predict_endpoint():
 
 @app.get(f"{ML_PREFIX}/predictions/latest")
 def get_predict_result_endpoint(ticker: str | None = None):
-    """티커별 최신 predict_signal 결과. ticker 생략 시 QQQ/XLE/XLF 전부."""
+    """티커별 최신 predict_signal 결과. ticker 생략 시 QQQ/XLE/XLF/XLV 전부."""
     requested = (ticker or "").strip().upper()
     tickers = [requested] if requested else list(DEFAULT_SIGNAL_TICKERS)
     by_ticker: dict[str, dict] = {}
