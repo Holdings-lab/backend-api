@@ -20,10 +20,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from crawler.service import run_crawl_now
-from crawler.postprocessing import sentiment_score as sentiment_score_module
 from scheduler import build_scheduler
 from db.db import fetch_policy_feed_frame, fetch_user_watch_asset_names, init_db
-from llm.service import ArticleInsightGenerationService, HomeBriefingGenerationService
 from llm.newsroom_briefing_service import (
     generate_and_store_ai_briefings,
     generate_and_store_daily_summaries,
@@ -77,60 +75,6 @@ run_lock = Lock()
 scheduler_instance = None
 pipeline_job_state: dict[str, object] = {}
 pipeline_job_state_lock = Lock()
-article_insight_service = ArticleInsightGenerationService()
-home_briefing_service = HomeBriefingGenerationService()
-
-
-def _safe_extract_probs_from_output(output_one_text) -> dict:
-    if output_one_text is None:
-        return {
-            "positive_prob": None,
-            "negative_prob": None,
-            "neutral_prob": None,
-            "sentiment_score": None,
-        }
-
-    if isinstance(output_one_text, dict):
-        if "label" in output_one_text and "score" in output_one_text:
-            output_one_text = [output_one_text]
-        else:
-            normalized = []
-            for value in output_one_text.values():
-                if isinstance(value, dict) and "label" in value and "score" in value:
-                    normalized.append(value)
-                elif isinstance(value, (list, tuple)):
-                    normalized.extend(
-                        item for item in value
-                        if isinstance(item, dict) and "label" in item and "score" in item
-                    )
-            output_one_text = normalized
-
-    if not isinstance(output_one_text, (list, tuple)):
-        return {
-            "positive_prob": None,
-            "negative_prob": None,
-            "neutral_prob": None,
-            "sentiment_score": None,
-        }
-
-    score_map = {}
-    for item in output_one_text:
-        if isinstance(item, dict) and "label" in item and "score" in item:
-            score_map[str(item["label"]).lower()] = item["score"]
-
-    pos = score_map.get("positive", 0.0)
-    neg = score_map.get("negative", 0.0)
-    neu = score_map.get("neutral", 0.0)
-
-    return {
-        "positive_prob": pos,
-        "negative_prob": neg,
-        "neutral_prob": neu,
-        "sentiment_score": pos - neg,
-    }
-
-
-sentiment_score_module.extract_probs_from_output = _safe_extract_probs_from_output
 
 
 def _safe_str(value, default=""):
@@ -363,7 +307,7 @@ def _build_model_asset_signal(
 
 
 def _load_ticker_model_signals() -> list[dict]:
-    """QQQ/XLE/XLF/XLV latest signal JSON 을 읽어 카드용 model assetSignals 를 만든다."""
+    """QQQ/XLF/XLE/XLV/XLP latest signal JSON 을 읽어 카드용 model assetSignals 를 만든다."""
     signals: list[dict] = []
     for ticker in DEFAULT_SIGNAL_TICKERS:
         try:
@@ -960,10 +904,9 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
                 },
             }
         else:
-            # 일일 예측: train_regression 제외, QQQ/XLE/XLF/XLV predict_signal 만 실행
+            # 일일 예측: QQQ/XLF/XLE/XLV/XLP predict_signal
             try:
                 predict_result = run_signals_for_tickers(
-                    tickers=list(DEFAULT_SIGNAL_TICKERS),
                     refresh_features=False,
                     target_date=parsed_target_date,
                 )
@@ -997,26 +940,18 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
             }
 
             if predict_result.get("status") in {"success", "partial"} and by_ticker:
-                briefing_stored = []
-                briefing_errors = []
-                for ticker, raw_signal in by_ticker.items():
-                    try:
-                        one = generate_and_store_ai_briefings(
-                            prediction_summary=signal_to_prediction_summary(raw_signal, ticker),
-                            target_date=parsed_target_date,
-                            sectors=[str(ticker).lower()],
-                        )
-                        briefing_stored.extend(one.get("stored") or [])
-                        briefing_errors.extend(one.get("errors") or [])
-                    except Exception as error:
-                        logger.warning("[Pipeline] ai briefing failed ticker=%s: %s", ticker, error)
-                        briefing_errors.append({"sector": str(ticker).lower(), "error": str(error)})
-                ai_briefing_result = {
-                    "status": "success" if briefing_stored else "failed",
-                    "stored_count": len(briefing_stored),
-                    "stored": briefing_stored,
-                    "errors": briefing_errors,
+                predictions_by_sector = {
+                    str(ticker).lower(): signal_to_prediction_summary(raw_signal, ticker)
+                    for ticker, raw_signal in by_ticker.items()
                 }
+                try:
+                    ai_briefing_result = generate_and_store_ai_briefings(
+                        predictions_by_sector=predictions_by_sector,
+                        target_date=parsed_target_date,
+                    )
+                except Exception as error:
+                    logger.warning("[Pipeline] ai briefing failed: %s", error)
+                    ai_briefing_result = {"status": "failed", "message": str(error)}
 
             webhook_result = _send_signal_to_api_server(signal_payload)
 
@@ -1127,12 +1062,11 @@ def run_crawl_endpoint():
 
 @app.post(f"{ML_PREFIX}/predictions/run")
 def run_predict_endpoint():
-    """일일 파이프라인과 동일하게 QQQ/XLE/XLF/XLV predict_signal 을 실행한다."""
+    """일일 파이프라인과 동일하게 QQQ/XLF/XLE/XLV/XLP predict_signal 을 실행한다."""
     if not run_lock.acquire(blocking=False):
         return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_PREDICT_BUSY", status_code=409)
     try:
         result = run_signals_for_tickers(
-            tickers=list(DEFAULT_SIGNAL_TICKERS),
             refresh_features=False,
         )
         if result.get("status") in {"success", "partial"}:
@@ -1149,7 +1083,7 @@ def run_predict_endpoint():
 
 @app.get(f"{ML_PREFIX}/predictions/latest")
 def get_predict_result_endpoint(ticker: str | None = None):
-    """티커별 최신 predict_signal 결과. ticker 생략 시 QQQ/XLE/XLF/XLV 전부."""
+    """ticker 가 있으면 그 종목만, 없으면 5종목 최신 predict_signal 결과"""
     requested = (ticker or "").strip().upper()
     tickers = [requested] if requested else list(DEFAULT_SIGNAL_TICKERS)
     by_ticker: dict[str, dict] = {}
@@ -1239,6 +1173,7 @@ async def run_signal_endpoint(request: Request, date: str | None = None):
 
 @app.get(f"{ML_PREFIX}/signal/latest")
 def get_latest_signal_endpoint(ticker: str | None = None):
+    """ticker 가 있으면 그 종목만, 없으면 5종목 최신 시그널."""
     requested = (ticker or "").strip().upper()
     tickers = [requested] if requested else list(DEFAULT_SIGNAL_TICKERS)
     by_ticker: dict[str, dict] = {}
@@ -1270,40 +1205,6 @@ def get_latest_signal_endpoint(ticker: str | None = None):
         },
         message="최신 시그널 조회에 성공했습니다.",
     )
-
-
-@app.get(f"{ML_PREFIX}/llm/article-insights")
-def get_article_insights_endpoint(
-    insightDate: str | None = None,
-):
-    result = article_insight_service.generate_for_date(insightDate)
-    if result.get("status") == "empty":
-        return _success_response(_remove_message_fields(result), message="기사 데이터가 없어 LLM 생성을 건너뜁니다.")
-    return _success_response(_remove_message_fields(result), message="기사 인사이트 조회에 성공했습니다.")
-
-
-@app.post(f"{ML_PREFIX}/llm/article-insights/rebuild")
-async def rebuild_article_insights_endpoint(request: Request):
-    try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
-    insight_date = payload.get("insightDate") or payload.get("date")
-    result = article_insight_service.generate_for_date(insight_date)
-    if result.get("status") == "empty":
-        return _success_response(_remove_message_fields(result), message="기사 데이터가 없어 재생성을 건너뜁니다.")
-    return _success_response(_remove_message_fields(result), message="기사 인사이트 재생성에 성공했습니다.")
-
-
-@app.get(f"{ML_PREFIX}/llm/home-briefings")
-def get_home_briefings_endpoint(
-    userId: int,
-    briefingDate: str | None = None,
-):
-    result = home_briefing_service.generate_for_user(userId, briefingDate)
-    if result.get("status") == "empty":
-        return _success_response(_remove_message_fields(result), message="브리핑 데이터가 없어 LLM 생성을 건너뜁니다.")
-    return _success_response(_remove_message_fields(result), message="홈 브리핑 조회에 성공했습니다.")
 
 
 @app.get(f"{ML_PREFIX}/newsroom/sector-briefings")
@@ -1340,7 +1241,7 @@ async def rebuild_daily_summaries_endpoint(request: Request):
 
 @app.post(f"{ML_PREFIX}/newsroom/daily-summaries/preview")
 async def preview_daily_summaries_endpoint(request: Request):
-    """daily_news_summary.py 결과 미리보기 (DB 미저장). sectors 생략 시 5종목."""
+    """daily_news_summary.py 결과 미리보기 (DB 미저장)"""
     try:
         payload = await request.json()
     except Exception:
@@ -1373,7 +1274,7 @@ async def rebuild_ai_briefings_endpoint(request: Request):
 
 @app.post(f"{ML_PREFIX}/newsroom/ai-briefings/preview")
 async def preview_ai_briefings_endpoint(request: Request):
-    """ai_analysis.py 결과 미리보기 (DB 미저장). sectors 생략 시 5종목."""
+    """ai_analysis.py 결과 미리보기 (DB 미저장)"""
     try:
         payload = await request.json()
     except Exception:
