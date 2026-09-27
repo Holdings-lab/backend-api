@@ -93,12 +93,12 @@ public class AssetMetricsService {
     }
 
     /**
-     * 우선: KIS 해외 현재가 rate 기반 종목 등락 (평가금액 가중).
+     * 우선: 종목 등락금액 합 / 계좌 총자산(현금 포함).
      * 없으면: PREVIOUS_DAY 스냅샷 대비 총자산 변화율.
      * 둘 다 없으면: 0.0
      */
     private BigDecimal calculateDailyChangePct(Long userId, BigDecimal currentTotal) {
-        BigDecimal fromKis = calculateKisDailyChangePct(userId);
+        BigDecimal fromKis = calculateKisDailyChangePct(userId, currentTotal);
         if (fromKis != null) {
             return fromKis;
         }
@@ -113,9 +113,18 @@ public class AssetMetricsService {
                 .orElse(BigDecimal.ZERO.setScale(1, RoundingMode.HALF_UP));
     }
 
-    private BigDecimal calculateKisDailyChangePct(Long userId) {
-        BigDecimal weightedSum = BigDecimal.ZERO;
-        BigDecimal weight = BigDecimal.ZERO;
+    /**
+     * 포트폴리오 일간 수익률(%)
+     * 분자 = 보유 종목 평가금액 × 종목 daily_change_pct 의 합
+     * 분모 = 계좌 총자산(현금 포함)
+     */
+    private BigDecimal calculateKisDailyChangePct(Long userId, BigDecimal assetTotal) {
+        if (assetTotal == null || assetTotal.compareTo(BigDecimal.ZERO) <= 0) {
+            return null;
+        }
+
+        BigDecimal changeAmount = BigDecimal.ZERO;
+        boolean anyRate = false;
 
         for (BrokerAccountEntity account : getConnectedAccounts(userId)) {
             for (AssetPositionEntity position : assetPositionRepository.findByAccountId(account.getId())) {
@@ -128,15 +137,19 @@ public class AssetMetricsService {
                 if (value.compareTo(BigDecimal.ZERO) <= 0) {
                     continue;
                 }
-                weightedSum = weightedSum.add(position.getDailyChangePct().multiply(value));
-                weight = weight.add(value);
+                anyRate = true;
+                changeAmount = changeAmount.add(
+                        value.multiply(position.getDailyChangePct())
+                                .divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP));
             }
         }
 
-        if (weight.compareTo(BigDecimal.ZERO) <= 0) {
+        if (!anyRate) {
             return null;
         }
-        return weightedSum.divide(weight, 6, RoundingMode.HALF_UP)
+        return changeAmount
+                .divide(assetTotal, 6, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100))
                 .setScale(1, RoundingMode.HALF_UP);
     }
 
