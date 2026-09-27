@@ -7,6 +7,7 @@ import com.project.server.exception.ApiException;
 import com.project.server.repository.AssetPositionRepository;
 import com.project.server.repository.BrokerAccountRepository;
 import com.project.server.service.broker.AssetSyncService;
+import com.project.server.service.integration.StockLogoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,7 @@ public class HoldingsService {
     private final AssetPositionRepository assetPositionRepository;
     private final AssetMetricsService assetMetricsService;
     private final AssetSyncService assetSyncService;
+    private final StockLogoService stockLogoService;
 
     public UserAssetDto.HoldingsResponse getHoldings(Long userId) {
         validateUserId(userId);
@@ -77,6 +79,8 @@ public class HoldingsService {
         BigDecimal topWeightSum = BigDecimal.ZERO;
 
         int topCount = Math.min(3, sorted.size());
+        stockLogoService.preloadLogos(
+                sorted.stream().limit(topCount).map(AggregatedPosition::ticker).toList());
         for (int i = 0; i < topCount; i++) {
             AggregatedPosition position = sorted.get(i);
             BigDecimal weight = toWeightPct(position.value(), assetTotal);
@@ -84,6 +88,7 @@ public class HoldingsService {
             holdings.add(UserAssetDto.HoldingItem.builder()
                     .ticker(position.ticker())
                     .name(position.name() != null ? position.name() : position.ticker())
+                    .logoUrl(stockLogoService.getLogoUrl(position.ticker()))
                     .weightPct(weight)
                     .build());
         }

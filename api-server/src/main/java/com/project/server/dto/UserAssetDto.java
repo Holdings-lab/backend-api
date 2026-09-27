@@ -30,6 +30,7 @@ public class UserAssetDto {
     public static class HoldingItem {
         private String ticker;
         private String name;
+        private String logoUrl;
         private BigDecimal weightPct;
     }
 
