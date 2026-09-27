@@ -41,9 +41,12 @@ public class MlSignalProxyService {
     public JsonNode runSignal(String ticker) {
         String targetUrl = normalizeBaseUrl(mlBaseUrl) + "/ml/signal/run";
         ObjectNode body = objectMapper.createObjectNode();
-        body.put("ticker", ticker == null || ticker.isBlank() ? "QQQ" : ticker.trim().toUpperCase());
+        String normalized = ticker == null ? "" : ticker.trim().toUpperCase();
+        if (!normalized.isBlank()) {
+            body.put("ticker", normalized);
+        }
 
-        log.info("Calling ML signal endpoint: url={}, ticker={}", targetUrl, body.path("ticker").asText());
+        log.info("Calling ML signal endpoint: url={}, ticker={}", targetUrl, normalized.isBlank() ? "QQQ,XLF,XLE,XLV,XLP" : normalized);
 
         HttpRequest request;
         try {

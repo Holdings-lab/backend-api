@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 from datetime import date, datetime
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_ML_WORKER_ROOT = Path("/opt/riseai/apps/ml-worker")
 DEFAULT_PREDICTIONS_DIR = Path("/opt/riseai/data/predictions")
 DEFAULT_FEATURES_ROOT = Path("/opt/riseai/data/features")
-DEFAULT_SIGNAL_TICKERS = ("QQQ", "XLE", "XLF", "XLV")
+DEFAULT_SIGNAL_TICKERS = ("QQQ", "XLF", "XLE", "XLV", "XLP")
 DEFAULT_TIMEOUT_SEC = 120
 
 
@@ -77,7 +76,7 @@ def _features_root() -> Path:
 
 
 def _default_output_path(ticker: str) -> Path:
-    # /opt/riseai/data/predictions/{qqq|xle|xlf|xlv}_latest_signal.json
+    # /opt/riseai/data/predictions/{qqq|xlf|xle|xlv|xlp}_latest_signal.json
     return _predictions_dir() / f"{_ticker_slug(ticker)}_latest_signal.json"
 
 
@@ -446,16 +445,11 @@ def run_signals_for_tickers(
     sleep_sec: float | None = None,
 ) -> dict[str, Any]:
     """
-    QQQ/XLE/XLF 등 여러 티커에 대해 predict_signal.py 를 순차 실행한다.
-    refresh_features=True 이면 크롤은 1회만 수행한다.
+    QQQ/XLF/XLE/XLV/XLP 에 대해 predict_signal.py 를 순차 실행
+    refresh_features=True 이면 크롤은 1회만 수행
     """
-    ticker_list = [
-        str(t).strip().upper()
-        for t in (tickers or DEFAULT_SIGNAL_TICKERS)
-        if str(t).strip()
-    ]
-    if not ticker_list:
-        ticker_list = list(DEFAULT_SIGNAL_TICKERS)
+    ticker_list = list(DEFAULT_SIGNAL_TICKERS)
+    _ = tickers
 
     if refresh_features:
         # 크롤은 공유 1회, feature 경로는 티커별로 다름
@@ -505,28 +499,7 @@ def run_signals_for_tickers(
 def parse_signal_request(payload: dict[str, Any] | None) -> dict[str, Any]:
     body = payload or {}
 
-    raw_tickers = body.get("tickers") or body.get("Tickers")
-    ticker = body.get("ticker") or body.get("Ticker")
-    tickers: list[str] | None = None
-    if isinstance(raw_tickers, str) and raw_tickers.strip():
-        if raw_tickers.strip().lower() in {"all", "*"}:
-            tickers = list(DEFAULT_SIGNAL_TICKERS)
-        else:
-            tickers = [part.strip().upper() for part in raw_tickers.split(",") if part.strip()]
-    elif isinstance(raw_tickers, (list, tuple)):
-        tickers = [str(part).strip().upper() for part in raw_tickers if str(part).strip()]
-    elif isinstance(ticker, str) and ticker.strip():
-        if ticker.strip().lower() in {"all", "*"}:
-            tickers = list(DEFAULT_SIGNAL_TICKERS)
-        else:
-            tickers = [ticker.strip().upper()]
-
-    if not tickers:
-        tickers = list(DEFAULT_SIGNAL_TICKERS)
-
-    for item in tickers:
-        if not re.fullmatch(r"[A-Za-z0-9^._-]{1,32}", item):
-            raise SignalRunnerError("ticker 형식이 올바르지 않습니다.", code="ML_SIGNAL_BAD_REQUEST")
+    tickers = list(DEFAULT_SIGNAL_TICKERS)
 
     target_date = body.get("targetDate") or body.get("target_date") or body.get("date")
     _parse_target_date(target_date)

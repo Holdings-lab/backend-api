@@ -36,7 +36,7 @@ public class MlPipelineController {
 
     @PostMapping("/signal")
     public ResponseEntity<JsonNode> runSignal(
-            @RequestParam(defaultValue = "QQQ") String ticker
+            @RequestParam(required = false) String ticker
     ) {
         return ResponseEntity.ok(mlSignalProxyService.runSignal(ticker));
     }

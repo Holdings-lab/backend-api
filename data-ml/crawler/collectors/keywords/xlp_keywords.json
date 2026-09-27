@@ -1,0 +1,42 @@
+{
+    "XLP_Keyword_Dictionary": {
+        "weight": 0.8,
+        "keywords": [
+            "consumer staples",
+            "household products",
+            "packaged food",
+            "grocery",
+            "beverage",
+            "tobacco",
+            "personal care",
+            "retail sales",
+            "consumer spending"
+        ]
+    },
+    "Prices_and_Demand": {
+        "weight": 1.0,
+        "keywords": [
+            "food prices",
+            "food inflation",
+            "commodity prices",
+            "consumer price",
+            "cpi",
+            "disposable income",
+            "household spending",
+            "supermarket"
+        ]
+    },
+    "Regulation_and_Trade": {
+        "weight": 0.75,
+        "keywords": [
+            "food safety",
+            "usda",
+            "fda",
+            "tariff",
+            "agricultural subsidy",
+            "supply chain",
+            "sugar tax",
+            "labeling requirement"
+        ]
+    }
+}

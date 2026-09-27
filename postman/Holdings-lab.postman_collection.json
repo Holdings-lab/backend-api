@@ -217,7 +217,7 @@
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{apiBaseUrl}}/api/ml/signal?ticker=QQQ"
+            "url": "{{apiBaseUrl}}/api/ml/signal"
           }
         },
         {

@@ -13,12 +13,10 @@ from typing import Any
 import pandas as pd
 
 from db.db import (
-    fetch_latest_prediction_summary,
     fetch_news_frame_for_sector,
     fetch_news_frame_for_sector_from_csv,
     fetch_sector_ai_briefings,
     fetch_sector_daily_summaries,
-    list_distinct_sectors,
     upsert_sector_ai_briefing,
     upsert_sector_daily_summary,
 )
@@ -34,7 +32,7 @@ MAX_NEWS_FALLBACK_DAYS = 3
 
 
 def _parse_sectors_arg(sectors: list[str] | str | None) -> list[str]:
-    """요청 sectors 를 정규화한다. 비어 있으면 [] (호출측에서 '전부'로 해석)."""
+    """요청 sectors 를 정규화한다. 비어 있으면 []."""
     if sectors is None:
         return []
     if isinstance(sectors, str):
@@ -66,31 +64,15 @@ def _parse_sectors_arg(sectors: list[str] | str | None) -> list[str]:
 
 
 def resolve_rebuild_sectors(sectors: list[str] | str | None = None) -> list[str]:
-    """
-    sectors 가 비어 있거나 미지정이면 DB distinct + 기본 티커 전부.
-    명시되면 그 목록만.
-    """
+    """지정되면 그 종목만, 미지정이면 5종목."""
     explicit = _parse_sectors_arg(sectors)
-    if explicit:
-        return explicit
-
-    merged: list[str] = []
-    seen: set[str] = set()
-    for item in [*DEFAULT_SECTORS, *list_distinct_sectors(limit=100)]:
-        key = str(item or "").strip().lower()
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        merged.append(key)
-    return merged
+    return explicit or list(DEFAULT_SECTORS)
 
 
 def resolve_preview_sectors(sectors: list[str] | str | None = None) -> list[str]:
-    """preview 전용: 미지정 시 DEFAULT_SECTORS(5종목)."""
+    """지정되면 그 종목만, 미지정이면 5종목."""
     explicit = _parse_sectors_arg(sectors)
-    if explicit:
-        return explicit
-    return list(DEFAULT_SECTORS)
+    return explicit or list(DEFAULT_SECTORS)
 
 
 def _as_date(value: date | datetime | str | None, fallback: date | None = None) -> date:
@@ -453,36 +435,52 @@ def generate_and_store_daily_summaries(
     }
 
 
+def _prediction_for_sector(
+    sector: str,
+    prediction_summary: dict[str, Any] | None = None,
+    predictions_by_sector: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """종목별 예측을 고른다. 다른 종목 예측으로 대체하지 않는다."""
+    keyed = predictions_by_sector or {}
+    direct = keyed.get(sector) or keyed.get(sector.upper())
+    if isinstance(direct, dict):
+        return direct
+
+    if prediction_summary:
+        summary_ticker = str(
+            prediction_summary.get("targetTicker") or prediction_summary.get("asset") or ""
+        ).strip().lower()
+        if not summary_ticker or summary_ticker == sector:
+            return prediction_summary
+
+    try:
+        from lstm_signal.runner import load_latest_signal, signal_to_prediction_summary
+
+        return signal_to_prediction_summary(load_latest_signal(sector.upper()), sector.upper())
+    except Exception:
+        return None
+
+
 def generate_and_store_ai_briefings(
     prediction_summary: dict[str, Any] | None = None,
     target_date: date | datetime | str | None = None,
     news_window_days: int = DEFAULT_AI_NEWS_WINDOW,
     sectors: list[str] | None = None,
     model: str = DEFAULT_MODEL,
+    predictions_by_sector: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    prediction = prediction_summary or fetch_latest_prediction_summary()
-    if not prediction:
-        return {
-            "status": "skipped",
-            "message": "prediction summary not found",
-            "stored_count": 0,
-            "stored": [],
-            "errors": [],
-        }
-
     as_of = _as_date(target_date, fallback=datetime.utcnow().date())
     # body/target_date 없으면 실행일 사용. prediction payload 의 옛 as_of는 무시
 
     sector_list = resolve_rebuild_sectors(sectors)
-    target_ticker = str(prediction.get("targetTicker") or prediction.get("asset") or "").strip().lower()
-    if target_ticker and target_ticker not in sector_list:
-        sector_list = [target_ticker, *sector_list]
-
     stored: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
 
     for sector in sector_list:
         try:
+            prediction = _prediction_for_sector(sector, prediction_summary, predictions_by_sector)
+            if not prediction:
+                raise ValueError(f"prediction summary not found (sector={sector})")
             news_df = _fetch_matched_news_for_ticker(
                 sector,
                 date_from=as_of - timedelta(days=max(0, int(news_window_days))),
@@ -597,18 +595,7 @@ def preview_ai_briefings(
     sectors: list[str] | None = None,
     model: str = DEFAULT_MODEL,
 ) -> dict[str, Any]:
-    """ai_analysis.py 결과만 반환. DB 저장 없음."""
-    prediction = prediction_summary or fetch_latest_prediction_summary()
-    if not prediction:
-        return {
-            "status": "skipped",
-            "persisted": False,
-            "message": "prediction summary not found",
-            "result_count": 0,
-            "results": [],
-            "errors": [],
-        }
-
+    """ai_analysis.py 결과만 반환. DB 저장 없음. 항상 5종목."""
     as_of = _as_date(target_date, fallback=datetime.utcnow().date())
     # body/target_date 없으면 실행일 사용. prediction 의 옛 as_of 는 무시.
 
@@ -618,6 +605,9 @@ def preview_ai_briefings(
 
     for sector in sector_list:
         try:
+            prediction = _prediction_for_sector(sector, prediction_summary)
+            if not prediction:
+                raise ValueError(f"prediction summary not found (sector={sector})")
             news_df = _fetch_matched_news_for_ticker(
                 sector,
                 date_from=as_of - timedelta(days=max(0, int(news_window_days))),
@@ -679,7 +669,7 @@ def get_sector_briefings_bundle(
     window_days: int = DEFAULT_DAILY_WINDOW,
 ) -> dict[str, Any]:
     as_of = _as_date(briefing_date, fallback=datetime.utcnow().date())
-    normalized = [str(s).strip().lower() for s in sectors if str(s).strip()]
+    normalized = _parse_sectors_arg(sectors) or list(DEFAULT_SECTORS)
     daily_df = fetch_sector_daily_summaries(
         sectors=normalized or None,
         release_date=as_of,

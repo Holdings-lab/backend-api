@@ -1,0 +1,42 @@
+{
+    "XLV_Keyword_Dictionary": {
+        "weight": 0.8,
+        "keywords": [
+            "healthcare",
+            "health care",
+            "pharmaceutical",
+            "biotech",
+            "drug pricing",
+            "medicare",
+            "medicaid",
+            "fda",
+            "hospital",
+            "health insurance"
+        ]
+    },
+    "Regulation_and_Pricing": {
+        "weight": 1.0,
+        "keywords": [
+            "drug price",
+            "prescription drug",
+            "inflation reduction act",
+            "medicare negotiation",
+            "fda approval",
+            "clinical trial",
+            "patent cliff",
+            "biosimilar"
+        ]
+    },
+    "Public_Health": {
+        "weight": 0.75,
+        "keywords": [
+            "public health",
+            "pandemic",
+            "vaccine",
+            "cdc",
+            "nih",
+            "opioid",
+            "mental health"
+        ]
+    }
+}

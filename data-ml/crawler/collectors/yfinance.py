@@ -20,7 +20,7 @@ from crawler.support_legacy.data_paths import collected_csv_path
 NY_TZ = ZoneInfo('America/New_York')
 # 기본 타겟 날짜: 뉴욕 시간 기준 어제 (YYYY-MM-DD)
 TARGET_DATE = (datetime.now(NY_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
-TICKERS = ["QQQ", "XLF", "XLE"]
+TICKERS = ["QQQ", "XLF", "XLE", "XLV", "XLP"]
 
 def _save_results(records, target_date):
     csv_path = Path(collected_csv_path(f"yahoo_market_news_{target_date}.csv"))
@@ -198,7 +198,9 @@ def scrape_news_sync(ticker, target_date=TARGET_DATE):
         print(response.text)
 
 def main():
-    news_results = scrape_news_sync(ticker="QQQ")
+    news_results = []
+    for ticker in TICKERS:
+        news_results.extend(scrape_news_sync(ticker=ticker) or [])
 
     if news_results:
         target_date = news_results[0]["release_date"] if news_results[0].get("release_date") else TARGET_DATE
