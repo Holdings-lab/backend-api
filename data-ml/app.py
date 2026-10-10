@@ -881,7 +881,7 @@ def _record_crawl_run(trigger: str, result: dict) -> None:
 
 
 def run_scheduled_crawl(trigger: str = "scheduler") -> dict:
-    """policy_monitor.py 실행"""
+    """policy_monitor.py 만 실행한다. 예측 JSON 은 쓰지 않는다."""
     if is_host_cron_window():
         logger.warning("[Scheduler] crawl skipped during host cron window")
         return {
@@ -923,7 +923,7 @@ def _public_signal_status(status: dict) -> dict:
 
 
 def run_scheduled_signal_read(trigger: str = "scheduler") -> dict:
-    """crontab이 쓴 JSON 을 읽고 브리핑·웹훅만 이어서 처리"""
+    """호스트 크론이 쓴 JSON 을 읽고 브리핑·웹훅만 이어서 처리한다."""
     views = {ticker: signal_file_status(ticker) for ticker in CRON_SIGNAL_TICKERS}
     predictions_by_sector: dict[str, dict] = {}
     for ticker, view in views.items():
@@ -1228,8 +1228,7 @@ def llm_health():
         return _error_response(message=f"LLM 헬스체크 실패: {e}", code="LLM_HEALTH_FAILED", status_code=503)
 
 
-@app.post(f"{ML_PREFIX}/crawlers/run")
-def run_crawl_endpoint():
+def _run_manual_crawl_response():
     if is_host_cron_window():
         return _host_cron_window_response()
     if not run_lock.acquire(blocking=False):
@@ -1242,6 +1241,11 @@ def run_crawl_endpoint():
         return _error_response(message="크롤링 실행에 실패했습니다.", code="ML_CRAWL_FAILED", status_code=500)
     finally:
         run_lock.release()
+
+
+@app.post(f"{ML_PREFIX}/crawlers/run")
+def run_crawl_endpoint():
+    return _run_manual_crawl_response()
 
 
 @app.post(f"{ML_PREFIX}/predictions/run")
@@ -1408,6 +1412,12 @@ def get_newsroom_sector_briefings_endpoint(
         window_days=windowDays,
     )
     return _success_response(result, message="뉴스룸 섹터 브리핑 조회에 성공했습니다.")
+
+
+@app.post(f"{ML_PREFIX}/newsroom/crawl")
+def run_newsroom_crawl_endpoint():
+    """policy_monitor.py 실행. CSV 저장은 해당 스크립트가 담당한다."""
+    return _run_manual_crawl_response()
 
 
 @app.post(f"{ML_PREFIX}/newsroom/daily-summaries/rebuild")
