@@ -338,6 +338,29 @@ def upsert_policy_document_features(document_id: int, record: dict[str, Any]) ->
         conn.commit()
 
 
+def fetch_latest_crawler_success_at(run_type: str = "policy_monitor") -> str | None:
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    with _connect(real_dict_cursor=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT created_at
+                FROM crawler_run_logs
+                WHERE status = 'success' AND run_type = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (run_type,),
+            )
+            row = cursor.fetchone()
+    if not row or row.get("created_at") is None:
+        return None
+    created_at = row["created_at"]
+    return created_at.isoformat()
+
+
 def insert_crawler_run_log(run_type: str, status: str, counts: dict[str, Any] | None = None, payload: dict[str, Any] | None = None) -> None:
     if psycopg2 is None:
         raise RuntimeError("psycopg2 is not installed")

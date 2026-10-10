@@ -21,7 +21,14 @@ from fastapi.responses import JSONResponse, Response
 
 from crawler.service import run_crawl_now
 from scheduler import build_scheduler
-from db.db import fetch_policy_feed_frame, fetch_user_watch_asset_names, init_db
+from pipeline_clock import is_host_cron_window, pipeline_now
+from db.db import (
+    fetch_latest_crawler_success_at,
+    fetch_policy_feed_frame,
+    fetch_user_watch_asset_names,
+    init_db,
+    insert_crawler_run_log,
+)
 from llm.newsroom_briefing_service import (
     generate_and_store_ai_briefings,
     generate_and_store_daily_summaries,
@@ -31,11 +38,13 @@ from llm.newsroom_briefing_service import (
 )
 from llm.providers import build_llm_client
 from lstm_signal.runner import (
+    CRON_SIGNAL_TICKERS,
     DEFAULT_SIGNAL_TICKERS,
     SignalRunnerError,
     load_latest_signal,
     parse_signal_request,
     run_signals_for_tickers,
+    signal_file_status,
     signal_to_prediction_summary,
 )
 
@@ -806,13 +815,13 @@ def _build_policy_feed(payload: dict) -> dict:
     }
 
 
-def _send_signal_to_api_server(signal_payload: dict) -> dict:
+def _send_signal_to_api_server(signal_payload: dict, keyword: str | None = None) -> dict:
     if not WEBHOOK_URL:
         return {"success": False, "error": "WEBHOOK_URL is empty"}
 
     request_body = {
         "eventId": int(datetime.utcnow().timestamp()),
-        "keyword": _safe_str(signal_payload.get("signal"), "policy-signal"),
+        "keyword": keyword or _safe_str(signal_payload.get("signal"), "policy-signal"),
         "source": "data-ml-scheduler",
         "signal": signal_payload,
     }
@@ -842,7 +851,160 @@ def _send_signal_to_api_server(signal_payload: dict) -> dict:
         return {"success": False, "error": str(error)}
 
 
+def _host_cron_window_response():
+    return _error_response(
+        message="서버 예측 크론 구간(21:50–22:30 KST)에는 크롤·예측을 시작하지 않습니다.",
+        code="ML_HOST_CRON_WINDOW",
+        status_code=409,
+    )
+
+
+def _record_crawl_run(trigger: str, result: dict) -> None:
+    status = "success" if result.get("status") == "success" else "failed"
+    db_sync = result.get("dbSync") if isinstance(result.get("dbSync"), dict) else {}
+    try:
+        insert_crawler_run_log(
+            run_type="policy_monitor",
+            status=status,
+            counts={
+                "scanned": db_sync.get("scanned"),
+                "upserted": db_sync.get("upserted"),
+            },
+            payload={
+                "trigger": trigger,
+                "message": result.get("message"),
+                "code": result.get("code"),
+            },
+        )
+    except Exception as error:
+        logger.warning("[Crawl] run log insert failed: %s", error)
+
+
+def run_scheduled_crawl(trigger: str = "scheduler") -> dict:
+    """policy_monitor.py 실행"""
+    if is_host_cron_window():
+        logger.warning("[Scheduler] crawl skipped during host cron window")
+        return {
+            "status": "skipped",
+            "message": "host cron window",
+            "trigger": trigger,
+            "executed_at": pipeline_now().isoformat(),
+        }
+    if not run_lock.acquire(blocking=False):
+        return {
+            "status": "busy",
+            "message": "이미 다른 작업이 실행 중입니다.",
+            "trigger": trigger,
+            "executed_at": pipeline_now().isoformat(),
+        }
+    try:
+        result = run_crawl_now(
+            bis_max_pages=PIPELINE_BIS_MAX_PAGES,
+            sleep_sec=PIPELINE_SLEEP_SEC,
+            run_type="policy_monitor",
+        )
+        _record_crawl_run(trigger, result)
+        if result.get("status") != "success":
+            logger.warning("[Scheduler] crawl failed: %s", result)
+        return result
+    finally:
+        run_lock.release()
+
+
+def _public_signal_status(status: dict) -> dict:
+    return {
+        "ticker": status.get("ticker"),
+        "present": bool(status.get("present")),
+        "stale": bool(status.get("stale")),
+        "modelVersion": status.get("modelVersion"),
+        "modifiedAt": status.get("modifiedAt"),
+        "generatedAt": status.get("generatedAt"),
+    }
+
+
+def run_scheduled_signal_read(trigger: str = "scheduler") -> dict:
+    """crontab이 쓴 JSON 을 읽고 브리핑·웹훅만 이어서 처리"""
+    views = {ticker: signal_file_status(ticker) for ticker in CRON_SIGNAL_TICKERS}
+    predictions_by_sector: dict[str, dict] = {}
+    for ticker, view in views.items():
+        payload = view.get("payload")
+        if not view.get("present") or not isinstance(payload, dict):
+            continue
+        enriched = dict(payload)
+        enriched["stale"] = view.get("stale")
+        enriched["modifiedAt"] = view.get("modifiedAt")
+        predictions_by_sector[ticker.lower()] = signal_to_prediction_summary(enriched, ticker)
+
+    daily_summary_result: dict = {"status": "skipped"}
+    ai_briefing_result: dict = {"status": "skipped"}
+    webhook_result: dict = {"success": True, "status": "skipped"}
+    if predictions_by_sector:
+        try:
+            daily_summary_result = generate_and_store_daily_summaries()
+        except Exception as error:
+            logger.warning("[Scheduler] daily summary failed: %s", error)
+            daily_summary_result = {"status": "failed", "message": str(error)}
+        try:
+            ai_briefing_result = generate_and_store_ai_briefings(
+                predictions_by_sector=predictions_by_sector,
+            )
+        except Exception as error:
+            logger.warning("[Scheduler] ai briefing failed: %s", error)
+            ai_briefing_result = {"status": "failed", "message": str(error)}
+
+        qqq_summary = predictions_by_sector.get("qqq") or {}
+        signal_name = str(qqq_summary.get("signal") or "hold").lower()
+        if signal_name not in {"buy", "sell", "hold"}:
+            signal_name = "hold"
+        webhook_result = _send_signal_to_api_server(
+            {
+                "trigger": trigger,
+                "status": "ok",
+                "signal": signal_name,
+                "generatedAt": pipeline_now().isoformat(),
+                "details": {
+                    "tickers": list(CRON_SIGNAL_TICKERS),
+                    "signals": {ticker: _public_signal_status(view) for ticker, view in views.items()},
+                },
+            }
+        )
+
+    stale = any((not view.get("present")) or view.get("stale") for view in views.values())
+    stale_webhook = None
+    if stale:
+        stale_webhook = _send_signal_to_api_server(
+            {
+                "trigger": trigger,
+                "status": "degraded",
+                "signal": "pipeline-stale",
+                "generatedAt": pipeline_now().isoformat(),
+                "details": {
+                    "signals": {ticker: _public_signal_status(view) for ticker, view in views.items()},
+                },
+            },
+            keyword="pipeline-stale",
+        )
+
+    return {
+        "status": "degraded" if stale else "success",
+        "trigger": trigger,
+        "signals": {ticker: _public_signal_status(view) for ticker, view in views.items()},
+        "dailySummary": daily_summary_result,
+        "aiBriefing": ai_briefing_result,
+        "webhook": webhook_result,
+        "staleWebhook": stale_webhook,
+        "executed_at": pipeline_now().isoformat(),
+    }
+
+
 def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, sleep_sec: float | None = None, target_date: str | None = None) -> dict:
+    if is_host_cron_window():
+        return {
+            "status": "skipped",
+            "message": "서버 예측 크론 구간에는 크롤·예측을 시작하지 않습니다.",
+            "trigger": trigger,
+            "executed_at": pipeline_now().isoformat(),
+        }
     if not run_lock.acquire(blocking=False):
         return {
             "status": "busy",
@@ -870,6 +1032,7 @@ def run_pipeline(trigger: str = "manual", bis_max_pages: int | None = None, slee
             target_date=parsed_target_date,
             run_type="policy_monitor",
         )
+        _record_crawl_run(trigger, crawl_result)
         crawl_ok = crawl_result.get("status") == "success"
 
         daily_summary_result = {"status": "skipped", "message": "crawl failed; daily summary skipped"}
@@ -991,29 +1154,31 @@ def on_startup():
     except Exception as error:
         logger.warning("[Startup] data-ml schema initialization failed: %s", error)
 
-    def _scheduled_job():
-        logger.info("[Scheduler] US Eastern midnight job start")
-        result = run_pipeline(
-            trigger="scheduler",
-            bis_max_pages=PIPELINE_BIS_MAX_PAGES,
-            sleep_sec=PIPELINE_SLEEP_SEC,
-        )
+    def _scheduled_crawl():
+        logger.info("[Scheduler] KST 20:00 crawl start")
+        result = run_scheduled_crawl(trigger="scheduler")
         if result.get("status") != "success":
-            logger.warning("scheduled pipeline result: %s", result)
+            logger.warning("scheduled crawl result: %s", result)
 
-    scheduler_instance = build_scheduler(_scheduled_job)
+    def _scheduled_signal_read():
+        logger.info("[Scheduler] KST 22:25 signal read start")
+        result = run_scheduled_signal_read(trigger="scheduler")
+        if result.get("status") != "success":
+            logger.warning("scheduled signal read result: %s", result)
+
+    scheduler_instance = build_scheduler(_scheduled_crawl, _scheduled_signal_read)
 
     if RUN_PIPELINE_ON_STARTUP:
         def _startup_pipeline():
             try:
-                startup_result = run_pipeline(trigger="startup")
+                startup_result = run_scheduled_crawl(trigger="startup")
                 if startup_result.get("status") != "success":
-                    logger.warning("startup pipeline result: %s", startup_result)
+                    logger.warning("startup crawl result: %s", startup_result)
             except Exception as error:
-                logger.exception("[Startup] pipeline failed: %s", error)
+                logger.exception("[Startup] crawl failed: %s", error)
 
-        Thread(target=_startup_pipeline, name="startup-pipeline", daemon=True).start()
-        logger.info("[Startup] pipeline started in background (health endpoint available)")
+        Thread(target=_startup_pipeline, name="startup-crawl", daemon=True).start()
+        logger.info("[Startup] crawl started in background (health endpoint available)")
 
 
 @app.on_event("shutdown")
@@ -1023,14 +1188,30 @@ def on_shutdown():
         scheduler_instance.shutdown(wait=False)
 
 
+def _pipeline_health() -> dict:
+    signals = {
+        ticker: _public_signal_status(signal_file_status(ticker))
+        for ticker in CRON_SIGNAL_TICKERS
+    }
+    degraded = any((not item["present"]) or item["stale"] for item in signals.values())
+    last_crawl = None
+    try:
+        last_crawl = fetch_latest_crawler_success_at()
+    except Exception as error:
+        logger.warning("[Health] crawler log read failed: %s", error)
+    return {
+        "status": "degraded" if degraded else "healthy",
+        "scheduler_running": bool(scheduler_instance and scheduler_instance.running),
+        "lastCrawlSuccessAt": last_crawl,
+        "signals": signals,
+        "timestamp": pipeline_now().isoformat(),
+    }
+
+
 @app.get(f"{ML_PREFIX}/health")
 def health():
     return _success_response(
-        {
-            "status": "healthy",
-            "scheduler_running": bool(scheduler_instance and scheduler_instance.running),
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-        },
+        _pipeline_health(),
         message="ML 헬스 체크에 성공했습니다.",
     )
 
@@ -1049,10 +1230,13 @@ def llm_health():
 
 @app.post(f"{ML_PREFIX}/crawlers/run")
 def run_crawl_endpoint():
+    if is_host_cron_window():
+        return _host_cron_window_response()
     if not run_lock.acquire(blocking=False):
         return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_CRAWL_BUSY", status_code=409)
     try:
         result = run_crawl_now(bis_max_pages=PIPELINE_BIS_MAX_PAGES, sleep_sec=PIPELINE_SLEEP_SEC)
+        _record_crawl_run("manual", result)
         if result.get("status") == "success":
             return _success_response(_remove_message_fields(result), message="크롤링 실행에 성공했습니다.")
         return _error_response(message="크롤링 실행에 실패했습니다.", code="ML_CRAWL_FAILED", status_code=500)
@@ -1063,6 +1247,8 @@ def run_crawl_endpoint():
 @app.post(f"{ML_PREFIX}/predictions/run")
 def run_predict_endpoint():
     """일일 파이프라인과 동일하게 QQQ/XLF/XLE/XLV/XLP predict_signal 을 실행한다."""
+    if is_host_cron_window():
+        return _host_cron_window_response()
     if not run_lock.acquire(blocking=False):
         return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_PREDICT_BUSY", status_code=409)
     try:
@@ -1120,6 +1306,8 @@ def get_predict_result_endpoint(ticker: str | None = None):
 
 @app.post(f"{ML_PREFIX}/signal/run")
 async def run_signal_endpoint(request: Request, date: str | None = None):
+    if is_host_cron_window():
+        return _host_cron_window_response()
     if not run_lock.acquire(blocking=False):
         return _error_response("이미 다른 작업이 실행 중입니다.", code="ML_SIGNAL_BUSY", status_code=409)
     try:
@@ -1345,6 +1533,8 @@ def policy_feed_stats_get_endpoint(
 
 @app.post(f"{ML_PREFIX}/pipelines/run")
 async def signal_endpoint(request: Request, date: str | None = None):
+    if is_host_cron_window():
+        return _host_cron_window_response()
     try:
         payload = await request.json()
     except Exception:

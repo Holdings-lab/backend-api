@@ -10,12 +10,16 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from pipeline_clock import pipeline_tz, signal_fresh_after
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_ML_WORKER_ROOT = Path("/opt/riseai/apps/ml-worker")
 DEFAULT_PREDICTIONS_DIR = Path("/opt/riseai/data/predictions")
 DEFAULT_FEATURES_ROOT = Path("/opt/riseai/data/features")
 DEFAULT_SIGNAL_TICKERS = ("QQQ", "XLF", "XLE", "XLV", "XLP")
+# crontab이 매일 쓰는 종목. XLP 는 제외됨
+CRON_SIGNAL_TICKERS = ("QQQ", "XLE", "XLF", "XLV")
 DEFAULT_TIMEOUT_SEC = 120
 
 
@@ -160,8 +164,48 @@ def _read_signal_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def signal_file_status(ticker: str) -> dict[str, Any]:
+    """예측 JSON 을 읽기만 한다. 파일은 만들지 않는다."""
+    normalized = (ticker or "QQQ").strip().upper() or "QQQ"
+    path = _default_output_path(normalized)
+    status: dict[str, Any] = {
+        "ticker": normalized,
+        "present": False,
+        "stale": True,
+        "modelVersion": None,
+        "modifiedAt": None,
+        "generatedAt": None,
+        "payload": None,
+    }
+    if not path.exists():
+        return status
+
+    modified = datetime.fromtimestamp(path.stat().st_mtime, tz=pipeline_tz())
+    status["modifiedAt"] = modified.isoformat()
+    try:
+        payload = _read_signal_json(path)
+    except SignalRunnerError:
+        return status
+
+    status["present"] = True
+    status["stale"] = modified < signal_fresh_after()
+    status["modelVersion"] = payload.get("modelVersion")
+    status["generatedAt"] = payload.get("generatedAt")
+    status["payload"] = payload
+    return status
+
+
 def load_latest_signal(ticker: str = "QQQ") -> dict[str, Any]:
-    return _read_signal_json(_default_output_path(ticker))
+    status = signal_file_status(ticker)
+    if not status["present"] or not isinstance(status["payload"], dict):
+        raise SignalRunnerError(
+            f"시그널 결과 파일이 없습니다: {_default_output_path(ticker)}",
+            code="ML_SIGNAL_RESULT_NOT_FOUND",
+        )
+    payload = dict(status["payload"])
+    payload["stale"] = status["stale"]
+    payload["modifiedAt"] = status["modifiedAt"]
+    return payload
 
 
 def prepare_features_existing(ticker: str = "QQQ") -> dict[str, Any]:
@@ -432,6 +476,7 @@ def signal_to_prediction_summary(signal: dict[str, Any] | None, ticker: str = "Q
             "topProbability": confidence,
         },
         "signal": direction,
+        "stale": bool(payload.get("stale", False)),
         "generatedAt": generated_at,
         "rawSignal": payload,
     }
