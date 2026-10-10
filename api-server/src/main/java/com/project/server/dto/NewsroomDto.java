@@ -103,10 +103,22 @@ public class NewsroomDto {
         private StockMeta stock;
         private String headline;
         private String imageUrl;
-        private String aiJudgement;
+        private AiJudgement aiJudgement;
         private DetailSummary summary;
+        private String alignment;
+        private List<String> urls;
         private List<SourceItem> sources;
         private DetailFooter footer;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AiJudgement {
+        private String title;
+        private String headline;
+        private String disclaimer;
     }
 
     @Data

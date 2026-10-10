@@ -122,6 +122,8 @@ public class NewsroomBriefingProxyService {
                 text(node.get("title")),
                 text(node.get("headline")),
                 text(node.get("reason")),
+                text(node.get("alignment")),
+                text(node.get("disclaimer")),
                 text(node.get("asOfDate")),
                 readUrlList(node.get("usedNewsUrls"))
         );
@@ -191,6 +193,8 @@ public class NewsroomBriefingProxyService {
             String title,
             String headline,
             String reason,
+            String alignment,
+            String disclaimer,
             String asOfDate,
             List<String> usedNewsUrls
     ) {

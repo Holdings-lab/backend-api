@@ -49,8 +49,6 @@ public class NewsroomService {
     private static final String FALLBACK_SUBTITLE = "보유 종목에 중요한 변화만 모았어요";
     private static final String TAB_FOOTER_MESSAGE = "오늘 브리핑은 여기까지예요";
     private static final String AI_NOTICE = "AI가 여러 기사를 요약했어요. 원문과 다를 수 있어요.";
-    private static final String HARDCODED_AI_JUDGEMENT =
-            "공급망 다변화는 장기 이슈라서 단일 보도만으로 단기 방향을 판단하기는 어려워요.";
     private static final String QUIET_SUMMARY = "계속 지켜보고 있어요";
     private static final String QUIET_HEADLINE = "특이사항 없음";
     private static final int NEWS_FRESHNESS_DAYS = 3;
@@ -161,22 +159,14 @@ public class NewsroomService {
                     "해당 종목의 상세 브리핑이 없습니다.", "NEWSROOM_DETAIL_NOT_FOUND");
         }
 
-        PolicyFeedDto.Card primary = matched.isEmpty() ? null : matched.get(0);
         BigDecimal dailyChangePct = scaleDailyChangePct(holding.dailyChangePct());
         BigDecimal totalAssetImpactPct = resolveTotalAssetImpactPct(dailyChangePct, holding.weightPct());
 
-        // sources 는 ai_analysis used_news_url 만 사용 (피드 매칭 기사로 채우지 않음)
         List<NewsroomDto.SourceItem> sources = buildSourcesFromAiBriefing(ai, cards);
+        List<String> urls = ai == null || ai.usedNewsUrls() == null ? List.of() : ai.usedNewsUrls();
 
-        String headline = firstNonBlank(
-                hasFreshDaily ? daily.title() : null,
-                primary == null ? null : primary.getTitleKo(),
-                primary == null ? null : primary.getTitle(),
-                holding.name() + " 관련 소식");
-        String summaryBody = firstNonBlank(
-                ai == null ? null : ai.reason(),
-                hasFreshDaily ? daily.content() : null,
-                headline);
+        String headline = hasFreshDaily ? daily.title() : null;
+        String summaryBody = ai == null ? null : ai.reason();
         List<String> findings = buildFindingsFromDailyOrCards(
                 hasFreshDaily ? daily.content() : null,
                 List.of());
@@ -185,10 +175,11 @@ public class NewsroomService {
                 hasFreshDaily ? sanitizeMediaUrl(daily.imageUrl()) : null,
                 resolveNewsThumbnail(matched));
 
-        String aiJudgement = firstNonBlank(
-                ai == null ? null : ai.headline(),
-                ai == null ? null : ai.reason(),
-                HARDCODED_AI_JUDGEMENT);
+        NewsroomDto.AiJudgement aiJudgement = NewsroomDto.AiJudgement.builder()
+                .title(ai == null ? null : ai.title())
+                .headline(ai == null ? null : ai.headline())
+                .disclaimer(ai == null ? null : ai.disclaimer())
+                .build();
 
         return NewsroomDto.DetailResponse.builder()
                 .stock(NewsroomDto.StockMeta.builder()
@@ -206,6 +197,8 @@ public class NewsroomService {
                         .body(summaryBody)
                         .findings(findings)
                         .build())
+                .alignment(ai == null ? null : ai.alignment())
+                .urls(urls)
                 .sources(sources)
                 .footer(NewsroomDto.DetailFooter.builder()
                         .asOfAt(asOfAt)
@@ -226,52 +219,21 @@ public class NewsroomService {
                 sectorBriefings == null ? null : sectorBriefings.get(toSectorKey(holding.ticker()));
         NewsroomBriefingProxyService.DailySummary daily =
                 briefing == null ? null : briefing.dailySummary();
+        NewsroomBriefingProxyService.AiBriefing ai =
+                briefing == null ? null : briefing.aiBriefing();
 
         // 최근 NEWS_FRESHNESS_DAYS 일 이내 카드 또는 daily
         boolean hasNews = !matched.isEmpty() || isFreshDaily(daily, asOfDate);
         NewsroomDto.BriefingType type = resolveBriefingType(
                 hasNews, heroTickers.contains(holding.ticker()));
 
-        String headline;
-        String summary;
+        String headline = isFreshDaily(daily, asOfDate) ? daily.title() : quietHeadline(daily, asOfDate);
+        String summary = firstNonBlank(ai == null ? null : ai.headline(), QUIET_SUMMARY);
         BigDecimal dailyChangePct = scaleDailyChangePct(holding.dailyChangePct());
         BigDecimal totalAssetImpactPct = resolveTotalAssetImpactPct(dailyChangePct, holding.weightPct());
-        String detailPath = null;
-
-        if (type == NewsroomDto.BriefingType.Hero) {
-            PolicyFeedDto.Card primary = matched.isEmpty() ? null : matched.get(0);
-            headline = firstNonBlank(
-                    isFreshDaily(daily, asOfDate) ? daily.title() : null,
-                    primary == null ? null : primary.getTitleKo(),
-                    primary == null ? null : primary.getTitle(),
-                    holding.name() + " 관련 소식");
-            summary = firstNonBlank(
-                    isFreshDaily(daily, asOfDate) ? daily.content() : null,
-                    primary == null ? null : primary.getBodySummaryKo(),
-                    primary == null ? null : primary.getBodySummary(),
-                    primary == null ? null : primary.getBodyExcerpt(),
-                    headline);
-            detailPath = detailPath(holding.ticker());
-        } else if (type == NewsroomDto.BriefingType.Compact) {
-            PolicyFeedDto.Card primary = matched.isEmpty() ? null : matched.get(0);
-            headline = firstNonBlank(
-                    isFreshDaily(daily, asOfDate) ? daily.title() : null,
-                    primary == null ? null : primary.getBodySummaryKo(),
-                    primary == null ? null : primary.getTitleKo(),
-                    primary == null ? null : primary.getBodySummary(),
-                    primary == null ? null : primary.getTitle(),
-                    holding.name() + " 관련 소식");
-            summary = null;
-            detailPath = detailPath(holding.ticker());
-        } else if (isFreshDaily(daily, asOfDate)) {
-            // Quiet 이지만 fresh daily 가 있으면(카드만 없는 경우) 요약 표시
-            headline = daily.title();
-            summary = firstNonBlank(daily.content(), QUIET_SUMMARY);
-            detailPath = detailPath(holding.ticker());
-        } else {
-            headline = quietHeadline(daily, asOfDate);
-            summary = QUIET_SUMMARY;
-        }
+        String detailPath = type == NewsroomDto.BriefingType.Quiet && !isFreshDaily(daily, asOfDate)
+                ? null
+                : detailPath(holding.ticker());
 
         return NewsroomDto.HoldingBriefing.builder()
                 .ticker(holding.ticker())
