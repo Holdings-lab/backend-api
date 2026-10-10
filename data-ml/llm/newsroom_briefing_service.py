@@ -397,8 +397,8 @@ def generate_and_store_daily_summaries(
             )
             if not summary.get("title") or not summary.get("content"):
                 raise ValueError("요약 결과에 title/content가 비어 있습니다.")
-            # LLM이 본문 날짜를 넣더라도, 저장 키는 실제 사용한 as_of 로 맞춘다.
-            summary["release_date"] = used_as_of.isoformat()
+            # 기사가 전날이어도 저장 키는 요청일(오늘). 안 그러면 rebuild가 옛 날짜에 쌓여 뉴스룸 최신 행을 못 덮는다.
+            summary["release_date"] = as_of.isoformat()
             summary["sector"] = sector
             # 매칭에 쓴 원문 URL을 남겨 디버깅/추적용으로 보관
             matched_urls = [
@@ -418,8 +418,9 @@ def generate_and_store_daily_summaries(
                     "sector": sector,
                     "id": summary_id,
                     "title": summary.get("title"),
-                    "release_date": used_as_of.isoformat(),
+                    "release_date": as_of.isoformat(),
                     "requested_date": as_of.isoformat(),
+                    "news_as_of": used_as_of.isoformat(),
                     "matched_news_count": len(news_df),
                     "matched_news_urls": matched_urls[:10],
                 }
@@ -567,8 +568,9 @@ def preview_daily_summaries(
             results.append(
                 {
                     "sector": sector,
-                    "release_date": str(summary.get("release_date") or used_as_of.isoformat()),
+                    "release_date": as_of.isoformat(),
                     "requested_date": as_of.isoformat(),
+                    "news_as_of": used_as_of.isoformat(),
                     "title": summary.get("title"),
                     "content": summary.get("content"),
                     "image_url": summary.get("image_url"),
