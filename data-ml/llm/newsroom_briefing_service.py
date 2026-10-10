@@ -20,6 +20,7 @@ from db.db import (
     upsert_sector_ai_briefing,
     upsert_sector_daily_summary,
 )
+from pipeline_clock import pipeline_now
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +76,13 @@ def resolve_preview_sectors(sectors: list[str] | str | None = None) -> list[str]
     return explicit or list(DEFAULT_SECTORS)
 
 
+def _today() -> date:
+    return pipeline_now().date()
+
+
 def _as_date(value: date | datetime | str | None, fallback: date | None = None) -> date:
     if value is None:
-        return fallback or datetime.utcnow().date()
+        return fallback or _today()
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
@@ -358,7 +363,7 @@ def generate_and_store_daily_summaries(
     sectors: list[str] | None = None,
     model: str = DEFAULT_MODEL,
 ) -> dict[str, Any]:
-    as_of = _as_date(target_date, fallback=datetime.utcnow().date() - timedelta(days=1))
+    as_of = _as_date(target_date, fallback=_today())
     sector_list = resolve_rebuild_sectors(sectors)
     stored: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
@@ -469,7 +474,7 @@ def generate_and_store_ai_briefings(
     model: str = DEFAULT_MODEL,
     predictions_by_sector: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    as_of = _as_date(target_date, fallback=datetime.utcnow().date())
+    as_of = _as_date(target_date, fallback=_today())
     # body/target_date 없으면 실행일 사용. prediction payload 의 옛 as_of는 무시
 
     sector_list = resolve_rebuild_sectors(sectors)
@@ -539,7 +544,7 @@ def preview_daily_summaries(
     model: str = DEFAULT_MODEL,
 ) -> dict[str, Any]:
     """daily_news_summary.py 결과만 반환. DB 저장 없음."""
-    as_of = _as_date(target_date, fallback=datetime.utcnow().date() - timedelta(days=1))
+    as_of = _as_date(target_date, fallback=_today())
     sector_list = resolve_preview_sectors(sectors)
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
@@ -596,7 +601,7 @@ def preview_ai_briefings(
     model: str = DEFAULT_MODEL,
 ) -> dict[str, Any]:
     """ai_analysis.py 결과만 반환. DB 저장 없음. 항상 5종목."""
-    as_of = _as_date(target_date, fallback=datetime.utcnow().date())
+    as_of = _as_date(target_date, fallback=_today())
     # body/target_date 없으면 실행일 사용. prediction 의 옛 as_of 는 무시.
 
     sector_list = resolve_preview_sectors(sectors)
@@ -668,30 +673,25 @@ def get_sector_briefings_bundle(
     briefing_date: date | datetime | str | None = None,
     window_days: int = DEFAULT_DAILY_WINDOW,
 ) -> dict[str, Any]:
-    as_of = _as_date(briefing_date, fallback=datetime.utcnow().date())
+    as_of = _as_date(briefing_date, fallback=_today())
     normalized = _parse_sectors_arg(sectors) or list(DEFAULT_SECTORS)
     daily_df = fetch_sector_daily_summaries(
         sectors=normalized or None,
-        release_date=as_of,
+        release_date=None,
         window_days=window_days,
     )
     ai_df = fetch_sector_ai_briefings(
         sectors=normalized or None,
-        as_of_date=as_of,
+        as_of_date=None,
     )
-
-    if daily_df.empty and normalized:
-        daily_df = fetch_sector_daily_summaries(sectors=normalized, release_date=None, window_days=window_days)
-        if not daily_df.empty:
-            daily_df = daily_df.sort_values(["sector", "release_date"], ascending=[True, False]).drop_duplicates(
-                "sector", keep="first"
-            )
-    if ai_df.empty and normalized:
-        ai_df = fetch_sector_ai_briefings(sectors=normalized, as_of_date=None)
-        if not ai_df.empty:
-            ai_df = ai_df.sort_values(["sector", "as_of_date"], ascending=[True, False]).drop_duplicates(
-                "sector", keep="first"
-            )
+    if not daily_df.empty:
+        daily_df = daily_df.sort_values(["sector", "release_date"], ascending=[True, False]).drop_duplicates(
+            "sector", keep="first"
+        )
+    if not ai_df.empty:
+        ai_df = ai_df.sort_values(["sector", "as_of_date"], ascending=[True, False]).drop_duplicates(
+            "sector", keep="first"
+        )
 
     result: dict[str, Any] = {}
     for sector in normalized:

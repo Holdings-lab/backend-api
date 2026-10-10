@@ -152,9 +152,9 @@ public class NewsroomService {
         NewsroomBriefingProxyService.AiBriefing ai =
                 briefing == null ? null : briefing.aiBriefing();
 
-        boolean hasFreshDaily = isFreshDaily(daily, asOfDate);
-        boolean hasFreshAi = isFreshAi(ai, asOfDate);
-        if (matched.isEmpty() && !hasFreshDaily && !hasFreshAi) {
+        boolean hasDaily = daily != null && firstNonBlank(daily.title(), daily.content()) != null;
+        boolean hasAi = ai != null && firstNonBlank(ai.reason(), ai.headline(), ai.title()) != null;
+        if (matched.isEmpty() && !hasDaily && !hasAi) {
             throw ApiException.notFound(
                     "해당 종목의 상세 브리핑이 없습니다.", "NEWSROOM_DETAIL_NOT_FOUND");
         }
@@ -165,14 +165,14 @@ public class NewsroomService {
         List<NewsroomDto.SourceItem> sources = buildSourcesFromAiBriefing(ai, cards);
         List<String> urls = ai == null || ai.usedNewsUrls() == null ? List.of() : ai.usedNewsUrls();
 
-        String headline = hasFreshDaily ? daily.title() : null;
+        String headline = daily == null ? null : daily.title();
         String summaryBody = ai == null ? null : ai.reason();
-        List<String> findings = buildFindingsFromDailyOrCards(
-                hasFreshDaily ? daily.content() : null,
-                List.of());
+        List<String> findings = daily == null || daily.content() == null || daily.content().isBlank()
+                ? List.of()
+                : List.of(daily.content().trim());
 
         String thumbnailUrl = firstNonBlank(
-                hasFreshDaily ? sanitizeMediaUrl(daily.imageUrl()) : null,
+                daily == null ? null : sanitizeMediaUrl(daily.imageUrl()),
                 resolveNewsThumbnail(matched));
 
         NewsroomDto.AiJudgement aiJudgement = NewsroomDto.AiJudgement.builder()
@@ -227,7 +227,9 @@ public class NewsroomService {
         NewsroomDto.BriefingType type = resolveBriefingType(
                 hasNews, heroTickers.contains(holding.ticker()));
 
-        String headline = isFreshDaily(daily, asOfDate) ? daily.title() : quietHeadline(daily, asOfDate);
+        String headline = daily != null && daily.title() != null && !daily.title().isBlank()
+                ? daily.title()
+                : quietHeadline(daily, asOfDate);
         String summary = firstNonBlank(ai == null ? null : ai.headline(), QUIET_SUMMARY);
         BigDecimal dailyChangePct = scaleDailyChangePct(holding.dailyChangePct());
         BigDecimal totalAssetImpactPct = resolveTotalAssetImpactPct(dailyChangePct, holding.weightPct());
