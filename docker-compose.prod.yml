@@ -42,9 +42,7 @@ services:
       SERVER_PORT: 8080
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      llm.provider: ${LLM_PROVIDER:-gemini}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      llm.provider: anthropic
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3.5-haiku-20241022}
       ML_API_BASE_URL: ${ML_API_BASE_URL:-http://data-ml:9000}
@@ -115,11 +113,9 @@ services:
       RUN_PIPELINE_ON_STARTUP: ${RUN_PIPELINE_ON_STARTUP:-false}
       WEBHOOK_URL: ${WEBHOOK_URL:-http://api-server:8080/api/internal/webhooks/events}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
-      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      LLM_PROVIDER: anthropic
       LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-30}
       LLM_RETRY_COUNT: ${LLM_RETRY_COUNT:-2}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-flash}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3.5-haiku-20241022}
       # 요약 시에만 ollama 사용

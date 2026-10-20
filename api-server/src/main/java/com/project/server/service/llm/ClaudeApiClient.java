@@ -3,7 +3,6 @@ package com.project.server.service.llm;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -15,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 
 @Service
-@ConditionalOnProperty(name = "llm.provider", havingValue = "anthropic")
 public class ClaudeApiClient implements LlmApiService {
 
     private final ObjectMapper objectMapper;

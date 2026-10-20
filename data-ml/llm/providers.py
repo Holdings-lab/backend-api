@@ -57,55 +57,8 @@ class RoutedLlmClient(BaseHttpLlmClient):
 
     def generate_json(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.2) -> dict[str, Any]:
         if not self.api_key:
-            raise RuntimeError(f"{self.provider_name.upper()} API key is required")
-
-        if self.provider_name == "anthropic":
-            return self._call_claude_api(system_prompt, user_prompt, temperature=temperature)
-        return self._call_gemini_api(system_prompt, user_prompt, temperature=temperature)
-
-    def _call_gemini_api(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.2) -> dict[str, Any]:
-        model_candidates = [self.model_name]
-        for fallback_model in ("gemini-2.0-flash", "gemini-1.5-flash-002", "gemini-1.5-pro"):
-            if fallback_model not in model_candidates:
-                model_candidates.append(fallback_model)
-
-        body = {
-            "systemInstruction": {"parts": [{"text": system_prompt}]},
-            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-            "generationConfig": {
-                "temperature": temperature,
-                "responseMimeType": "application/json",
-            },
-        }
-
-        last_error: Exception | None = None
-        for model_name in model_candidates:
-            url = (
-                f"https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{model_name}:generateContent?key={self.api_key}"
-            )
-            try:
-                payload = self._post_json(url, {"Content-Type": "application/json"}, body)
-                candidates = payload.get("candidates") or []
-                if not candidates:
-                    raise RuntimeError("gemini API returned no candidates")
-                parts = (candidates[0].get("content") or {}).get("parts") or []
-                text = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
-                if not text:
-                    raise RuntimeError("gemini API returned empty content")
-                if model_name != self.model_name:
-                    self.model_name = model_name
-                return _extract_json_text(text)
-            except Exception as error:
-                last_error = error
-                error_text = str(error)
-                if "404" not in error_text and "NOT_FOUND" not in error_text and "not found" not in error_text.lower():
-                    break
-
-        if last_error is not None:
-            raise last_error
-
-        raise RuntimeError("gemini API call failed")
+            raise RuntimeError("ANTHROPIC API key is required")
+        return self._call_claude_api(system_prompt, user_prompt, temperature=temperature)
 
     def _call_claude_api(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.2) -> dict[str, Any]:
         body = {
@@ -146,20 +99,10 @@ class RoutedLlmClient(BaseHttpLlmClient):
 
 
 def build_llm_client() -> BaseHttpLlmClient:
-    provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
     timeout_sec = float(os.getenv("LLM_TIMEOUT_SEC", "25"))
-
-    if provider == "anthropic":
-        return RoutedLlmClient(
-            provider_name="anthropic",
-            api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-            model_name=os.getenv("ANTHROPIC_MODEL", "claude-3.5-haiku-20241022"),
-            timeout_sec=timeout_sec,
-        )
-
     return RoutedLlmClient(
-        provider_name="gemini",
-        api_key=os.getenv("GEMINI_API_KEY", ""),
-        model_name=os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
+        provider_name="anthropic",
+        api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+        model_name=os.getenv("ANTHROPIC_MODEL", "claude-3.5-haiku-20241022"),
         timeout_sec=timeout_sec,
     )
