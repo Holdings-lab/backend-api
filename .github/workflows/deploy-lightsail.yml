@@ -85,9 +85,20 @@ jobs:
               exit 1
             fi
             
+            echo "=== Freeing disk before pull ==="
+            df -h /
+            docker image prune -af || true
+            docker builder prune -af || true
+            docker container prune -f || true
+
             echo "=== Pulling Docker images sequentially ==="
             docker compose -f docker-compose.prod.yml --env-file .env.docker pull postgres
             docker compose -f docker-compose.prod.yml --env-file .env.docker pull api-server
+
+            echo "=== Replacing data-ml image ==="
+            docker compose -f docker-compose.prod.yml --env-file .env.docker stop data-ml || true
+            docker compose -f docker-compose.prod.yml --env-file .env.docker rm -f data-ml || true
+            docker image prune -af || true
             docker compose -f docker-compose.prod.yml --env-file .env.docker pull data-ml
 
             echo "=== Starting Docker containers ==="
@@ -95,5 +106,6 @@ jobs:
             
             echo "=== Cleaning up unused images ==="
             docker image prune -af || true
+            df -h /
             
             echo "=== Deployment Successfully Completed! ==="
