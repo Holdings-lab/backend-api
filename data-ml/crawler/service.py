@@ -12,7 +12,7 @@ if PROJECT_ROOT_STR not in sys.path:
     sys.path.insert(0, PROJECT_ROOT_STR)
 
 from crawler.external import ExternalCrawlerError, run_apps_crawler_policy_monitor
-from db.db import sync_policy_features_csv_to_db
+from db.db import purge_expired_ml_data, sync_policy_features_csv_to_db
 
 
 logger = logging.getLogger(__name__)
@@ -90,9 +90,17 @@ def run_crawl_now(
             "errors": [str(error)],
         }
 
+    retention: dict = {"status": "skipped"}
+    try:
+        retention = purge_expired_ml_data()
+    except Exception as error:
+        logger.warning("[crawl] retention purge failed: %s", error)
+        retention = {"status": "failed", "message": str(error)}
+
     return {
         **crawl,
         "status": "success",
         "message": "policy_monitor.py 실행을 완료했습니다.",
         "dbSync": db_sync,
+        "retention": retention,
     }

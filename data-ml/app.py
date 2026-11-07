@@ -28,6 +28,7 @@ from db.db import (
     fetch_user_watch_asset_names,
     init_db,
     insert_crawler_run_log,
+    purge_expired_ml_data,
 )
 from llm.newsroom_briefing_service import (
     generate_and_store_ai_briefings,
@@ -1166,7 +1167,17 @@ def on_startup():
         if result.get("status") != "success":
             logger.warning("scheduled signal read result: %s", result)
 
-    scheduler_instance = build_scheduler(_scheduled_crawl, _scheduled_signal_read)
+    def _scheduled_retention_purge():
+        logger.info("[Scheduler] KST 03:30 retention purge start")
+        try:
+            result = purge_expired_ml_data()
+        except Exception as error:
+            logger.warning("scheduled retention purge failed: %s", error)
+            return
+        if result.get("status") != "success":
+            logger.info("scheduled retention purge result: %s", result)
+
+    scheduler_instance = build_scheduler(_scheduled_crawl, _scheduled_signal_read, _scheduled_retention_purge)
 
     if RUN_PIPELINE_ON_STARTUP:
         def _startup_pipeline():

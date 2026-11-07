@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -336,6 +336,79 @@ def upsert_policy_document_features(document_id: int, record: dict[str, Any]) ->
         with conn.cursor() as cursor:
             cursor.execute(query, params)
         conn.commit()
+
+
+def data_retention_days() -> int:
+    """0 이하면 보관 삭제를 끈다. 기본 14일."""
+    raw = (os.getenv("DATA_RETENTION_DAYS") or "14").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return 14
+
+
+def purge_expired_ml_data(retention_days: int | None = None) -> dict[str, Any]:
+    """2주(기본)가 지난 data-ml 저장분을 지운다.
+
+    policy_document_features 와 article_insights 는 문서 삭제 시 CASCADE 된다.
+    """
+    days = data_retention_days() if retention_days is None else int(retention_days)
+    if days <= 0:
+        return {"status": "skipped", "retentionDays": days, "deleted": {}}
+
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed")
+
+    from pipeline_clock import pipeline_now, pipeline_tz
+
+    cutoff = pipeline_now().date() - timedelta(days=days)
+    params = {"cutoff": cutoff, "tz": str(pipeline_tz())}
+    statements = {
+        "policyDocuments": """
+            DELETE FROM policy_documents
+            WHERE COALESCE(
+                published_date,
+                CASE
+                    WHEN release_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+                    THEN LEFT(release_date, 10)::date
+                END,
+                (collected_at AT TIME ZONE %(tz)s)::date,
+                (created_at AT TIME ZONE %(tz)s)::date
+            ) < %(cutoff)s
+        """,
+        "sectorDailySummaries": """
+            DELETE FROM sector_daily_summaries
+            WHERE release_date < %(cutoff)s
+        """,
+        "sectorAiBriefings": """
+            DELETE FROM sector_ai_briefings
+            WHERE as_of_date < %(cutoff)s
+        """,
+        "policyPredictionRuns": """
+            DELETE FROM policy_prediction_runs
+            WHERE (created_at AT TIME ZONE %(tz)s)::date < %(cutoff)s
+        """,
+        "crawlerRunLogs": """
+            DELETE FROM crawler_run_logs
+            WHERE (created_at AT TIME ZONE %(tz)s)::date < %(cutoff)s
+        """,
+    }
+
+    deleted: dict[str, int] = {}
+    with _connect() as conn:
+        with conn.cursor() as cursor:
+            for name, statement in statements.items():
+                cursor.execute(statement, params)
+                deleted[name] = int(cursor.rowcount)
+        conn.commit()
+
+    logger.info("[Retention] deleted rows older than %s (%s days): %s", cutoff.isoformat(), days, deleted)
+    return {
+        "status": "success",
+        "retentionDays": days,
+        "cutoffDate": cutoff.isoformat(),
+        "deleted": deleted,
+    }
 
 
 def fetch_latest_crawler_success_at(run_type: str = "policy_monitor") -> str | None:

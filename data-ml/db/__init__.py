@@ -3,6 +3,7 @@ from .db import (
     fetch_policy_feed_frame,
     init_db,
     insert_crawler_run_log,
+    purge_expired_ml_data,
     persist_policy_pipeline_outputs,
     resolve_policy_features_csv_path,
     sync_policy_features_csv_to_db,
